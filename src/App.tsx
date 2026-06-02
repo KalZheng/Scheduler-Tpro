@@ -3,9 +3,15 @@ import {
   subscribeToSchedules, 
   addSchedule, 
   updateSchedule, 
-  deleteSchedule 
+  deleteSchedule,
+  subscribeToAvailabilities,
+  addAvailability,
+  deleteAvailability,
+  subscribeToStaffingTargets,
+  updateStaffingTarget,
+  syncActiveMonth
 } from './services/scheduler';
-import type { WorkSchedule } from './services/scheduler';
+import type { WorkSchedule, WorkerAvailability, StaffingTarget } from './services/scheduler';
 import { isValidConfig } from './firebase';
 import workplaces from './config/workplaces.json';
 
@@ -19,52 +25,66 @@ const DAYS_OF_WEEK = [
   { value: 7, name: '週日', english: 'Sunday', short: 'Sun' }
 ];
 
-const TIME_SLOTS = Array.from({ length: 48 }, (_, i) => {
-  const hour = Math.floor(i / 2).toString().padStart(2, '0');
-  const minute = (i % 2 === 0 ? '00' : '30');
+const TIME_SLOTS = Array.from({ length: 31 }, (_, i) => {
+  const totalMinutes = 6 * 60 + i * 30; // Starts at 6:00 AM (360 minutes)
+  const hour = Math.floor(totalMinutes / 60).toString().padStart(2, '0');
+  const minute = (totalMinutes % 60).toString().padStart(2, '0');
   return `${hour}:${minute}`;
 });
 
+const compareTimeStrings = (timeA: string, timeB: string): number => {
+  if (!timeA || !timeB) return 0;
+  const [hA, mA] = timeA.split(':').map(val => parseInt(val, 10) || 0);
+  const [hB, mB] = timeB.split(':').map(val => parseInt(val, 10) || 0);
+  if (hA !== hB) return hA - hB;
+  return mA - mB;
+};
+
 const COLOR_THEMES: Record<string, { bg: string, border: string, text: string, dot: string, hover: string, badgeBg: string }> = {
   indigo: {
-    bg: 'bg-indigo-500/10',
-    border: 'border-indigo-500/20',
-    text: 'text-indigo-300',
-    dot: 'bg-indigo-400',
-    hover: 'hover:border-indigo-500/40',
-    badgeBg: 'bg-indigo-500'
+    // Espresso / Deep Roasted Coffee
+    bg: 'bg-[#5D4037]/8',
+    border: 'border-[#4E342E]/25',
+    text: 'text-[#3E2723]',
+    dot: 'bg-[#4E342E]',
+    hover: 'hover:border-[#4E342E]/50 hover:bg-[#5D4037]/12',
+    badgeBg: 'bg-[#4E342E]'
   },
   emerald: {
-    bg: 'bg-emerald-500/10',
-    border: 'border-emerald-500/20',
-    text: 'text-emerald-300',
-    dot: 'bg-emerald-400',
-    hover: 'hover:border-emerald-500/40',
-    badgeBg: 'bg-emerald-500'
+    // Matcha / Green Tea Accent
+    bg: 'bg-[#2E7D32]/8',
+    border: 'border-[#2E7D32]/25',
+    text: 'text-[#1B5E20]',
+    dot: 'bg-[#2E7D32]',
+    hover: 'hover:border-[#2E7D32]/50 hover:bg-[#2E7D32]/12',
+    badgeBg: 'bg-[#2E7D32]'
   },
   violet: {
-    bg: 'bg-violet-500/10',
-    border: 'border-violet-500/20',
-    text: 'text-violet-300',
-    dot: 'bg-violet-400',
-    hover: 'hover:border-violet-500/40',
-    badgeBg: 'bg-violet-500'
+    // Cappuccino / Cinnamon Warm Cocoa
+    bg: 'bg-[#8D6E63]/10',
+    border: 'border-[#8D6E63]/30',
+    text: 'text-[#5D4037]',
+    dot: 'bg-[#8D6E63]',
+    hover: 'hover:border-[#8D6E63]/60 hover:bg-[#8D6E63]/15',
+    badgeBg: 'bg-[#8D6E63]'
   },
   amber: {
-    bg: 'bg-amber-500/10',
-    border: 'border-amber-500/20',
-    text: 'text-amber-300',
-    dot: 'bg-amber-400',
-    hover: 'hover:border-amber-500/40',
-    badgeBg: 'bg-amber-500'
+    // Caramel / Sweet Orange Tan
+    bg: 'bg-[#E65100]/8',
+    border: 'border-[#E65100]/25',
+    text: 'text-[#BF360C]',
+    dot: 'bg-[#E65100]',
+    hover: 'hover:border-[#E65100]/50 hover:bg-[#E65100]/12',
+    badgeBg: 'bg-[#E65100]'
   },
   rose: {
-    bg: 'bg-rose-500/10',
-    border: 'border-rose-500/20',
-    text: 'text-rose-300',
-    dot: 'bg-rose-400',
-    hover: 'hover:border-rose-500/40',
-    badgeBg: 'bg-rose-500'
+    // Latte / Milky Tan Beige
+    bg: 'bg-[#D7CCC8]/35',
+    border: 'border-[#BCAAA4]/40',
+    text: 'text-[#6D4C41]',
+    dot: 'bg-[#A1887F]',
+    hover: 'hover:border-[#BCAAA4]/70 hover:bg-[#D7CCC8]/50',
+    badgeBg: 'bg-[#8D6E63]'
   }
 };
 
@@ -109,16 +129,30 @@ const getMonthGridDates = (monthStart: Date): Date[] => {
   return dates;
 };
 
-// Date helper: Get 14 days starting on the Monday of the current week (aligned for 2-row selection)
-const getAlign14Days = (monday: Date): Date[] => {
+// Date helper: Get 28 days starting on the Monday of the current week (aligned for 4-row selection)
+const getAlign28Days = (monday: Date): Date[] => {
   const list = [];
-  for (let i = 0; i < 14; i++) {
+  for (let i = 0; i < 28; i++) {
     const d = new Date(monday);
     d.setDate(monday.getDate() + i);
     list.push(d);
   }
   return list;
 };
+
+// Date helper: Get all dates in the currently selected month
+const getDaysInMonth = (monthStart: Date): Date[] => {
+  const year = monthStart.getFullYear();
+  const month = monthStart.getMonth();
+  const date = new Date(year, month, 1);
+  const days = [];
+  while (date.getMonth() === month) {
+    days.push(new Date(date));
+    date.setDate(date.getDate() + 1);
+  }
+  return days;
+};
+
 
 // Date helper: Calculate duration (supporting overnight shifts)
 const calculateDuration = (start: string, end: string): number => {
@@ -151,8 +185,101 @@ const getColorFromName = (name: string): string => {
   return colors[index];
 };
 
+// Helper: check if scheduled shift is active during a specific hour Index (0-23)
+const isShiftActiveAtHour = (startTime: string, endTime: string, hourIndex: number): boolean => {
+  if (!startTime || !endTime) return false;
+  const [sh, sm] = startTime.split(':').map(Number);
+  const [eh, em] = endTime.split(':').map(Number);
+  if (isNaN(sh) || isNaN(sm) || isNaN(eh) || isNaN(em)) return false;
+  
+  const start = sh + sm / 60;
+  let end = eh + em / 60;
+  const checkTime = hourIndex + 0.5; // midpoint of the hour
+  
+  if (end < start) {
+    // Overnight shift
+    return (checkTime >= start) || (checkTime < end);
+  }
+  return (checkTime >= start) && (checkTime < end);
+};
+
+const getCleanNote = (notes?: string): string => {
+  if (!notes) return '';
+  const prefix = '由登記可用時間自動排入: ';
+  if (notes.startsWith(prefix)) {
+    return notes.substring(prefix.length).trim();
+  }
+  if (notes === '由登記可用時間自動排入') {
+    return '';
+  }
+  return notes.trim();
+};
+
 function App() {
   const [schedules, setSchedules] = useState<WorkSchedule[]>([]);
+  const [availabilities, setAvailabilities] = useState<WorkerAvailability[]>([]);
+  const [staffingTargets, setStaffingTargets] = useState<StaffingTarget[]>([]);
+  
+  // Role selection state: worker or manager
+  const [activeRole, setActiveRole] = useState<'worker' | 'manager'>('worker');
+
+  // Manager authentication state
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => sessionStorage.getItem('manager_auth') === 'true');
+  const [passcodeInput, setPasscodeInput] = useState('');
+  const [loginError, setLoginError] = useState('');
+
+  // Hash-based routing to separate Worker and Manager views
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash;
+      if (hash === '#/manager') {
+        setActiveRole('manager');
+      } else {
+        setActiveRole('worker');
+      }
+    };
+
+    // Run once on load
+    handleHashChange();
+
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
+
+  // Handle Login authentication
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    const MANAGER_PASSCODE = 'coffee888';
+    if (passcodeInput === MANAGER_PASSCODE) {
+      setIsAuthenticated(true);
+      sessionStorage.setItem('manager_auth', 'true');
+      setLoginError('');
+      setPasscodeInput('');
+    } else {
+      setLoginError('密碼不正確，請重新輸入 ☕');
+    }
+  };
+
+  // Handle Logout
+  const handleLogout = () => {
+    setIsAuthenticated(false);
+    sessionStorage.removeItem('manager_auth');
+    setPasscodeInput('');
+    window.location.hash = '#/worker';
+  };
+  
+  // Manager view sub-mode: calendar or grid
+  const [managerViewMode, setManagerViewMode] = useState<'calendar' | 'grid'>('calendar');
+  
+  // Worker identity (cached in localStorage)
+  const [workerName, setWorkerName] = useState(() => localStorage.getItem('scheduler_worker_name') || '');
+  
+  // Worker availability submission form states
+  const [availWorkplace, setAvailWorkplace] = useState(workplaces[0]?.name || '');
+  const [availStartTime, setAvailStartTime] = useState('09:00');
+  const [availEndTime, setAvailEndTime] = useState('17:00');
+  const [availNotes, setAvailNotes] = useState('');
+  const [availSelectedDates, setAvailSelectedDates] = useState<string[]>([]);
   
   // Month Calendar View states
   const [currentMonthStart, setCurrentMonthStart] = useState<Date>(() => {
@@ -180,14 +307,183 @@ function App() {
 
   // Generate date checklist for the modal form (aligned in 2 rows of 7 columns, starting Monday of current week)
   const pickerWeekStart = getMondayOfDate(new Date());
-  const pickerDates = getAlign14Days(pickerWeekStart);
+  const pickerDates = getAlign28Days(pickerWeekStart);
 
   useEffect(() => {
-    const unsubscribe = subscribeToSchedules((data) => {
+    const unsubSchedules = subscribeToSchedules((data) => {
       setSchedules(data);
     });
-    return () => unsubscribe();
+    const unsubAvailabilities = subscribeToAvailabilities((data) => {
+      setAvailabilities(data);
+    });
+    const unsubStaffingTargets = subscribeToStaffingTargets((data) => {
+      setStaffingTargets(data);
+    });
+    
+    return () => {
+      unsubSchedules();
+      unsubAvailabilities();
+      unsubStaffingTargets();
+    };
   }, []);
+
+  useEffect(() => {
+    if (currentMonthStart) {
+      const year = currentMonthStart.getFullYear();
+      const month = (currentMonthStart.getMonth() + 1).toString().padStart(2, '0');
+      syncActiveMonth(`${year}-${month}`);
+    }
+  }, [currentMonthStart]);
+
+  // Worker Identity handlers
+  const handleSaveWorkerName = (name: string) => {
+    setWorkerName(name);
+    localStorage.setItem('scheduler_worker_name', name);
+  };
+
+  // Submit worker availability
+  const handleAddAvailability = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!workerName.trim()) {
+      alert('請先輸入您的姓名。');
+      return;
+    }
+    if (availSelectedDates.length === 0) {
+      alert('請至少選擇一個可用日期。');
+      return;
+    }
+    try {
+      const promises = availSelectedDates.map(dateStr => {
+        return addAvailability({
+          employeeName: workerName.trim(),
+          date: dateStr,
+          workplace: availWorkplace,
+          startTime: availStartTime,
+          endTime: availEndTime,
+          notes: availNotes.trim()
+        });
+      });
+      await Promise.all(promises);
+      setAvailSelectedDates([]);
+      setAvailNotes('');
+      alert('已成功送出您的可用時間！');
+    } catch (error) {
+      console.error("Error saving availability: ", error);
+      alert('送出可用時間失敗，請稍後再試。');
+    }
+  };
+
+  // Delete worker availability
+  const handleDeleteAvailability = async (id: string) => {
+    if (confirm('確定要刪除此可用時間紀錄嗎？')) {
+      try {
+        await deleteAvailability(id);
+      } catch (error) {
+        console.error("Error deleting availability: ", error);
+      }
+    }
+  };
+
+  // Instant Schedule Assign (Zero-Click Modal)
+  const handleInstantAssign = async (avail: WorkerAvailability) => {
+    try {
+      const derivedColor = getColorFromName(avail.employeeName);
+      const payload = {
+        title: avail.employeeName.trim(),
+        employeeName: avail.employeeName.trim(),
+        date: avail.date,
+        workplace: avail.workplace,
+        startTime: avail.startTime,
+        endTime: avail.endTime,
+        notes: avail.notes ? `由登記可用時間自動排入: ${avail.notes.trim()}` : '由登記可用時間自動排入',
+        color: derivedColor
+      };
+      await addSchedule(payload);
+    } catch (error) {
+      console.error("Error doing instant assign: ", error);
+      alert('自動排程失敗，請重試。');
+    }
+  };
+
+  const getIsDayUnderstaffed = (dateStr: string) => {
+    const daySchedules = schedules.filter(s => s.date === dateStr);
+    for (let hour = 6; hour <= 20; hour++) {
+      const target = getStaffingTargetForHour(hour, dateStr);
+      if (target > 0) {
+        const current = daySchedules.filter(s => isShiftActiveAtHour(s.startTime, s.endTime, hour)).length;
+        if (current < target) return true;
+      }
+    }
+    return false;
+  };
+
+
+  // Update staffing target
+  const handleUpdateTarget = async (hour: number, change: number) => {
+    const currentCount = getStaffingTargetForHour(hour, selectedDateStr);
+    const newCount = Math.max(0, currentCount + change);
+    try {
+      await updateStaffingTarget(hour, newCount, selectedDateStr);
+    } catch (error) {
+      console.error("Error updating staffing target: ", error);
+    }
+  };
+
+  const getStaffingTargetForHour = (hour: number, dateStr?: string): number => {
+    const targetDate = dateStr || selectedDateStr;
+    const dateMatch = staffingTargets.find(t => t.hour === hour && t.date === targetDate);
+    if (dateMatch) return dateMatch.targetCount;
+    
+    const globalMatch = staffingTargets.find(t => t.hour === hour && !t.date);
+    if (globalMatch) return globalMatch.targetCount;
+    
+    return 2;
+  };
+
+  const handleAdjustSelectedDate = (days: number) => {
+    const current = new Date(selectedDateStr);
+    current.setDate(current.getDate() + days);
+    const newDateStr = formatDateString(current);
+    setSelectedDateStr(newDateStr);
+    
+    const currentMonth = currentMonthStart.getMonth();
+    const currentYear = currentMonthStart.getFullYear();
+    if (current.getMonth() !== currentMonth || current.getFullYear() !== currentYear) {
+      setCurrentMonthStart(new Date(current.getFullYear(), current.getMonth(), 1));
+    }
+  };
+
+  // Toggle date selection for worker availability form
+  const toggleAvailDateSelection = (dateStr: string) => {
+    if (availSelectedDates.includes(dateStr)) {
+      setAvailSelectedDates(availSelectedDates.filter(d => d !== dateStr));
+    } else {
+      setAvailSelectedDates([...availSelectedDates, dateStr]);
+    }
+  };
+
+  // Quick select shortcuts for worker availability
+  const handleSelectAvailAllDays = () => {
+    setAvailSelectedDates(pickerDates.map(formatDateString));
+  };
+
+  const handleSelectAvailMonWedFri = () => {
+    const mwf = pickerDates
+      .filter(d => d.getDay() === 1 || d.getDay() === 3 || d.getDay() === 5)
+      .map(formatDateString);
+    setAvailSelectedDates(mwf);
+  };
+
+  const handleSelectAvailTueThu = () => {
+    const tt = pickerDates
+      .filter(d => d.getDay() === 2 || d.getDay() === 4)
+      .map(formatDateString);
+    setAvailSelectedDates(tt);
+  };
+
+  const handleClearAvailAllSelected = () => {
+    setAvailSelectedDates([]);
+  };
 
   // Open modal to add shift
   const handleOpenAddModal = (defaultDateStr?: string) => {
@@ -337,11 +633,26 @@ function App() {
 
   // Calendar calculations (filtered by the currently active visible month grid)
   const monthGridDates = getMonthGridDates(currentMonthStart);
+  const gridDates = getDaysInMonth(currentMonthStart);
+
+  const allEmployees = Array.from(
+    new Set([
+      ...schedules.map(s => s.employeeName.trim()),
+      ...availabilities.map(a => a.employeeName.trim())
+    ])
+  ).filter(Boolean).sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+
 
   const getSchedulesForDate = (dateStr: string) => {
     return schedules
       .filter(item => item.date === dateStr)
-      .sort((a, b) => a.startTime.localeCompare(b.startTime));
+      .sort((a, b) => compareTimeStrings(a.startTime, b.startTime));
+  };
+
+  const getAvailabilitiesForDate = (dateStr: string) => {
+    return availabilities
+      .filter(item => item.date === dateStr)
+      .sort((a, b) => compareTimeStrings(a.startTime, b.startTime));
   };
 
   const getDateTotalHours = (dateStr: string) => {
@@ -371,327 +682,1186 @@ function App() {
   const selectedDayOfWeekMapped = selectedDayOfWeekIndex === 0 ? 7 : selectedDayOfWeekIndex;
   const selectedDayInfo = DAYS_OF_WEEK.find(d => d.value === selectedDayOfWeekMapped) || DAYS_OF_WEEK[0];
 
+  // Availabilities on selected day
+  const dayAvailabilities = getAvailabilitiesForDate(selectedDateStr);
+
   return (
-    <div className="min-h-screen text-slate-100 font-sans pb-12">
+    <div className="min-h-screen text-[#3E2723] font-sans pb-12">
       <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-6">
         
         {/* Header Banner */}
-        <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-slate-900/40 p-6 md:p-8 rounded-2xl border border-slate-800/80 backdrop-blur-md relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-80 h-80 bg-indigo-500/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/4 pointer-events-none"></div>
+        <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white/60 p-6 md:p-8 rounded-2xl border border-[#DAC0A3]/50 backdrop-blur-md relative overflow-hidden shadow-sm">
+          <div className="absolute top-0 right-0 w-80 h-80 bg-[#8D6E63]/8 rounded-full blur-3xl -translate-y-1/2 translate-x-1/4 pointer-events-none"></div>
           
           <div className="space-y-2 z-10">
             <div className="flex flex-wrap items-center gap-3">
-              <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">
-                工作排程日曆
+              <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight bg-gradient-to-r from-[#5D4037] via-[#8D6E63] to-[#A1887F] bg-clip-text text-transparent flex items-center gap-2">
+                精品咖啡館 ☕ 夥伴排班系統
               </h1>
               {isValidConfig ? (
-                <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
-                  雲端同步
+                <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-600/10 border border-emerald-600/20 text-[#2E7D32]">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#2E7D32] animate-ping"></span>
+                  雲端同步已啟用
                 </span>
               ) : (
-                <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-indigo-500/10 border border-indigo-500/20 text-indigo-400">
-                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-400"></span>
+                <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-[#8D6E63]/10 border border-[#8D6E63]/20 text-[#6D4C41]">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#8D6E63]"></span>
                   本機儲存 (LocalStorage)
                 </span>
               )}
             </div>
-            <p className="text-slate-400 text-xs md:text-sm">
-              按月檢視班表，支援雙週多選排程，工時統計與智慧人員色彩標示。
+            <p className="text-[#6D4C41]/80 text-xs md:text-sm font-medium">
+              提供排班夥伴登記可用時段與店長排班規劃，支援咖啡館人力覆蓋率與工時即時同步。
             </p>
           </div>
 
-          <button
-            onClick={() => handleOpenAddModal(selectedDateStr)}
-            className="z-10 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-5 py-2.5 rounded-xl shadow-lg shadow-indigo-500/20 hover:shadow-indigo-500/35 transition-all hover:-translate-y-0.5 active:translate-y-0 flex items-center gap-2 cursor-pointer text-sm"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
-            </svg>
-            多選日期排班
-          </button>
+          <div className="z-10 flex gap-2 w-full md:w-auto">
+            {activeRole === 'manager' && isAuthenticated && (
+              <div className="flex gap-2 w-full md:w-auto">
+                <button
+                  onClick={() => handleOpenAddModal(selectedDateStr)}
+                  className="flex-1 md:flex-initial bg-[#795548] hover:bg-[#6D4C41] text-white font-semibold px-5 py-2.5 rounded-xl shadow-lg shadow-[#795548]/15 hover:shadow-[#795548]/25 transition-all hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center gap-2 cursor-pointer text-sm"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+                  </svg>
+                  新增排班紀錄
+                </button>
+                <button
+                  onClick={handleLogout}
+                  className="bg-white hover:bg-[#FAF7F2] border border-[#E5DCD5] text-[#5D4037] hover:text-[#3E2723] font-semibold px-4 py-2.5 rounded-xl transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer text-sm"
+                  title="登出管理模式"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 01-3-3h4a3 3 0 013 3v1" />
+                  </svg>
+                  登出
+                </button>
+              </div>
+            )}
+          </div>
         </header>
 
-        {/* Calendar Toolbar */}
-        <section className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3 bg-slate-900/50 p-4 rounded-xl border border-slate-800">
-          {/* Left: Month Nav */}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleGoToToday}
-              className="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700/60 hover:border-slate-600 text-xs font-semibold transition-all cursor-pointer"
-            >
-              今天
-            </button>
-            <div className="flex items-center rounded-lg border border-slate-700/60 bg-slate-800 overflow-hidden">
+        {/* Role Switcher - Only visible to authenticated managers */}
+        {isAuthenticated && (
+          <div className="flex justify-center">
+            <div className="bg-white/60 p-1.5 rounded-2xl border border-[#DAC0A3]/50 backdrop-blur-md flex gap-2 shadow-sm">
               <button
-                onClick={handlePrevMonth}
-                className="p-1.5 hover:bg-slate-700 text-slate-300 border-r border-slate-700/60 transition-colors cursor-pointer"
-                title="前一個月"
+                onClick={() => {
+                  window.location.hash = '#/worker';
+                }}
+                className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                  activeRole === 'worker'
+                    ? 'bg-[#6D4C41] text-white shadow-md shadow-[#6D4C41]/15'
+                    : 'text-[#8D6E63] hover:text-[#5D4037] hover:bg-[#F5EBE6]/60'
+                }`}
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                 </svg>
+                員工：登記可用時間
               </button>
               <button
-                onClick={handleNextMonth}
-                className="p-1.5 hover:bg-slate-700 text-slate-300 transition-colors cursor-pointer"
-                title="後一個月"
+                onClick={() => {
+                  window.location.hash = '#/manager';
+                }}
+                className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                  activeRole === 'manager'
+                    ? 'bg-[#6D4C41] text-white shadow-md shadow-[#6D4C41]/15'
+                    : 'text-[#8D6E63] hover:text-[#5D4037] hover:bg-[#F5EBE6]/60'
+                }`}
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
                 </svg>
+                主管：排班規劃中心
               </button>
             </div>
-            
-            {/* Displaying current Month/Year */}
-            <h2 className="text-base md:text-lg font-bold text-slate-100 ml-2">
-              {currentMonthStart.getFullYear()}年 {currentMonthStart.getMonth() + 1}月
-            </h2>
           </div>
+        )}
 
-          {/* Right: Quick monthly stats info */}
-          <div className="flex items-center gap-4 text-[11px] md:text-xs text-slate-400 bg-slate-950/40 px-3 md:px-4 py-2 rounded-lg border border-slate-850">
-            <div>本月班次：<span className="font-semibold text-slate-200 font-mono">{totalShifts}</span> 次</div>
-            <div className="w-px h-3 bg-slate-800"></div>
-            <div>本月工時：<span className="font-semibold text-indigo-400 font-mono">{Math.round(totalHours * 10) / 10}</span> 小時</div>
-            <div className="w-px h-3 bg-slate-800"></div>
-            <div>排班人數：<span className="font-semibold text-pink-400 font-mono">{totalEmployees}</span> 人</div>
-          </div>
-        </section>
-
-        {/* Month View Calendar Layout */}
-        <main className="glass-panel rounded-2xl overflow-hidden border border-slate-800">
-          
-          {/* Weekday columns labels */}
-          <div className="grid grid-cols-7 border-b border-slate-850 bg-slate-900/60">
-            {DAYS_OF_WEEK.map(day => (
-              <div key={day.value} className="py-2 text-center text-xs font-bold text-slate-400">
-                {day.name}
+        {/* WORKER ROLE VIEW */}
+        {activeRole === 'worker' && (
+          <div className="space-y-6">
+            {/* Name Input Banner Card */}
+            <div className="glass-panel p-6 rounded-2xl border border-[#DAC0A3]/50 flex flex-col sm:flex-row items-center gap-4 justify-between shadow-sm">
+              <div className="space-y-1 text-center sm:text-left">
+                <h2 className="text-lg font-bold text-[#3E2723] flex items-center justify-center sm:justify-start gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-[#795548]"></span>
+                  員工身分確認
+                </h2>
+                <p className="text-xs text-[#6D4C41]">
+                  {workerName ? `您目前是以「${workerName}」的身分填寫班表` : '請先設定您的姓名，以便送出您的可用時間。'}
+                </p>
               </div>
-            ))}
-          </div>
+              <div className="flex gap-2 w-full sm:w-auto">
+                <input
+                  type="text"
+                  placeholder="輸入您的真實姓名"
+                  value={workerName}
+                  onChange={(e) => handleSaveWorkerName(e.target.value)}
+                  className="w-full sm:w-60 glass-input px-4 py-2 rounded-xl text-sm"
+                />
+              </div>
+            </div>
 
-          {/* Monthly dates grid (42 cells) */}
-          <div className="grid grid-cols-7 gap-px bg-slate-850">
-            {monthGridDates.map((dateObj) => {
-              const dateStr = formatDateString(dateObj);
-              const isToday = dateStr === todayStr;
-              const isCurrentMonth = dateObj.getMonth() === currentMonthStart.getMonth();
-              const isSelected = dateStr === selectedDateStr;
+            {/* Worker Dashboard Split Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
               
-              const daySchedules = getSchedulesForDate(dateStr);
-              const totalDayHours = getDateTotalHours(dateStr);
-              
-              const isFirstOfMonth = dateObj.getDate() === 1;
-              const dateLabel = isFirstOfMonth ? `${dateObj.getMonth() + 1}/1` : dateObj.getDate().toString();
+              {/* Submission Form Card */}
+              <div className="glass-panel p-6 rounded-2xl border border-[#DAC0A3]/50 lg:col-span-5 space-y-4 shadow-sm">
+                <div>
+                  <h3 className="text-base font-bold text-[#3E2723] flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#2E7D32]"></span>
+                    登記可用時段
+                  </h3>
+                  <p className="text-xs text-[#6D4C41] mt-0.5 font-medium">
+                    請選取日期、地點與可配合排班的時間範圍，店長即可為您安排班表。
+                  </p>
+                </div>
 
-              return (
-                <div
-                  key={dateStr}
-                  onClick={() => setSelectedDateStr(dateStr)}
-                  className={`min-h-[75px] md:min-h-[110px] p-1.5 flex flex-col justify-between transition-colors cursor-pointer select-none relative group ${
-                    isSelected 
-                      ? 'bg-indigo-500/5' 
-                      : isToday 
-                        ? 'bg-slate-900/40' 
-                        : isCurrentMonth 
-                          ? 'bg-slate-900/10 hover:bg-slate-900/30' 
-                          : 'bg-slate-950/20 text-slate-600 opacity-40 hover:bg-slate-900/20'
-                  }`}
-                >
-                  {/* Date cell header */}
-                  <div className="flex items-center justify-between mb-1">
-                    <span 
-                      className={`text-xs font-bold font-mono px-1.5 py-0.5 rounded-full flex items-center justify-center ${
-                        isToday 
-                          ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/35' 
-                          : isSelected 
-                            ? 'text-indigo-400 bg-indigo-500/10'
-                            : isCurrentMonth
-                              ? 'text-slate-300'
-                              : 'text-slate-600'
-                      }`}
+                <form onSubmit={handleAddAvailability} className="space-y-4 pt-2">
+                  {/* Workplace Selection */}
+                  <div>
+                    <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">可配合地點</label>
+                    <select
+                      value={availWorkplace}
+                      onChange={(e) => setAvailWorkplace(e.target.value)}
+                      className="w-full glass-input px-4 py-2.5 rounded-xl text-sm cursor-pointer"
                     >
-                      {dateLabel}
-                    </span>
+                      {workplaces.map(loc => (
+                        <option key={loc.id} value={loc.name} className="bg-white text-[#3E2723]">
+                          {loc.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-                    {/* Total Daily Hours badge (desktop only) */}
-                    {totalDayHours > 0 && (
-                      <span className="hidden md:inline-block text-[9px] px-1 py-0.2 rounded bg-slate-950/40 text-slate-400 border border-slate-850/50 font-mono">
-                        {totalDayHours}h
+                  {/* Time Inputs */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">開始時間</label>
+                      <select
+                        value={availStartTime}
+                        onChange={(e) => setAvailStartTime(e.target.value)}
+                        className="w-full glass-input px-4 py-2.5 rounded-xl text-sm cursor-pointer"
+                      >
+                        {TIME_SLOTS.map(slot => (
+                          <option key={slot} value={slot} className="bg-white text-[#3E2723] font-mono">
+                            {slot}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">最晚結束時間</label>
+                      <select
+                        value={availEndTime}
+                        onChange={(e) => setAvailEndTime(e.target.value)}
+                        className="w-full glass-input px-4 py-2.5 rounded-xl text-sm cursor-pointer"
+                      >
+                        {TIME_SLOTS.map(slot => (
+                          <option key={slot} value={slot} className="bg-white text-[#3E2723] font-mono">
+                            {slot}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Date Multi-selector */}
+                  <div>
+                    <div className="flex justify-between items-center mb-2">
+                      <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider">選擇可用日期 (可複選)</label>
+                      <span className="text-[10px] text-[#795548] font-bold bg-[#8D6E63]/10 px-2 py-0.5 rounded font-mono">
+                        已選 {availSelectedDates.length} 天
                       </span>
-                    )}
+                    </div>
+                    
+                    {/* Shortcuts */}
+                    <div className="flex flex-wrap gap-1.5 mb-2.5">
+                      <button
+                        type="button"
+                        onClick={handleSelectAvailMonWedFri}
+                        className="text-[10px] px-2.5 py-1 rounded bg-white border border-[#DAC0A3]/65 text-[#6D4C41] hover:border-[#8D6E63] hover:text-[#3E2723] hover:bg-[#FAF7F2] cursor-pointer font-bold transition-all"
+                      >
+                        一/三/五
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSelectAvailTueThu}
+                        className="text-[10px] px-2.5 py-1 rounded bg-white border border-[#DAC0A3]/65 text-[#6D4C41] hover:border-[#8D6E63] hover:text-[#3E2723] hover:bg-[#FAF7F2] cursor-pointer font-bold transition-all"
+                      >
+                        二/四
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSelectAvailAllDays}
+                        className="text-[10px] px-2.5 py-1 rounded bg-white border border-[#DAC0A3]/65 text-[#6D4C41] hover:border-[#8D6E63] hover:text-[#3E2723] hover:bg-[#FAF7F2] cursor-pointer font-bold transition-all"
+                      >
+                        全選 (四週)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleClearAvailAllSelected}
+                        className="text-[10px] px-2.5 py-1 rounded bg-white border border-[#DAC0A3]/65 text-[#6D4C41]/70 hover:border-[#DAC0A3] cursor-pointer font-bold transition-all"
+                      >
+                        清除
+                      </button>
+                    </div>
 
-                    {/* Plus Icon to quick add shift (desktop hover only) */}
-                    <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleOpenAddModal(dateStr);
+                    {/* 4-Week Calendar checklist grid */}
+                    <div className="p-2 border border-[#DAC0A3]/50 rounded-xl bg-white/40">
+                      <div className="grid grid-cols-7 gap-1 text-center text-[10px] text-[#6D4C41]/80 font-bold mb-1">
+                        <div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div><div>日</div>
+                      </div>
+                      <div className="grid grid-cols-7 gap-1">
+                        {pickerDates.map(dateObj => {
+                          const dateStr = formatDateString(dateObj);
+                          const isSelected = availSelectedDates.includes(dateStr);
+                          const isToday = dateStr === todayStr;
+
+                          return (
+                            <button
+                              key={dateStr}
+                              type="button"
+                              onClick={() => toggleAvailDateSelection(dateStr)}
+                              className={`relative py-1.5 px-0.5 rounded-lg border text-center transition-all cursor-pointer text-[10px] font-mono font-bold flex flex-col items-center justify-center ${
+                                isSelected
+                                  ? 'bg-[#8D6E63]/20 border-[#8D6E63] text-[#5D4037] shadow-sm'
+                                  : 'bg-white/70 border-[#DAC0A3]/40 text-[#6D4C41] hover:border-[#8D6E63]/60 hover:bg-white'
+                              } ${isToday ? 'ring-1 ring-[#8D6E63]/40' : ''}`}
+                            >
+                              <span>{formatMMDD(dateObj)}</span>
+                              {isToday && (
+                                <span className="absolute top-0.5 right-0.5 w-1 h-1 rounded-full bg-[#8D6E63]"></span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Notes */}
+                  <div>
+                    <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">備註事項 (如：只能上早班、偏好時段等)</label>
+                    <textarea 
+                      placeholder="填寫特別備註，協助店長協調排班..."
+                      value={availNotes}
+                      onChange={(e) => setAvailNotes(e.target.value)}
+                      className="w-full glass-input px-4 py-2.5 rounded-xl text-sm min-h-[70px] resize-none"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="w-full bg-[#795548] hover:bg-[#6D4C41] text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-[#795548]/15 cursor-pointer text-center text-sm"
+                  >
+                    送出可用時間
+                  </button>
+                </form>
+              </div>
+
+              {/* Submitted Availabilities List */}
+              <div className="glass-panel p-6 rounded-2xl border border-[#DAC0A3]/50 lg:col-span-7 space-y-4 shadow-sm">
+                <div>
+                  <h3 className="text-base font-bold text-[#3E2723] flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#8D6E63]"></span>
+                    您登記的可用時間紀錄
+                  </h3>
+                  <p className="text-xs text-[#6D4C41] mt-0.5 font-medium">
+                    以下為「{workerName || '未填寫姓名'}」已登記並提交的可用時段。店長可以在此時段安排您的排班。
+                  </p>
+                </div>
+
+                <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
+                  {!workerName.trim() ? (
+                    <div className="py-12 text-center border-2 border-dashed border-[#DAC0A3]/45 rounded-xl">
+                      <p className="text-xs text-[#6D4C41]/80 font-medium">請在上方輸入姓名以檢視您的可用時間紀錄</p>
+                    </div>
+                  ) : availabilities.filter(a => a.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase()).length === 0 ? (
+                    <div className="py-12 text-center border-2 border-dashed border-[#DAC0A3]/45 rounded-xl">
+                      <p className="text-xs text-[#6D4C41]/80 font-medium">尚無登記任何可用時間</p>
+                    </div>
+                  ) : (
+                    availabilities
+                      .filter(a => a.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase())
+                      .sort((a, b) => {
+                        const dateCompare = b.date.localeCompare(a.date);
+                        if (dateCompare !== 0) return dateCompare;
+                        return compareTimeStrings(a.startTime, b.startTime);
+                      })
+                      .map(avail => {
+                         const dateObj = new Date(avail.date);
+                         const dayOfWeekIndex = dateObj.getDay();
+                         const mappedDayIndex = dayOfWeekIndex === 0 ? 7 : dayOfWeekIndex;
+                         const dayInfo = DAYS_OF_WEEK.find(d => d.value === mappedDayIndex) || DAYS_OF_WEEK[0];
+
+                         return (
+                           <div
+                             key={avail.id}
+                             className="glass-card p-4 rounded-xl border border-[#DAC0A3]/45 flex items-center justify-between gap-4"
+                           >
+                             <div className="space-y-1">
+                               <div className="flex items-center gap-2">
+                                 <span className="text-sm font-extrabold text-[#3E2723]">
+                                   {avail.date} ({dayInfo.name})
+                                 </span>
+                                 <span className="text-[10px] px-2 py-0.5 rounded bg-[#F5EBE6] text-[#5D4037] border border-[#DAC0A3]/40 font-bold">
+                                   📍 {avail.workplace}
+                                 </span>
+                               </div>
+                               <div className="text-xs text-[#6D4C41]/90 font-medium flex items-center gap-1 font-mono">
+                                 🕒 可配合時間：{avail.startTime} - {avail.endTime}
+                               </div>
+                               {avail.notes && (
+                                 <p className="text-xs text-[#5D4037] bg-white/50 px-2.5 py-1 rounded border border-[#DAC0A3]/40 border-dashed mt-1 inline-block">
+                                   📝 備註：{avail.notes}
+                                 </p>
+                               )}
+                             </div>
+                             <button
+                               onClick={() => handleDeleteAvailability(avail.id)}
+                               className="p-2 rounded-xl bg-white hover:bg-red-50 text-[#6D4C41] hover:text-red-650 transition-all border border-[#DAC0A3]/65 hover:border-red-200 cursor-pointer"
+                               title="刪除可用時段"
+                             >
+                               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                               </svg>
+                             </button>
+                           </div>
+                         );
+                       })
+                  )}
+                </div>
+              </div>
+              
+            </div>
+
+            {/* Subtle Manager Login link at the bottom of the Worker view */}
+            <div className="flex justify-center pt-8 pb-4">
+              <a 
+                href="#/manager" 
+                className="text-[10px] text-[#6D4C41]/35 hover:text-[#795548] font-bold flex items-center gap-1 transition-all select-none"
+              >
+                🔒 管理登入
+              </a>
+            </div>
+          </div>
+        )}
+
+        {/* MANAGER ROLE VIEW */}
+        {activeRole === 'manager' && (
+          !isAuthenticated ? (
+            /* Cozy Coffee-Themed Passcode Login Screen */
+            <div className="max-w-md mx-auto my-12 animate-scale-in">
+              <div className="glass-panel p-8 rounded-3xl border border-[#DAC0A3]/50 shadow-2xl flex flex-col space-y-6">
+                <div className="text-center space-y-2">
+                  <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-[#FAF7F2] border border-[#DAC0A3]/50 text-3xl shadow-sm">
+                    ☕
+                  </div>
+                  <h2 className="text-xl font-black text-[#3E2723] pt-2">
+                    精品咖啡館 ☕ 主管登入
+                  </h2>
+                  <p className="text-xs text-[#6D4C41] font-medium">
+                    請輸入管理密碼以進入排班規劃中心
+                  </p>
+                </div>
+
+                <form onSubmit={handleLogin} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">管理密碼</label>
+                    <input 
+                      type="password"
+                      required
+                      placeholder="請輸入密碼..."
+                      value={passcodeInput}
+                      onChange={(e) => setPasscodeInput(e.target.value)}
+                      className="w-full glass-input px-4 py-2.5 rounded-xl text-sm font-mono tracking-widest text-center"
+                      autoFocus
+                    />
+                  </div>
+
+                  {loginError && (
+                    <div className="text-xs text-red-650 font-bold text-center bg-red-50/50 py-2 rounded-lg border border-red-100 animate-pulse">
+                      {loginError}
+                    </div>
+                  )}
+
+                  <div className="flex gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        window.location.hash = '#/worker';
                       }}
-                      className="hidden md:group-hover:flex items-center justify-center p-0.5 rounded hover:bg-slate-800 text-slate-400 hover:text-indigo-300 border border-transparent hover:border-slate-700 transition-all"
-                      title="在此日新增排班"
+                      className="flex-1 bg-white hover:bg-[#FAF7F2] border border-[#E5DCD5] text-[#5D4037] font-semibold px-4 py-3 rounded-xl transition-all cursor-pointer text-center text-sm"
                     >
-                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M12 4v16m8-8H4" />
-                      </svg>
+                      返回員工頁面
+                    </button>
+                    <button
+                      type="submit"
+                      className="flex-1 bg-[#795548] hover:bg-[#5D4037] text-white font-semibold px-4 py-3 rounded-xl transition-all shadow-lg shadow-[#795548]/15 cursor-pointer text-center text-sm"
+                    >
+                      進入系統
                     </button>
                   </div>
-
-                  {/* Shifts contents */}
-                  <div className="flex-1 space-y-1 overflow-y-auto">
-                    {/* Desktop View: lists the shift pills */}
-                    <div className="hidden md:block space-y-1">
-                      {daySchedules.slice(0, 3).map(schedule => {
-                        const theme = COLOR_THEMES[schedule.color] || COLOR_THEMES.indigo;
-                        return (
-                          <div
-                            key={schedule.id}
-                            onClick={(e) => handleOpenEditModal(schedule, e)}
-                            className={`group/item text-[10px] py-1 px-1.5 rounded truncate select-none border font-semibold flex items-center justify-between ${theme.bg} ${theme.border} ${theme.hover}`}
-                            title={`👤 ${schedule.employeeName} (${schedule.startTime} - ${schedule.endTime})${schedule.workplace ? ` | 📍 ${schedule.workplace}` : ''}`}
-                          >
-                            <span className="truncate">
-                              {schedule.employeeName}{schedule.workplace ? ` (${schedule.workplace.substring(0, 2)})` : ''} {schedule.startTime}
-                            </span>
-                          </div>
-                        );
-                      })}
-                      {daySchedules.length > 3 && (
-                        <div className="text-[9px] text-slate-500 font-bold text-center pl-1">
-                          還有 {daySchedules.length - 3} 個班...
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Mobile View: displays small colored indicator dots */}
-                    <div className="md:hidden flex flex-wrap gap-0.5 justify-center mt-1">
-                      {daySchedules.map(schedule => {
-                        const theme = COLOR_THEMES[schedule.color] || COLOR_THEMES.indigo;
-                        return (
-                          <span 
-                            key={schedule.id} 
-                            className={`w-1.5 h-1.5 rounded-full ${theme.dot}`}
-                          />
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                </div>
-              );
-            })}
-          </div>
-        </main>
-
-        {/* Selected Date Detail Block (Crucial for mobile experience, elegant for desktop too) */}
-        <section className="glass-panel p-5 rounded-2xl border border-slate-800 space-y-4">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-850 pb-3">
-            <div>
-              <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-indigo-500"></span>
-                已選日期：{selectedDateObject.getFullYear()}年 {formatMMDD(selectedDateObject)} ({selectedDayInfo.name})
-              </h3>
-              <p className="text-xs text-slate-400 mt-0.5">
-                此日共排定 {selectedDateShifts.length} 個班次，合計 {selectedDateTotalHours} 小時。
-              </p>
-            </div>
-            
-            <button
-              onClick={() => handleOpenAddModal(selectedDateStr)}
-              className="px-4 py-2 bg-indigo-600/10 hover:bg-indigo-600/25 border border-indigo-500/35 hover:border-indigo-500 text-indigo-300 font-semibold rounded-xl text-xs transition-all cursor-pointer"
-            >
-              ＋ 在此日新增排班
-            </button>
-          </div>
-
-          {selectedDateShifts.length === 0 ? (
-            <div className="py-8 text-center border-2 border-dashed border-slate-850/40 rounded-xl">
-              <p className="text-xs text-slate-500 font-medium">此日尚無排班班次紀錄</p>
+                </form>
+              </div>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-              {selectedDateShifts.map(schedule => {
-                const theme = COLOR_THEMES[schedule.color] || COLOR_THEMES.indigo;
-                const duration = calculateDuration(schedule.startTime, schedule.endTime);
-                
-                return (
-                  <div
-                    key={schedule.id}
-                    onClick={(e) => handleOpenEditModal(schedule, e)}
-                    className={`group glass-card p-3 rounded-xl border relative cursor-pointer flex flex-col justify-between gap-3 ${theme.bg} ${theme.border} ${theme.hover}`}
+            <div className="space-y-6">
+            
+            {/* Calendar Toolbar */}
+            <section className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3 bg-white/70 p-4 rounded-xl border border-[#DAC0A3]/50 shadow-sm">
+              {/* Left: Month Nav */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleGoToToday}
+                  className="px-3.5 py-1.5 rounded-lg bg-white hover:bg-[#FAF7F2] text-[#5D4037] border border-[#DAC0A3]/60 hover:border-[#8D6E63] text-xs font-semibold transition-all cursor-pointer"
+                >
+                  今天
+                </button>
+                <div className="flex items-center rounded-lg border border-[#DAC0A3]/60 bg-white overflow-hidden">
+                  <button
+                    onClick={handlePrevMonth}
+                    className="p-1.5 hover:bg-[#FAF7F2] text-[#6D4C41] border-r border-[#DAC0A3]/60 transition-colors cursor-pointer"
+                    title="前一個月"
                   >
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between gap-1">
-                        <span className={`text-[10px] font-bold flex items-center gap-1 ${theme.text} font-mono`}>
-                          <span className={`w-1.5 h-1.5 rounded-full ${theme.dot}`}></span>
-                          {schedule.startTime} - {schedule.endTime}
-                        </span>
-                        <div className="flex items-center gap-1">
-                          {schedule.workplace && (
-                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-950/60 text-slate-300 border border-slate-850/50 font-semibold flex items-center gap-0.5">
-                              📍{schedule.workplace}
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={handleNextMonth}
+                    className="p-1.5 hover:bg-[#FAF7F2] text-[#6D4C41] transition-colors cursor-pointer"
+                    title="後一個月"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                </div>
+                
+                {/* Displaying current Month/Year */}
+                <h2 className="text-base md:text-lg font-bold text-[#3E2723] ml-2">
+                  {currentMonthStart.getFullYear()}年 {currentMonthStart.getMonth() + 1}月
+                </h2>
+
+                {/* View Switcher Toggle */}
+                <div className="flex items-center gap-1 bg-[#FAF7F2] border border-[#DAC0A3]/60 p-1 rounded-xl ml-2">
+                  <button
+                    onClick={() => setManagerViewMode('calendar')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      managerViewMode === 'calendar'
+                        ? 'bg-[#795548] text-white shadow-sm'
+                        : 'text-[#8D6E63] hover:text-[#3E2723]'
+                    }`}
+                  >
+                    日曆檢視
+                  </button>
+                  <button
+                    onClick={() => setManagerViewMode('grid')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      managerViewMode === 'grid'
+                        ? 'bg-[#795548] text-white shadow-sm'
+                        : 'text-[#8D6E63] hover:text-[#3E2723]'
+                    }`}
+                  >
+                    網格總覽
+                  </button>
+                </div>
+              </div>
+
+              {/* Right: Quick monthly stats info */}
+              <div className="flex items-center gap-4 text-[11px] md:text-xs text-[#6D4C41] bg-white/85 px-3 md:px-4 py-2 rounded-lg border border-[#DAC0A3]/55 shadow-sm">
+                <div>本月班次：<span className="font-semibold text-[#3E2723] font-mono">{totalShifts}</span> 次</div>
+                <div className="w-px h-3 bg-[#DAC0A3]/45"></div>
+                <div>本月工時：<span className="font-semibold text-[#795548] font-mono">{Math.round(totalHours * 10) / 10}</span> 小時</div>
+                <div className="w-px h-3 bg-[#DAC0A3]/45"></div>
+                <div>排班人數：<span className="font-semibold text-[#E65100] font-mono">{totalEmployees}</span> 人</div>
+              </div>
+            </section>
+
+            {/* Conditional Main Grid View */}
+            {managerViewMode === 'calendar' ? (
+              /* Month View Calendar Layout */
+              <main className="glass-panel rounded-2xl overflow-hidden border border-[#DAC0A3]/50 shadow-sm animate-fade-in">
+                
+                {/* Weekday columns labels */}
+                <div className="grid grid-cols-7 border-b border-[#DAC0A3]/50 bg-[#F5EBE6]/60">
+                  {DAYS_OF_WEEK.map(day => (
+                    <div key={day.value} className="py-2 text-center text-xs font-bold text-[#6D4C41]">
+                      {day.name}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Monthly dates grid (42 cells) */}
+                <div className="grid grid-cols-7 gap-px bg-[#EADBC8]/60">
+                  {monthGridDates.map((dateObj) => {
+                    const dateStr = formatDateString(dateObj);
+                    const isToday = dateStr === todayStr;
+                    const isCurrentMonth = dateObj.getMonth() === currentMonthStart.getMonth();
+                    const isSelected = dateStr === selectedDateStr;
+                    
+                    const daySchedules = getSchedulesForDate(dateStr);
+                    const totalDayHours = getDateTotalHours(dateStr);
+                    const dateAvails = getAvailabilitiesForDate(dateStr);
+                    const availCount = dateAvails.length;
+                    const isUnderstaffed = getIsDayUnderstaffed(dateStr);
+                    
+                    const isFirstOfMonth = dateObj.getDate() === 1;
+                    const dateLabel = isFirstOfMonth ? `${dateObj.getMonth() + 1}/1` : dateObj.getDate().toString();
+
+                    return (
+                      <div
+                        key={dateStr}
+                        onClick={() => setSelectedDateStr(dateStr)}
+                        className={`min-h-[75px] md:min-h-[110px] p-1.5 flex flex-col justify-between transition-colors cursor-pointer select-none relative group ${
+                          isSelected 
+                            ? 'bg-[#8D6E63]/10' 
+                            : isToday 
+                              ? 'bg-[#FAF7F2]' 
+                              : isCurrentMonth 
+                                ? 'bg-white/90 hover:bg-[#FAF7F2]' 
+                                : 'bg-[#FAF7F2]/50 text-[#8D6E63]/40 opacity-50 hover:bg-[#FAF7F2]'
+                        }`}
+                      >
+                        {/* Date cell header */}
+                        <div className="flex items-center justify-between mb-1">
+                          <span 
+                            className={`text-xs font-bold font-mono px-1.5 py-0.5 rounded-full flex items-center justify-center ${
+                              isToday 
+                                ? 'bg-[#795548] text-white shadow-sm shadow-[#795548]/20' 
+                                : isSelected 
+                                  ? 'text-[#5D4037] bg-[#8D6E63]/10'
+                                  : isCurrentMonth
+                                    ? 'text-[#3E2723] font-extrabold'
+                                    : 'text-[#8D6E63]/60'
+                            }`}
+                          >
+                            {dateLabel}
+                          </span>
+
+                          {/* Availability Count Badge */}
+                          {availCount > 0 && (
+                            <span className="text-[9px] px-1 py-0.2 rounded bg-emerald-600/10 border border-emerald-600/20 text-[#2E7D32] font-bold flex items-center gap-0.5" title={`${availCount} 位人員今日可用`}>
+                              🙋{availCount}
                             </span>
                           )}
-                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-950/60 text-slate-400 border border-slate-850/50 font-mono font-bold">
-                            {duration}h
+
+                          {/* Total Daily Hours badge (desktop only) */}
+                          {totalDayHours > 0 && (
+                            <span className="hidden md:inline-block text-[9px] px-1 py-0.2 rounded bg-white/80 text-[#6D4C41] border border-[#DAC0A3]/50 font-mono flex items-center gap-1">
+                              {totalDayHours}h
+                              {isUnderstaffed && (
+                                <span className="w-1 h-1 rounded-full bg-[#E65100] animate-pulse" title="排班未達目標人數"></span>
+                              )}
+                            </span>
+                          )}
+
+                          {/* Plus Icon to quick add shift (desktop hover only) */}
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenAddModal(dateStr);
+                            }}
+                            className="hidden md:group-hover:flex items-center justify-center p-0.5 rounded hover:bg-[#FAF7F2] text-[#8D6E63] hover:text-[#5D4037] border border-transparent hover:border-[#DAC0A3]/50 transition-all"
+                            title="在此日新增排班"
+                          >
+                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M12 4v16m8-8H4" />
+                            </svg>
+                          </button>
+                        </div>
+
+                        {/* Shifts contents */}
+                        <div className="flex-1 space-y-1 overflow-y-auto">
+                          {/* Desktop View: lists the shift pills */}
+                          <div className="hidden md:block space-y-1">
+                            {daySchedules.slice(0, 3).map(schedule => {
+                              const theme = COLOR_THEMES[schedule.color] || COLOR_THEMES.indigo;
+                              return (
+                                <div
+                                  key={schedule.id}
+                                  onClick={(e) => handleOpenEditModal(schedule, e)}
+                                  className={`group/item text-[10px] py-1 px-1.5 rounded truncate select-none border font-semibold flex items-center justify-between ${theme.bg} ${theme.border} ${theme.hover}`}
+                                  title={`👤 ${schedule.employeeName} (${schedule.startTime} - ${schedule.endTime})${schedule.workplace ? ` | 📍 ${schedule.workplace}` : ''}`}
+                                >
+                                  <span className="truncate">
+                                    {schedule.employeeName}{schedule.workplace ? ` (${schedule.workplace.substring(0, 2)})` : ''} {schedule.startTime}-{schedule.endTime}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                            {daySchedules.length > 3 && (
+                              <div className="text-[9px] text-[#6D4C41] font-bold text-center pl-1">
+                                還有 {daySchedules.length - 3} 個班...
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Mobile View: displays small colored indicator dots */}
+                          <div className="md:hidden flex flex-wrap gap-0.5 justify-center mt-1">
+                            {daySchedules.map(schedule => {
+                              const theme = COLOR_THEMES[schedule.color] || COLOR_THEMES.indigo;
+                              return (
+                                <span 
+                                  key={schedule.id} 
+                                  className={`w-1.5 h-1.5 rounded-full ${theme.dot}`}
+                                />
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                      </div>
+                    );
+                  })}
+                </div>
+              </main>
+            ) : (
+              /* Excel Grid Layout */
+              <main className="glass-panel rounded-2xl overflow-hidden border border-[#DAC0A3]/50 shadow-sm animate-scale-in">
+                <div className="overflow-x-auto max-w-full">
+                  <table className="w-full border-collapse text-left select-none table-fixed">
+                    <thead>
+                      <tr className="border-b border-[#DAC0A3]/50 bg-[#F5EBE6]/60">
+                        {/* Sticky Employee Row Header */}
+                        <th className="sticky left-0 z-20 bg-[#F5EBE6] px-4 py-4 text-xs font-black text-[#3E2723] border-r border-b border-[#DAC0A3]/50 w-[130px] shadow-[4px_0_8px_-4px_rgba(100,70,50,0.15)]">
+                          人員姓名
+                        </th>
+                        {/* Date headers */}
+                        {gridDates.map(dateObj => {
+                          const dateStr = formatDateString(dateObj);
+                          const isToday = dateStr === todayStr;
+                          const isSelected = dateStr === selectedDateStr;
+                          const dayOfWeekIndex = dateObj.getDay();
+                          const mappedDayIndex = dayOfWeekIndex === 0 ? 7 : dayOfWeekIndex;
+                          const dayInfo = DAYS_OF_WEEK.find(d => d.value === mappedDayIndex) || DAYS_OF_WEEK[0];
+                          
+                          const totalDayHours = getDateTotalHours(dateStr);
+                          const isUnderstaffed = getIsDayUnderstaffed(dateStr);
+
+                          return (
+                            <th 
+                              key={dateStr}
+                              onClick={() => setSelectedDateStr(dateStr)}
+                              className={`px-2 py-2 text-center text-xs font-bold border-r border-b border-[#DAC0A3]/50 w-[100px] cursor-pointer transition-colors ${
+                                isSelected
+                                  ? 'bg-[#8D6E63]/15 text-[#3E2723]'
+                                  : isToday
+                                    ? 'bg-[#F5EBE6] text-[#3E2723] font-black'
+                                    : 'hover:bg-[#FAF7F2]/75 text-[#6D4C41]'
+                              }`}
+                            >
+                              <div className="font-mono text-sm font-extrabold">{dateObj.getDate()}</div>
+                              <div className="text-xs font-bold opacity-90">{dayInfo.name}</div>
+                              {/* Hourly coverage indicator under the header */}
+                              <div className="mt-1 flex items-center justify-center gap-1">
+                                {totalDayHours > 0 && (
+                                  <span className={`text-[8px] font-black px-1.5 py-0.2 rounded-md ${
+                                    isUnderstaffed 
+                                      ? 'bg-[#E65100]/10 text-[#BF360C] border border-[#E65100]/20' 
+                                      : 'bg-emerald-600/10 text-[#2E7D32] border border-emerald-600/20'
+                                  }`}>
+                                    {totalDayHours}h
+                                  </span>
+                                )}
+                              </div>
+                            </th>
+                          );
+                        })}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {allEmployees.length === 0 ? (
+                        <tr>
+                          <td colSpan={gridDates.length + 1} className="py-16 text-center text-xs text-[#6D4C41] font-medium bg-[#FAF7F2]/40">
+                            目前尚無人員排班或登記資料
+                          </td>
+                        </tr>
+                      ) : (
+                        allEmployees.map(empName => (
+                          <tr key={empName} className="border-b border-[#DAC0A3]/40 hover:bg-[#FAF7F2]/30 transition-colors group">
+                            {/* Sticky Left Column Employee Initials */}
+                            <td className="sticky left-0 z-10 bg-[#FAF7F2]/95 group-hover:bg-[#F5EBE6] backdrop-blur-sm px-4 py-3.5 text-sm font-extrabold text-[#3E2723] border-r border-b border-[#DAC0A3]/40 shadow-[4px_0_8px_-4px_rgba(100,70,50,0.1)] truncate w-[130px] h-[96px]">
+                              👤 {empName}
+                            </td>
+
+                            {/* Column cell details */}
+                            {gridDates.map(dateObj => {
+                              const dateStr = formatDateString(dateObj);
+                              const isSelected = dateStr === selectedDateStr;
+
+                              // Shift scheduled
+                              const empSchedules = schedules.filter(
+                                s => s.employeeName.trim().toLowerCase() === empName.toLowerCase() && s.date === dateStr
+                              ).sort((a, b) => compareTimeStrings(a.startTime, b.startTime));
+
+                              // Worker Availability
+                              const empAvails = availabilities.filter(
+                                a => a.employeeName.trim().toLowerCase() === empName.toLowerCase() && a.date === dateStr
+                              ).sort((a, b) => compareTimeStrings(a.startTime, b.startTime));
+
+                              return (
+                                <td
+                                  key={dateStr}
+                                  onClick={() => setSelectedDateStr(dateStr)}
+                                  className={`p-1.5 border-r border-[#DAC0A3]/40 text-center w-[100px] h-[96px] relative align-middle transition-colors ${
+                                    isSelected ? 'bg-[#8D6E63]/5' : ''
+                                  }`}
+                                >
+                                  {empSchedules.length > 0 ? (
+                                    // 1. Scheduled shift (solid color pill)
+                                    <div className="space-y-0.5">
+                                      {empSchedules.map(sched => {
+                                        const theme = COLOR_THEMES[sched.color] || COLOR_THEMES.indigo;
+                                        const cleanNote = getCleanNote(sched.notes);
+                                        return (
+                                          <div
+                                            key={sched.id}
+                                            onClick={(e) => handleOpenEditModal(sched, e)}
+                                            className={`text-xs py-1.5 px-2 rounded-md border font-semibold truncate cursor-pointer transition-all hover:scale-[1.02] ${theme.bg} ${theme.border} ${theme.text}`}
+                                            title={`👤 ${sched.employeeName} (${sched.startTime}-${sched.endTime}) @ 📍 ${sched.workplace}${cleanNote ? ` | 📝 ${cleanNote}` : ''}`}
+                                          >
+                                            {sched.startTime}-{sched.endTime}
+                                            <div className="text-[10px] opacity-75 truncate">{sched.workplace}</div>
+                                            {cleanNote && (
+                                              <div className="text-[10px] opacity-90 truncate mt-0.5 leading-normal font-medium">
+                                                ({cleanNote})
+                                              </div>
+                                            )}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  ) : empAvails.length > 0 ? (
+                                    // 2. Unscheduled Availability (dashed green border pill)
+                                    <div className="space-y-0.5">
+                                      {empAvails.map(avail => {
+                                        const cleanNote = getCleanNote(avail.notes);
+                                        return (
+                                          <div
+                                            key={avail.id}
+                                            className="text-xs py-2 px-1 border border-dashed border-emerald-600/30 bg-[#E8F5E9]/50 text-[#2E7D32] font-black rounded-md relative group/btn flex flex-col justify-center items-center min-h-[72px] h-auto"
+                                            title={`可用時段: ${avail.startTime}-${avail.endTime} @ 📍 ${avail.workplace}${cleanNote ? ` | 📝 ${cleanNote}` : ''}`}
+                                          >
+                                            <div className="text-[10px] font-mono leading-none font-bold">{avail.startTime}-{avail.endTime}</div>
+                                            <div className="text-[9px] opacity-75 mt-1 leading-none truncate w-full">{avail.workplace}</div>
+                                            {cleanNote && (
+                                              <div className="text-[9.5px] opacity-85 mt-1 leading-none truncate w-full">
+                                                ({cleanNote})
+                                              </div>
+                                            )}
+                                            
+                                            {/* Hover Instant Schedule Button */}
+                                            <button
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleInstantAssign(avail);
+                                              }}
+                                              className="absolute inset-0 bg-[#2E7D32]/95 text-white rounded-md flex items-center justify-center gap-0.5 opacity-0 group-hover/btn:opacity-100 transition-opacity text-xs font-extrabold cursor-pointer"
+                                            >
+                                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                                              </svg>
+                                              直接排
+                                            </button>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  ) : (
+                                    // 3. Empty cell (Click to quick assign)
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setModalMode('create');
+                                        setEditingId(null);
+                                        setEmployeeName(empName);
+                                        setWorkplace(workplaces[0]?.name || '');
+                                        setStartTime('09:00');
+                                        setEndTime('17:00');
+                                        setNotes('');
+                                        setSelectedDates([dateStr]);
+                                        setIsModalOpen(true);
+                                      }}
+                                      className="w-full h-full min-h-[72px] rounded-lg border border-transparent hover:border-[#8D6E63]/40 hover:bg-[#FAF7F2] transition-all flex items-center justify-center text-[#E5D3C3] hover:text-[#795548] cursor-pointer"
+                                      title="在此日排班"
+                                    >
+                                      <svg className="w-4 h-4 opacity-0 hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+                                      </svg>
+                                    </button>
+                                  )}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </main>
+            )}
+
+            {/* Selected Date Detail Block (Today's scheduled shifts) */}
+            <section className="glass-panel p-5 rounded-2xl border border-[#DAC0A3]/50 shadow-sm space-y-4">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-[#DAC0A3]/35 pb-3">
+                <div>
+                  <h3 className="text-base font-bold text-[#3E2723] flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#795548]"></span>
+                    今日班證明細：{selectedDateObject.getFullYear()}年 {formatMMDD(selectedDateObject)} ({selectedDayInfo.name})
+                  </h3>
+                  <p className="text-xs text-[#6D4C41] mt-0.5 font-medium">
+                    此日共排定 {selectedDateShifts.length} 個班次，合計 {selectedDateTotalHours} 小時。
+                  </p>
+                </div>
+                
+                <button
+                  onClick={() => handleOpenAddModal(selectedDateStr)}
+                  className="px-4 py-2 bg-[#8D6E63]/10 hover:bg-[#8D6E63]/20 border border-[#8D6E63]/30 hover:border-[#8D6E63] text-[#5D4037] font-semibold rounded-xl text-xs transition-all cursor-pointer"
+                >
+                  ＋ 在此日新增排班
+                </button>
+              </div>
+
+              {selectedDateShifts.length === 0 ? (
+                <div className="py-8 text-center border-2 border-dashed border-[#DAC0A3]/45 rounded-xl">
+                  <p className="text-xs text-[#6D4C41]/80 font-medium">此日尚無排班班次紀錄</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                  {selectedDateShifts.map(schedule => {
+                    const theme = COLOR_THEMES[schedule.color] || COLOR_THEMES.indigo;
+                    const duration = calculateDuration(schedule.startTime, schedule.endTime);
+                    
+                    return (
+                      <div
+                        key={schedule.id}
+                        onClick={(e) => handleOpenEditModal(schedule, e)}
+                        className={`group glass-card p-3 rounded-xl border border-[#DAC0A3]/40 relative cursor-pointer flex flex-col justify-between gap-3 ${theme.bg} ${theme.border} ${theme.hover}`}
+                      >
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between gap-1">
+                            <span className={`text-[10px] font-bold flex items-center gap-1 ${theme.text} font-mono`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${theme.dot}`}></span>
+                              {schedule.startTime} - {schedule.endTime}
+                            </span>
+                            <div className="flex items-center gap-1">
+                              {schedule.workplace && (
+                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-white/80 text-[#5D4037] border border-[#DAC0A3]/40 font-semibold flex items-center gap-0.5">
+                                  📍{schedule.workplace}
+                                </span>
+                              )}
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-white/80 text-[#6D4C41] border border-[#DAC0A3]/40 font-mono font-bold">
+                                {duration}h
+                              </span>
+                            </div>
+                          </div>
+                          
+                           <h4 className="font-extrabold text-[#3E2723] text-sm flex items-center gap-1.5 leading-tight group-hover:text-[#4E342E] transition-colors">
+                            👤 {schedule.employeeName}
+                          </h4>
+                        </div>
+
+                        {schedule.notes && (
+                          <div className="text-[10px] text-[#6D4C41] bg-white/50 px-2 py-1 rounded border border-dashed border-[#DAC0A3]/40 text-left truncate">
+                            📝 {schedule.notes}
+                          </div>
+                        )}
+
+                        <div className="flex items-center justify-end gap-1.5 border-t border-[#DAC0A3]/30 pt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={(e) => handleOpenEditModal(schedule, e)}
+                            className="p-1 rounded bg-white hover:bg-[#FAF7F2] border border-[#DAC0A3]/50 text-[#6D4C41] hover:text-[#3E2723] transition-colors cursor-pointer"
+                            title="編輯"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                            </svg>
+                          </button>
+                          <button
+                            onClick={(e) => handleDelete(schedule.id, e)}
+                            className="p-1 rounded bg-white hover:bg-red-50 border border-[#DAC0A3]/50 text-[#6D4C41] hover:text-red-605 transition-colors cursor-pointer"
+                            title="刪除"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+
+            {/* Today's Available Workers Panel */}
+            <section className="glass-panel p-5 rounded-2xl border border-[#DAC0A3]/50 shadow-sm space-y-4">
+              <div>
+                <h3 className="text-base font-bold text-[#3E2723] flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-[#8D6E63]"></span>
+                  今日可用人員 ({formatMMDD(selectedDateObject)})
+                </h3>
+                <p className="text-xs text-[#6D4C41] mt-0.5 font-medium">
+                  以下為此日登記可配合上班的同仁。點擊「直接排班」可一鍵排入，或點擊「調整」自訂排程細節。
+                </p>
+              </div>
+
+              {dayAvailabilities.length === 0 ? (
+                <div className="py-8 text-center border-2 border-dashed border-[#DAC0A3]/45 rounded-xl">
+                  <p className="text-xs text-[#6D4C41]/80 font-medium">今日尚無同仁填寫可用時間</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                  {dayAvailabilities.map(avail => {
+                    const theme = COLOR_THEMES[getColorFromName(avail.employeeName)] || COLOR_THEMES.indigo;
+                    return (
+                      <div 
+                        key={avail.id}
+                        className={`glass-card p-3.5 rounded-xl border flex flex-col justify-between gap-3 ${theme.bg} ${theme.border}`}
+                      >
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className={`text-[10px] font-bold flex items-center gap-1 ${theme.text} font-mono`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${theme.dot}`}></span>
+                              登記：{avail.startTime} - {avail.endTime}
+                            </span>
+                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-white/80 text-[#5D4037] border border-[#DAC0A3]/40 font-bold">
+                              📍 {avail.workplace}
+                            </span>
+                          </div>
+                          <h4 className="font-extrabold text-[#3E2723] text-sm">
+                            👤 {avail.employeeName}
+                          </h4>
+                          {avail.notes && (
+                            <p className="text-[10px] text-[#5D4037] bg-white/60 p-1.5 rounded border border-[#DAC0A3]/40 border-dashed truncate">
+                              📝 {avail.notes}
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="flex gap-2 mt-1">
+                          <button
+                            onClick={() => handleInstantAssign(avail)}
+                            className="flex-1 py-2 bg-[#2E7D32] hover:bg-[#1B5E20] text-white font-bold rounded-lg text-xs transition-all flex items-center justify-center gap-1 cursor-pointer shadow-sm hover:shadow-[#2E7D32]/10"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                            </svg>
+                            直接排班
+                          </button>
+                          <button
+                            onClick={() => {
+                              setModalMode('create');
+                              setEditingId(null);
+                              setEmployeeName(avail.employeeName);
+                              setWorkplace(avail.workplace);
+                              setStartTime(avail.startTime);
+                              setEndTime(avail.endTime);
+                              setNotes(avail.notes || '');
+                              setSelectedDates([selectedDateStr]);
+                              setIsModalOpen(true);
+                            }}
+                            className="px-3 py-2 bg-white hover:bg-[#FAF7F2] border border-[#DAC0A3]/60 hover:border-[#8D6E63] text-[#5D4037] font-bold rounded-lg text-xs transition-all flex items-center justify-center gap-1 cursor-pointer"
+                            title="調整排班細節"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+                            </svg>
+                            調整
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+
+            {/* Daily Staffing Coverage Timeline */}
+            <section className="glass-panel p-5 rounded-2xl border border-[#DAC0A3]/50 shadow-sm space-y-4">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div>
+                  <h3 className="text-base font-bold text-[#3E2723] flex flex-wrap items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#2E7D32] animate-pulse"></span>
+                    當日工時人力覆蓋率
+                    <div className="inline-flex items-center gap-1.5 ml-2 bg-[#F5EBE6] border border-[#DAC0A3]/65 p-0.5 rounded-xl">
+                      <button
+                        type="button"
+                        onClick={() => handleAdjustSelectedDate(-1)}
+                        className="p-1 hover:bg-white text-[#6D4C41] rounded-lg transition-colors cursor-pointer"
+                        title="前一天"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" />
+                        </svg>
+                      </button>
+                      <span className="text-xs px-1.5 font-mono text-[#795548] font-extrabold select-none">
+                        {selectedDateStr} ({selectedDayInfo.name})
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleAdjustSelectedDate(1)}
+                        className="p-1 hover:bg-white text-[#6D4C41] rounded-lg transition-colors cursor-pointer"
+                        title="後一天"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
+                        </svg>
+                      </button>
+                    </div>
+                  </h3>
+                  <p className="text-xs text-[#6D4C41] mt-1 font-medium">
+                    檢視各小時時段排班人數是否達標。點擊 +/- 調整，或在輸入框內直接修改目標人數需求。
+                  </p>
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3">
+                {Array.from({ length: 15 }, (_, i) => i + 6).map(hour => {
+                  // Calculate scheduled workers during this hour
+                  const scheduledWorkersInHour = selectedDateShifts.filter(shift => 
+                    isShiftActiveAtHour(shift.startTime, shift.endTime, hour)
+                  );
+                  const currentCount = scheduledWorkersInHour.length;
+                  const targetCount = getStaffingTargetForHour(hour, selectedDateStr);
+                  
+                  let status: 'under' | 'optimal' | 'over' = 'optimal';
+                  if (currentCount < targetCount) {
+                    status = 'under';
+                  } else if (currentCount > targetCount) {
+                    status = 'over';
+                  }
+                  
+                  const statusColors = {
+                    under: {
+                      bg: 'bg-[#E65100]/5 hover:bg-[#E65100]/8',
+                      border: 'border-[#E65100]/20 hover:border-[#E65100]/35',
+                      text: 'text-[#BF360C]',
+                      badge: 'bg-[#E65100]/10 text-[#BF360C] border border-[#E65100]/20',
+                      label: '不足'
+                    },
+                    optimal: {
+                      bg: 'bg-[#2E7D32]/5 hover:bg-[#2E7D32]/8',
+                      border: 'border-[#2E7D32]/20 hover:border-[#2E7D32]/35',
+                      text: 'text-[#1B5E20]',
+                      badge: 'bg-[#2E7D32]/10 text-[#1B5E20] border border-[#2E7D32]/20',
+                      label: '達標'
+                    },
+                    over: {
+                      bg: 'bg-[#5D4037]/5 hover:bg-[#5D4037]/8',
+                      border: 'border-[#5D4037]/20 hover:border-[#5D4037]/35',
+                      text: 'text-[#3E2723]',
+                      badge: 'bg-[#5D4037]/10 text-[#3E2723] border border-[#5D4037]/20',
+                      label: '超出'
+                    }
+                  };
+                  
+                  const colors = statusColors[status];
+                  const hourStr = `${hour.toString().padStart(2, '0')}:00`;
+                  const hourEndStr = `${(hour + 1).toString().padStart(2, '0')}:00`;
+
+                  return (
+                    <div 
+                      key={hour} 
+                      className={`glass-card p-3 rounded-xl border flex flex-col justify-between items-center transition-all ${colors.bg} ${colors.border}`}
+                    >
+                      <span className="text-[10px] text-[#6D4C41] font-bold font-mono">
+                        {hourStr} - {hourEndStr}
+                      </span>
+                      
+                      <div className="my-2.5 text-center">
+                        <div className="text-2xl font-black font-mono tracking-tight text-[#3E2723] flex items-center justify-center">
+                          <span>{currentCount}</span>
+                          <span className="text-lg text-[#6D4C41]/35 font-normal mx-1">/</span>
+                          <span className="text-2xl text-[#795548]">{targetCount}</span>
+                          <span className="text-[10px] text-[#6D4C41]/60 font-bold font-sans ml-0.5">人</span>
+                        </div>
+                        <div className="mt-1">
+                          <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${colors.badge}`}>
+                            {colors.label}
                           </span>
                         </div>
                       </div>
-                      
-                      <h4 className="font-extrabold text-slate-200 text-sm flex items-center gap-1.5 leading-tight group-hover:text-white transition-colors">
-                        👤 {schedule.employeeName}
-                      </h4>
-                    </div>
 
-                    {schedule.notes && (
-                      <div className="text-[10px] text-slate-400 bg-slate-900/10 px-2 py-1 rounded border border-dashed border-slate-850 text-left truncate">
-                        📝 {schedule.notes}
+                      {/* Target adjustment controls */}
+                      <div className="flex items-center gap-1 mt-1 bg-[#FAF7F2] p-0.5 rounded-lg border border-[#DAC0A3]/50">
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateTarget(hour, -1)}
+                          className="w-5 h-5 rounded bg-white hover:bg-[#FAF7F2] border border-[#DAC0A3]/50 text-[#6D4C41] hover:text-[#3E2723] transition-all flex items-center justify-center cursor-pointer text-xs font-bold font-mono"
+                          title="減少目標人數"
+                        >
+                          -
+                        </button>
+                        <input
+                          type="number"
+                          min="0"
+                          max="20"
+                          value={targetCount}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value);
+                            if (!isNaN(val) && val >= 0) {
+                              updateStaffingTarget(hour, val, selectedDateStr);
+                            }
+                          }}
+                          className="w-8 text-center bg-transparent border-0 text-[10px] font-black font-mono text-[#795548] py-0.5 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          title="直接輸入修改目標人數"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateTarget(hour, 1)}
+                          className="w-5 h-5 rounded bg-white hover:bg-[#FAF7F2] border border-[#DAC0A3]/50 text-[#6D4C41] hover:text-[#3E2723] transition-all flex items-center justify-center cursor-pointer text-xs font-bold font-mono"
+                          title="增加目標人數"
+                        >
+                          +
+                        </button>
                       </div>
-                    )}
-
-                    <div className="flex items-center justify-end gap-1.5 border-t border-slate-800/40 pt-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button
-                        onClick={(e) => handleOpenEditModal(schedule, e)}
-                        className="p-1 rounded bg-slate-850 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors"
-                        title="編輯"
-                      >
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                        </svg>
-                      </button>
-                      <button
-                        onClick={(e) => handleDelete(schedule.id, e)}
-                        className="p-1 rounded bg-slate-850 hover:bg-red-950/50 text-slate-300 hover:text-red-400 transition-colors"
-                        title="刪除"
-                      >
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                      </button>
+                      
+                      {/* Scheduled employees tooltip/details */}
+                      <div className="mt-2 w-full pt-1.5 border-t border-[#DAC0A3]/30 text-[9px] text-center truncate min-h-[18px]">
+                        {scheduledWorkersInHour.length > 0 ? (
+                          <span className="text-[#6D4C41] font-semibold" title={scheduledWorkersInHour.map(w => w.employeeName).join(', ')}>
+                            {scheduledWorkersInHour.map(w => w.employeeName).join(', ')}
+                          </span>
+                        ) : (
+                          <span className="text-[#6D4C41]/35 font-medium select-none">
+                            (無排班)
+                          </span>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
+            </section>
+
             </div>
-          )}
-        </section>
+          )
+        )}
 
       </div>
 
       {/* Add/Edit Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
-          <div className="glass-panel rounded-2xl w-full max-w-md overflow-hidden shadow-2xl border border-slate-800/80 animate-scale-in flex flex-col">
+        <div className="fixed inset-0 bg-[#3E2723]/30 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="glass-panel rounded-2xl w-full max-w-md overflow-hidden shadow-2xl border border-[#DAC0A3]/50 flex flex-col">
             
             {/* Modal Header */}
-            <div className="p-6 border-b border-slate-850 flex items-center justify-between">
-              <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-indigo-500"></span>
+            <div className="p-6 border-b border-[#DAC0A3]/35 flex items-center justify-between">
+              <h3 className="text-base font-bold text-[#3E2723] flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-[#795548]"></span>
                 {modalMode === 'create' ? '新增排班時段 (可複選日期)' : '編輯排班時段'}
               </h3>
               <button 
                 onClick={() => setIsModalOpen(false)}
-                className="text-slate-400 hover:text-slate-200 p-1.5 rounded-lg hover:bg-slate-900 transition-colors cursor-pointer"
+                className="text-[#6D4C41] hover:text-[#3E2723] p-1.5 rounded-lg hover:bg-[#FAF7F2] transition-colors cursor-pointer"
               >
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -702,13 +1872,59 @@ function App() {
             {/* Modal Form */}
             <form onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto max-h-[80vh]">
               
+              {/* Quick Autofill Helper in Add Modal */}
+              {modalMode === 'create' && selectedDates.length === 1 && (
+                <div className="space-y-2">
+                  <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider">
+                    從今日登記可用人員中快速填入
+                  </label>
+                  {getAvailabilitiesForDate(selectedDates[0]).length === 0 ? (
+                    <div className="text-[10px] text-[#6D4C41] py-2 px-3 bg-[#FAF7F2] rounded-xl border border-[#DAC0A3]/40 text-center">
+                      此日無夥伴登記可用時間
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-2 p-2 bg-[#FAF7F2] rounded-xl border border-[#DAC0A3]/40">
+                      <div className="flex flex-wrap gap-1.5">
+                        {getAvailabilitiesForDate(selectedDates[0]).map(avail => {
+                          const isCurrentlySelected = employeeName === avail.employeeName &&
+                                                      workplace === avail.workplace &&
+                                                      startTime === avail.startTime &&
+                                                      endTime === avail.endTime;
+                          return (
+                            <button
+                              key={avail.id}
+                              type="button"
+                              onClick={() => {
+                                setEmployeeName(avail.employeeName);
+                                setWorkplace(avail.workplace);
+                                setStartTime(avail.startTime);
+                                setEndTime(avail.endTime);
+                                setNotes(avail.notes || '');
+                              }}
+                              className={`text-[10px] px-2.5 py-1.5 rounded-xl border transition-all cursor-pointer font-bold flex items-center gap-1 ${
+                                isCurrentlySelected
+                                  ? 'bg-[#795548] border-[#795548] text-white shadow-sm shadow-[#795548]/15'
+                                  : 'bg-white border border-[#DAC0A3]/55 hover:border-[#8D6E63] text-[#5D4037] hover:text-[#3E2723]'
+                              }`}
+                            >
+                              <span>👤 {avail.employeeName}</span>
+                              <span className="opacity-60 text-[9px] font-mono">({avail.startTime}-{avail.endTime} @ {avail.workplace})</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Employee Name */}
               <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">排班人員姓名</label>
+                <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">排班人員姓名</label>
                 <input 
                   type="text"
                   required
-                  placeholder="填寫排班同仁姓名"
+                  placeholder="填寫排班夥伴姓名"
                   value={employeeName}
                   onChange={(e) => setEmployeeName(e.target.value)}
                   className="w-full glass-input px-4 py-2.5 rounded-xl text-sm"
@@ -717,14 +1933,14 @@ function App() {
 
               {/* Workplace Selection */}
               <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">工作地點</label>
+                <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">工作地點</label>
                 <select
                   value={workplace}
                   onChange={(e) => setWorkplace(e.target.value)}
                   className="w-full glass-input px-4 py-2.5 rounded-xl text-sm cursor-pointer"
                 >
                   {workplaces.map(loc => (
-                    <option key={loc.id} value={loc.name} className="bg-slate-950 text-slate-100">
+                    <option key={loc.id} value={loc.name} className="bg-white text-[#3E2723]">
                       {loc.name}
                     </option>
                   ))}
@@ -735,8 +1951,8 @@ function App() {
               {modalMode === 'create' ? (
                 <div>
                   <div className="flex justify-between items-center mb-2">
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">選擇排班日期 (可選取多天，自動入帳)</label>
-                    <span className="text-[10px] text-indigo-400 font-bold bg-indigo-500/10 px-2 py-0.5 rounded font-mono">
+                    <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider">選擇排班日期 (可複選)</label>
+                    <span className="text-[10px] text-[#8D6E63] font-bold bg-[#8D6E63]/10 px-2 py-0.5 rounded font-mono">
                       已選 {selectedDates.length} 天
                     </span>
                   </div>
@@ -746,37 +1962,37 @@ function App() {
                     <button
                       type="button"
                       onClick={handleSelectMonWedFri}
-                      className="text-[10px] px-2 py-1 rounded bg-slate-900 border border-slate-800 text-slate-300 hover:border-slate-700 hover:text-white cursor-pointer font-bold"
+                      className="text-[10px] px-2 py-1 rounded bg-[#FAF7F2] border border-[#E5DCD5] text-[#5D4037] hover:border-[#8D6E63] hover:text-[#3E2723] cursor-pointer font-bold transition-all"
                     >
                       一/三/五
                     </button>
                     <button
                       type="button"
                       onClick={handleSelectTueThu}
-                      className="text-[10px] px-2 py-1 rounded bg-slate-900 border border-slate-800 text-slate-300 hover:border-slate-700 hover:text-white cursor-pointer font-bold"
+                      className="text-[10px] px-2 py-1 rounded bg-[#FAF7F2] border border-[#E5DCD5] text-[#5D4037] hover:border-[#8D6E63] hover:text-[#3E2723] cursor-pointer font-bold transition-all"
                     >
                       二/四
                     </button>
                     <button
                       type="button"
                       onClick={handleSelectAllDays}
-                      className="text-[10px] px-2 py-1 rounded bg-slate-900 border border-slate-800 text-slate-300 hover:border-slate-700 hover:text-white cursor-pointer font-bold"
+                      className="text-[10px] px-2 py-1 rounded bg-[#FAF7F2] border border-[#E5DCD5] text-[#5D4037] hover:border-[#8D6E63] hover:text-[#3E2723] cursor-pointer font-bold transition-all"
                     >
-                      全選 (雙週)
+                      全選 (四週)
                     </button>
                     <button
                       type="button"
                       onClick={handleClearAllSelected}
-                      className="text-[10px] px-2 py-1 rounded bg-slate-900 border border-slate-800 text-slate-400 hover:border-slate-750 cursor-pointer font-bold"
+                      className="text-[10px] px-2 py-1 rounded bg-[#FAF7F2] border border-[#E5DCD5] text-[#8D6E63] hover:border-[#8D6E63] hover:text-[#3E2723] cursor-pointer font-bold transition-all"
                     >
                       清除
                     </button>
                   </div>
 
-                  {/* 2-Week Grid (2 rows of 7 columns matching Mon-Sun) */}
-                  <div className="p-2 border border-slate-850 rounded-xl bg-slate-950/30">
+                  {/* 4-Week Grid (4 rows of 7 columns matching Mon-Sun) */}
+                  <div className="p-2 border border-[#E5DCD5] rounded-xl bg-[#FAF7F2]/50">
                     {/* Weekday names */}
-                    <div className="grid grid-cols-7 gap-1 text-center text-[10px] text-slate-500 font-bold mb-1">
+                    <div className="grid grid-cols-7 gap-1 text-center text-[10px] text-[#8D6E63] font-bold mb-1">
                       <div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div><div>日</div>
                     </div>
                     {/* Date buttons grid */}
@@ -793,14 +2009,14 @@ function App() {
                             onClick={() => toggleDateSelection(dateStr)}
                             className={`relative py-1.5 px-0.5 rounded-lg border text-center transition-all cursor-pointer text-[10px] font-mono font-bold flex flex-col items-center justify-center ${
                               isSelected
-                                ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300 shadow-sm'
-                                : 'bg-slate-900/40 border-slate-850 text-slate-400 hover:border-slate-750 hover:bg-slate-900/60'
-                            } ${isToday ? 'ring-1 ring-indigo-500/30' : ''}`}
+                                ? 'bg-[#795548]/15 border-[#795548] text-[#3E2723] shadow-xs'
+                                : 'bg-white border-[#E5DCD5] text-[#8D6E63] hover:border-[#8D6E63] hover:bg-[#FAF7F2]'
+                            } ${isToday ? 'ring-1 ring-[#795548]/40' : ''}`}
                             title={formatDateString(dateObj)}
                           >
                             <span>{formatMMDD(dateObj)}</span>
                             {isToday && (
-                              <span className="absolute top-0.5 right-0.5 w-1 h-1 rounded-full bg-indigo-400"></span>
+                              <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-[#795548]"></span>
                             )}
                           </button>
                         );
@@ -809,9 +2025,9 @@ function App() {
                   </div>
                 </div>
               ) : (
-                // Edit mode: single date selection (HTML5 date input for ultimate flexibility)
+                // Edit mode: single date selection (HTML5 date input)
                 <div>
-                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">排班日期</label>
+                  <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">排班日期</label>
                   <input 
                     type="date"
                     required
@@ -825,28 +2041,28 @@ function App() {
               {/* Time inputs */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">開始時間</label>
+                  <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">開始時間</label>
                   <select
                     value={startTime}
                     onChange={(e) => setStartTime(e.target.value)}
                     className="w-full glass-input px-4 py-2.5 rounded-xl text-sm cursor-pointer"
                   >
                     {TIME_SLOTS.map(slot => (
-                      <option key={slot} value={slot} className="bg-slate-950 text-slate-100 font-mono">
+                      <option key={slot} value={slot} className="bg-white text-[#3E2723] font-mono">
                         {slot}
                       </option>
                     ))}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">結束時間</label>
+                  <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">結束時間</label>
                   <select
                     value={endTime}
                     onChange={(e) => setEndTime(e.target.value)}
                     className="w-full glass-input px-4 py-2.5 rounded-xl text-sm cursor-pointer"
                   >
                     {TIME_SLOTS.map(slot => (
-                      <option key={slot} value={slot} className="bg-slate-950 text-slate-100 font-mono">
+                      <option key={slot} value={slot} className="bg-white text-[#3E2723] font-mono">
                         {slot}
                       </option>
                     ))}
@@ -856,38 +2072,38 @@ function App() {
 
               {/* Auto calculated hours warning/info */}
               {startTime && endTime && (
-                <div className="px-4 py-2.5 rounded-xl bg-slate-900/60 border border-slate-850 flex items-center justify-between">
-                  <span className="text-xs text-slate-400">預估單次工時：</span>
-                  <span className="text-sm font-bold text-indigo-400 font-mono">
+                <div className="px-4 py-2.5 rounded-xl bg-[#FAF7F2] border border-[#E5DCD5] flex items-center justify-between">
+                  <span className="text-xs text-[#6D4C41]">預估單次工時：</span>
+                  <span className="text-sm font-bold text-[#795548] font-mono">
                     {calculateDuration(startTime, endTime)} 小時 
-                    {calculateDuration(startTime, endTime) > 12 && <span className="text-[10px] font-normal text-amber-400 ml-1">(長時間班次)</span>}
+                    {calculateDuration(startTime, endTime) > 12 && <span className="text-[10px] font-normal text-[#E65100] ml-1 font-sans">(長時間班次)</span>}
                   </span>
                 </div>
               )}
 
               {/* Notes */}
               <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">備註項目 (選填)</label>
+                <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">備註項目 (選填)</label>
                 <textarea 
                   placeholder="班次注意事項、特別交辦事項..."
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
-                  className="w-full glass-input px-4 py-2.5 rounded-xl text-sm min-h-[70px] resize-none"
+                  className="w-full glass-input px-4 py-2.5 rounded-xl text-sm min-h-[70px] resize-none placeholder-[#8D6E63]/50"
                 />
               </div>
 
               {/* Actions */}
-              <div className="flex gap-3 border-t border-slate-850 pt-4 mt-6">
+              <div className="flex gap-3 border-t border-[#E5DCD5] pt-4 mt-6">
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="flex-1 bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-slate-700 text-slate-300 font-semibold px-4 py-3 rounded-xl transition-all cursor-pointer text-center text-sm"
+                  className="flex-1 bg-white hover:bg-[#FAF7F2] border border-[#E5DCD5] text-[#5D4037] font-semibold px-4 py-3 rounded-xl transition-all cursor-pointer text-center text-sm"
                 >
                   取消
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-4 py-3 rounded-xl transition-all shadow-lg shadow-indigo-500/10 cursor-pointer text-center text-sm"
+                  className="flex-1 bg-[#795548] hover:bg-[#5D4037] text-white font-semibold px-4 py-3 rounded-xl transition-all shadow-lg shadow-[#795548]/10 cursor-pointer text-center text-sm"
                 >
                   儲存
                 </button>

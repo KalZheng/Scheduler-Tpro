@@ -1,0 +1,79 @@
+{
+  "staffingTargets": [
+    {
+      "id": "hour-6",
+      "hour": 6,
+      "targetCount": 2
+    },
+    {
+      "id": "hour-7",
+      "hour": 7,
+      "targetCount": 2
+    },
+    {
+      "id": "hour-8",
+      "hour": 8,
+      "targetCount": 3
+    },
+    {
+      "id": "hour-9",
+      "hour": 9,
+      "targetCount": 3
+    },
+    {
+      "id": "hour-10",
+      "hour": 10,
+      "targetCount": 2
+    },
+    {
+      "id": "hour-11",
+      "hour": 11,
+      "targetCount": 2
+    },
+    {
+      "id": "hour-12",
+      "hour": 12,
+      "targetCount": 3
+    },
+    {
+      "id": "hour-13",
+      "hour": 13,
+      "targetCount": 2
+    },
+    {
+      "id": "hour-14",
+      "hour": 14,
+      "targetCount": 2
+    },
+    {
+      "id": "hour-15",
+      "hour": 15,
+      "targetCount": 2
+    },
+    {
+      "id": "hour-16",
+      "hour": 16,
+      "targetCount": 2
+    },
+    {
+      "id": "hour-17",
+      "hour": 17,
+      "targetCount": 2
+    },
+    {
+      "id": "hour-18",
+      "hour": 18,
+      "targetCount": 2
+    },
+    {
+      "id": "hour-19",
+      "hour": 19,
+      "targetCount": 2
+    },
+    {
+      "id": "hour-20",
+      "hour": 20,
+      "targetCount": 2
+    }
+  ]
+}
