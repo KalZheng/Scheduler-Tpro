@@ -1,6 +1,18 @@
 {
   "schedules": [
     {
+      "id": "brkippa",
+      "title": "Kal",
+      "employeeName": "Kal",
+      "date": "2026-06-05",
+      "workplace": "台北總部",
+      "startTime": "09:00",
+      "endTime": "17:00",
+      "notes": "由登記可用時間自動排入: test",
+      "color": "indigo",
+      "createdAt": 1780626122213
+    },
+    {
       "id": "4pj37jc",
       "title": "test2",
       "employeeName": "test2",
@@ -86,6 +98,16 @@
     }
   ],
   "availabilities": [
+    {
+      "id": "a2vrbjn",
+      "employeeName": "Kal",
+      "date": "2026-06-05",
+      "workplace": "台北總部",
+      "startTime": "09:00",
+      "endTime": "17:00",
+      "notes": "test",
+      "createdAt": 1780626112269
+    },
     {
       "id": "cbx32kf",
       "employeeName": "test2",

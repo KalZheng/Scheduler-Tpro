@@ -23,27 +23,27 @@
     {
       "id": "hour-10",
       "hour": 10,
-      "targetCount": 2
+      "targetCount": 3
     },
     {
       "id": "hour-11",
       "hour": 11,
-      "targetCount": 2
+      "targetCount": 3
     },
     {
       "id": "hour-12",
       "hour": 12,
-      "targetCount": 3
+      "targetCount": 4
     },
     {
       "id": "hour-13",
       "hour": 13,
-      "targetCount": 2
+      "targetCount": 3
     },
     {
       "id": "hour-14",
       "hour": 14,
-      "targetCount": 2
+      "targetCount": 3
     },
     {
       "id": "hour-15",
@@ -69,11 +69,16 @@
       "id": "hour-19",
       "hour": 19,
       "targetCount": 2
-    },
+    }
+  ],
+  "employees": [
     {
-      "id": "hour-20",
-      "hour": 20,
-      "targetCount": 2
+      "id": "5p69idq",
+      "name": "Kal",
+      "status": "訓練",
+      "trainingPosition": "餐吧",
+      "trainedPositions": [],
+      "createdAt": 1780621476923
     }
   ]
 }

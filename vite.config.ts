@@ -112,17 +112,19 @@ function localDbPlugin() {
 
               const globalPath = path.resolve(dataDir, 'db-global.json');
               let globalTargets = [];
+              let globalEmployees = [];
               if (fs.existsSync(globalPath)) {
                 const globalData = JSON.parse(fs.readFileSync(globalPath, 'utf-8'));
                 globalTargets = globalData.staffingTargets || [];
+                globalEmployees = globalData.employees || [];
               } else {
                 // Initialize default staffing targets if global doesn't exist
-                globalTargets = Array.from({ length: 15 }, (_, i) => ({
+                globalTargets = Array.from({ length: 14 }, (_, i) => ({
                   id: `hour-${i + 6}`,
                   hour: i + 6,
                   targetCount: 2
                 }));
-                fs.writeFileSync(globalPath, JSON.stringify({ staffingTargets: globalTargets }, null, 2), 'utf-8');
+                fs.writeFileSync(globalPath, JSON.stringify({ staffingTargets: globalTargets, employees: [] }, null, 2), 'utf-8');
               }
 
               // Merge staffingTargets
@@ -136,7 +138,8 @@ function localDbPlugin() {
               res.end(JSON.stringify({
                 schedules: monthData.schedules || [],
                 availabilities: monthData.availabilities || [],
-                staffingTargets: mergedTargets
+                staffingTargets: mergedTargets,
+                employees: globalEmployees
               }));
             } catch (error) {
               res.statusCode = 500;
@@ -183,7 +186,10 @@ function localDbPlugin() {
 
                 // Write global file
                 const globalPath = path.resolve(dataDir, 'db-global.json');
-                fs.writeFileSync(globalPath, JSON.stringify({ staffingTargets: globalTargets }, null, 2), 'utf-8');
+                fs.writeFileSync(globalPath, JSON.stringify({ 
+                  staffingTargets: globalTargets,
+                  employees: parsed.employees || []
+                }, null, 2), 'utf-8');
 
                 res.setHeader('Content-Type', 'application/json');
                 res.statusCode = 200;

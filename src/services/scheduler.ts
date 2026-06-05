@@ -42,21 +42,33 @@ export interface StaffingTarget {
   date?: string; // Optional specific date
 }
 
+export interface Employee {
+  id: string;
+  name: string;
+  status: '正式' | '訓練';
+  trainingPosition?: '餐吧' | 'POS機' | '後吧' | null; // 訓練中崗位 (最多一個)
+  trainedPositions: ('餐吧' | 'POS機' | '後吧')[]; // 已受訓合格崗位 (可多選)
+  createdAt: number;
+}
+
 // Local Storage & Local File DB fallback mechanism
 let localListeners: ((schedules: WorkSchedule[]) => void)[] = [];
 let localAvailabilityListeners: ((availabilities: WorkerAvailability[]) => void)[] = [];
 let localStaffingTargetListeners: ((targets: StaffingTarget[]) => void)[] = [];
+let localEmployeeListeners: ((employees: Employee[]) => void)[] = [];
 
 interface DbSchema {
   schedules: WorkSchedule[];
   availabilities: WorkerAvailability[];
   staffingTargets: StaffingTarget[];
+  employees: Employee[];
 }
 
-let inMemoryDb: DbSchema = {
+const inMemoryDb: DbSchema = {
   schedules: [],
   availabilities: [],
-  staffingTargets: []
+  staffingTargets: [],
+  employees: []
 };
 
 const loadedMonths = new Set<string>();
@@ -67,7 +79,7 @@ const getLocalSchedules = (): WorkSchedule[] => {
   try {
     const list = JSON.parse(data) as WorkSchedule[];
     return list.sort((a, b) => b.createdAt - a.createdAt);
-  } catch (e) {
+  } catch {
     return [];
   }
 };
@@ -78,7 +90,7 @@ const getLocalAvailabilities = (): WorkerAvailability[] => {
   try {
     const list = JSON.parse(data) as WorkerAvailability[];
     return list.sort((a, b) => b.createdAt - a.createdAt);
-  } catch (e) {
+  } catch {
     return [];
   }
 };
@@ -88,7 +100,18 @@ const getLocalStaffingTargets = (): StaffingTarget[] => {
   if (!data) return [];
   try {
     return JSON.parse(data) as StaffingTarget[];
-  } catch (e) {
+  } catch {
+    return [];
+  }
+};
+
+const getLocalEmployees = (): Employee[] => {
+  const data = localStorage.getItem('employees_list');
+  if (!data) return [];
+  try {
+    const list = JSON.parse(data) as Employee[];
+    return list.sort((a, b) => b.createdAt - a.createdAt);
+  } catch {
     return [];
   }
 };
@@ -122,15 +145,20 @@ export const syncActiveMonth = async (monthStr: string) => {
         ...(data.staffingTargets || [])
       ];
 
+      // Merge employees
+      inMemoryDb.employees = data.employees || [];
+
       // Update LocalStorage backup
       localStorage.setItem('weekly_work_schedules', JSON.stringify(inMemoryDb.schedules));
       localStorage.setItem('weekly_worker_availabilities', JSON.stringify(inMemoryDb.availabilities));
       localStorage.setItem('hourly_staffing_targets', JSON.stringify(inMemoryDb.staffingTargets));
+      localStorage.setItem('employees_list', JSON.stringify(inMemoryDb.employees));
 
       // Trigger all active UI listeners
       localListeners.forEach(listener => listener(inMemoryDb.schedules));
       localAvailabilityListeners.forEach(listener => listener(inMemoryDb.availabilities));
       localStaffingTargetListeners.forEach(listener => listener(inMemoryDb.staffingTargets));
+      localEmployeeListeners.forEach(listener => listener(inMemoryDb.employees));
     }
   } catch (e) {
     console.error(`Failed to sync month data for ${monthStr}:`, e);
@@ -148,11 +176,13 @@ const loadFileDb = async () => {
       inMemoryDb.schedules = data.schedules || [];
       inMemoryDb.availabilities = data.availabilities || [];
       inMemoryDb.staffingTargets = data.staffingTargets || [];
+      inMemoryDb.employees = data.employees || [];
       
       // Update local storage backup
       localStorage.setItem('weekly_work_schedules', JSON.stringify(inMemoryDb.schedules));
       localStorage.setItem('weekly_worker_availabilities', JSON.stringify(inMemoryDb.availabilities));
       localStorage.setItem('hourly_staffing_targets', JSON.stringify(inMemoryDb.staffingTargets));
+      localStorage.setItem('employees_list', JSON.stringify(inMemoryDb.employees));
     } else {
       throw new Error("Local DB API response not OK");
     }
@@ -161,11 +191,13 @@ const loadFileDb = async () => {
     inMemoryDb.schedules = getLocalSchedules();
     inMemoryDb.availabilities = getLocalAvailabilities();
     inMemoryDb.staffingTargets = getLocalStaffingTargets();
+    inMemoryDb.employees = getLocalEmployees();
   } finally {
     // Notify all active listeners of loaded values
     localListeners.forEach(listener => listener(inMemoryDb.schedules));
     localAvailabilityListeners.forEach(listener => listener(inMemoryDb.availabilities));
     localStaffingTargetListeners.forEach(listener => listener(inMemoryDb.staffingTargets));
+    localEmployeeListeners.forEach(listener => listener(inMemoryDb.employees));
   }
 };
 
@@ -181,11 +213,13 @@ const saveDbForDate = async (dateStr?: string) => {
   localStorage.setItem('weekly_work_schedules', JSON.stringify(inMemoryDb.schedules));
   localStorage.setItem('weekly_worker_availabilities', JSON.stringify(inMemoryDb.availabilities));
   localStorage.setItem('hourly_staffing_targets', JSON.stringify(inMemoryDb.staffingTargets));
+  localStorage.setItem('employees_list', JSON.stringify(inMemoryDb.employees));
 
   // Trigger active listeners immediately for immediate UI response
   localListeners.forEach(listener => listener(inMemoryDb.schedules));
   localAvailabilityListeners.forEach(listener => listener(inMemoryDb.availabilities));
   localStaffingTargetListeners.forEach(listener => listener(inMemoryDb.staffingTargets));
+  localEmployeeListeners.forEach(listener => listener(inMemoryDb.employees));
 
   // Sync to local JSON file for that month
   try {
@@ -196,7 +230,8 @@ const saveDbForDate = async (dateStr?: string) => {
     const payload = {
       schedules: monthSchedules,
       availabilities: monthAvailabilities,
-      staffingTargets: monthTargets
+      staffingTargets: monthTargets,
+      employees: inMemoryDb.employees
     };
 
     await fetch(`/api/db?month=${monthStr}`, {
@@ -367,5 +402,71 @@ export const updateStaffingTarget = async (hour: number, targetCount: number, da
       inMemoryDb.staffingTargets.push({ id: targetId, hour, targetCount, date });
     }
     await saveDbForDate(date);
+  }
+};
+
+export const subscribeToEmployees = (callback: (employees: Employee[]) => void) => {
+  if (isValidConfig && db) {
+    const employeesCollection = collection(db, 'employees');
+    const q = query(employeesCollection, orderBy('createdAt', 'desc'));
+    
+    return onSnapshot(q, (snapshot) => {
+      const employees = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Employee[];
+      callback(employees);
+    });
+  } else {
+    localEmployeeListeners.push(callback);
+    callback(inMemoryDb.employees);
+    return () => {
+      localEmployeeListeners = localEmployeeListeners.filter(l => l !== callback);
+    };
+  }
+};
+
+export const addEmployee = async (employee: Omit<Employee, 'id' | 'createdAt'>) => {
+  const newEmp = {
+    ...employee,
+    createdAt: Date.now()
+  };
+
+  if (isValidConfig && db) {
+    const employeesCollection = collection(db, 'employees');
+    return await addDoc(employeesCollection, newEmp);
+  } else {
+    const createdItem: Employee = {
+      id: Math.random().toString(36).substring(2, 9),
+      ...newEmp
+    };
+    inMemoryDb.employees = [createdItem, ...inMemoryDb.employees];
+    await saveDbForDate();
+    return createdItem;
+  }
+};
+
+export const updateEmployee = async (id: string, updates: Partial<Omit<Employee, 'id' | 'createdAt'>>) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'employees', id);
+    return await updateDoc(docRef, updates);
+  } else {
+    inMemoryDb.employees = inMemoryDb.employees.map(item => {
+      if (item.id === id) {
+        return { ...item, ...updates };
+      }
+      return item;
+    });
+    await saveDbForDate();
+  }
+};
+
+export const deleteEmployee = async (id: string) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'employees', id);
+    return await deleteDoc(docRef);
+  } else {
+    inMemoryDb.employees = inMemoryDb.employees.filter(item => item.id !== id);
+    await saveDbForDate();
   }
 };
