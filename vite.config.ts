@@ -90,6 +90,25 @@ function localDbPlugin() {
       // Proactively run migration
       migrateLegacyDb();
 
+      // Proactively migrate employees from db-global.json to db-employees.json
+      const globalPath = path.resolve(dataDir, 'db-global.json');
+      const employeesPath = path.resolve(dataDir, 'db-employees.json');
+      if (fs.existsSync(globalPath) && !fs.existsSync(employeesPath)) {
+        try {
+          console.log("[localDbPlugin] Checking for employees data in db-global.json to migrate...");
+          const globalRaw = fs.readFileSync(globalPath, 'utf-8');
+          const globalData = JSON.parse(globalRaw);
+          if (globalData.employees) {
+            fs.writeFileSync(employeesPath, JSON.stringify({ employees: globalData.employees }, null, 2), 'utf-8');
+            delete globalData.employees;
+            fs.writeFileSync(globalPath, JSON.stringify(globalData, null, 2), 'utf-8');
+            console.log("[localDbPlugin] Successfully migrated employees to db-employees.json");
+          }
+        } catch (e) {
+          console.error("[localDbPlugin] Migration of employees failed:", e);
+        }
+      }
+
       server.middlewares.use((req: any, res: any, next: any) => {
         console.log(`[localDbPlugin] Incoming: ${req.method} ${req.url}`);
         if (req.url && req.url.startsWith('/api/db')) {
@@ -112,11 +131,9 @@ function localDbPlugin() {
 
               const globalPath = path.resolve(dataDir, 'db-global.json');
               let globalTargets = [];
-              let globalEmployees = [];
               if (fs.existsSync(globalPath)) {
                 const globalData = JSON.parse(fs.readFileSync(globalPath, 'utf-8'));
                 globalTargets = globalData.staffingTargets || [];
-                globalEmployees = globalData.employees || [];
               } else {
                 // Initialize default staffing targets if global doesn't exist
                 globalTargets = Array.from({ length: 14 }, (_, i) => ({
@@ -124,7 +141,16 @@ function localDbPlugin() {
                   hour: i + 6,
                   targetCount: 2
                 }));
-                fs.writeFileSync(globalPath, JSON.stringify({ staffingTargets: globalTargets, employees: [] }, null, 2), 'utf-8');
+                fs.writeFileSync(globalPath, JSON.stringify({ staffingTargets: globalTargets }, null, 2), 'utf-8');
+              }
+
+              const employeesPath = path.resolve(dataDir, 'db-employees.json');
+              let globalEmployees = [];
+              if (fs.existsSync(employeesPath)) {
+                const employeesData = JSON.parse(fs.readFileSync(employeesPath, 'utf-8'));
+                globalEmployees = employeesData.employees || [];
+              } else {
+                fs.writeFileSync(employeesPath, JSON.stringify({ employees: [] }, null, 2), 'utf-8');
               }
 
               // Merge staffingTargets
@@ -187,7 +213,12 @@ function localDbPlugin() {
                 // Write global file
                 const globalPath = path.resolve(dataDir, 'db-global.json');
                 fs.writeFileSync(globalPath, JSON.stringify({ 
-                  staffingTargets: globalTargets,
+                  staffingTargets: globalTargets
+                }, null, 2), 'utf-8');
+
+                // Write employees file
+                const employeesPath = path.resolve(dataDir, 'db-employees.json');
+                fs.writeFileSync(employeesPath, JSON.stringify({
                   employees: parsed.employees || []
                 }, null, 2), 'utf-8');
 

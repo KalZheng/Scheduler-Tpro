@@ -70,15 +70,5 @@
       "hour": 19,
       "targetCount": 2
     }
-  ],
-  "employees": [
-    {
-      "id": "5p69idq",
-      "name": "Kal",
-      "status": "訓練",
-      "trainingPosition": "餐吧",
-      "trainedPositions": [],
-      "createdAt": 1780621476923
-    }
   ]
 }

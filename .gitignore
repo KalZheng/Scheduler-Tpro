@@ -25,3 +25,4 @@ dist-ssr
 
 # Database files
 data/db-20*.json
+data/db-employees.json
