@@ -45,11 +45,34 @@ export interface StaffingTarget {
 export interface Employee {
   id: string;
   name: string;
-  status: '正式' | '訓練';
+  phone: string;
+  status: '正式夥伴' | '兼職夥伴';
+  active: boolean;
   trainingPosition?: '餐吧' | 'POS機' | '後吧' | null; // 訓練中崗位 (最多一個)
   trainedPositions: ('餐吧' | 'POS機' | '後吧')[]; // 已受訓合格崗位 (可多選)
+  certificates?: ('FBI' | '黃金吧檯手')[]; // 持有證照 (可多選)
   createdAt: number;
 }
+
+export const migrateEmployee = (emp: any): Employee => {
+  let status = emp.status;
+  if (status === '正式') status = '正式夥伴';
+  if (status === '訓練') status = '兼職夥伴';
+  if (status !== '正式夥伴' && status !== '兼職夥伴') {
+    status = '兼職夥伴';
+  }
+  return {
+    id: emp.id,
+    name: emp.name || '',
+    phone: emp.phone || '',
+    status: status as '正式夥伴' | '兼職夥伴',
+    active: emp.active !== false,
+    trainingPosition: emp.trainingPosition || null,
+    trainedPositions: emp.trainedPositions || [],
+    certificates: emp.certificates || [],
+    createdAt: emp.createdAt || Date.now()
+  };
+};
 
 // Local Storage & Local File DB fallback mechanism
 let localListeners: ((schedules: WorkSchedule[]) => void)[] = [];
@@ -109,8 +132,8 @@ const getLocalEmployees = (): Employee[] => {
   const data = localStorage.getItem('employees_list');
   if (!data) return [];
   try {
-    const list = JSON.parse(data) as Employee[];
-    return list.sort((a, b) => b.createdAt - a.createdAt);
+    const list = JSON.parse(data) as any[];
+    return list.map(migrateEmployee).sort((a, b) => b.createdAt - a.createdAt);
   } catch {
     return [];
   }
@@ -146,7 +169,7 @@ export const syncActiveMonth = async (monthStr: string) => {
       ];
 
       // Merge employees
-      inMemoryDb.employees = data.employees || [];
+      inMemoryDb.employees = (data.employees || []).map(migrateEmployee);
 
       // Update LocalStorage backup
       localStorage.setItem('weekly_work_schedules', JSON.stringify(inMemoryDb.schedules));
@@ -176,7 +199,7 @@ const loadFileDb = async () => {
       inMemoryDb.schedules = data.schedules || [];
       inMemoryDb.availabilities = data.availabilities || [];
       inMemoryDb.staffingTargets = data.staffingTargets || [];
-      inMemoryDb.employees = data.employees || [];
+      inMemoryDb.employees = (data.employees || []).map(migrateEmployee);
       
       // Update local storage backup
       localStorage.setItem('weekly_work_schedules', JSON.stringify(inMemoryDb.schedules));
@@ -411,10 +434,10 @@ export const subscribeToEmployees = (callback: (employees: Employee[]) => void) 
     const q = query(employeesCollection, orderBy('createdAt', 'desc'));
     
     return onSnapshot(q, (snapshot) => {
-      const employees = snapshot.docs.map(doc => ({
+      const employees = snapshot.docs.map(doc => migrateEmployee({
         id: doc.id,
         ...doc.data()
-      })) as Employee[];
+      }));
       callback(employees);
     });
   } else {

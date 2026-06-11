@@ -26,3 +26,7 @@ dist-ssr
 # Database files
 data/db-20*.json
 data/db-employees.json
+
+# Configuration files
+src/config/workplaces.json
+src/config/workplace.json

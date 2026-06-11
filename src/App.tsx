@@ -303,16 +303,24 @@ function App() {
 
   // Employee Form fields
   const [empName, setEmpName] = useState('');
-  const [empStatus, setEmpStatus] = useState<'正式' | '訓練'>('訓練');
+  const [empPhone, setEmpPhone] = useState('');
+  const [empStatus, setEmpStatus] = useState<'正式夥伴' | '兼職夥伴'>('兼職夥伴');
+  const [empActive, setEmpActive] = useState<boolean>(true);
   const [empTrainingPos, setEmpTrainingPos] = useState<'餐吧' | 'POS機' | '後吧' | null>(null);
   const [empTrainedPoss, setEmpTrainedPoss] = useState<('餐吧' | 'POS機' | '後吧')[]>([]);
+  const [empCertificates, setEmpCertificates] = useState<('FBI' | '黃金吧檯手')[]>([]);
 
   // Search/Filter for employee list
   const [empSearch, setEmpSearch] = useState('');
-  const [empStatusFilter, setEmpStatusFilter] = useState<'all' | '正式' | '訓練'>('all');
+  const [empStatusFilter, setEmpStatusFilter] = useState<'all' | '正式夥伴' | '兼職夥伴'>('all');
+  const [empActiveFilter, setEmpActiveFilter] = useState<'all' | 'active' | 'inactive'>('active');
 
   // Worker identity (cached in localStorage)
   const [workerName, setWorkerName] = useState(() => localStorage.getItem('scheduler_worker_name') || '');
+  const [isWorkerVerified, setIsWorkerVerified] = useState(() => localStorage.getItem('scheduler_worker_verified') === 'true' && !!localStorage.getItem('scheduler_worker_name'));
+  const [selectedWorkerName, setSelectedWorkerName] = useState('');
+  const [workerPhoneInput, setWorkerPhoneInput] = useState('');
+  const [workerVerifyError, setWorkerVerifyError] = useState('');
 
   // Worker availability submission form states
   const [availWorkplace, setAvailWorkplace] = useState(workplaces[0]?.name || '');
@@ -351,16 +359,8 @@ function App() {
   const pickerWeekStart = getMondayOfDate(new Date());
   const pickerDates = getAlign28Days(pickerWeekStart);
 
-  const handleStatusChange = (status: '正式' | '訓練') => {
+  const handleStatusChange = (status: '正式夥伴' | '兼職夥伴') => {
     setEmpStatus(status);
-    if (status === '正式') {
-      setEmpTrainedPoss(['餐吧', 'POS機', '後吧']);
-      setEmpTrainingPos(null);
-    } else {
-      if (empTrainedPoss.length === 3) {
-        setEmpTrainedPoss([]);
-      }
-    }
   };
 
   const handleTagClick = (pos: '餐吧' | 'POS機' | '後吧') => {
@@ -369,9 +369,6 @@ function App() {
       setEmpTrainingPos(null);
       setEmpTrainedPoss(prev => {
         const next = prev.includes(pos) ? prev : [...prev, pos];
-        if (next.length === 3) {
-          setEmpStatus('正式');
-        }
         return next;
       });
     } else if (empTrainedPoss.includes(pos)) {
@@ -384,10 +381,7 @@ function App() {
       } else {
         setEmpTrainedPoss(prev => {
           const next = prev.includes(pos) ? prev : [...prev, pos];
-          if (next.length === 3) {
-            setEmpStatus('正式');
-            setEmpTrainingPos(null);
-          }
+          setEmpTrainingPos(null);
           return next;
         });
       }
@@ -421,9 +415,6 @@ function App() {
     if (empTrainingPos === pos) setEmpTrainingPos(null);
     setEmpTrainedPoss(prev => {
       const next = prev.includes(pos) ? prev : [...prev, pos];
-      if (next.length === 3) {
-        setEmpStatus('正式');
-      }
       return next;
     });
   };
@@ -433,16 +424,22 @@ function App() {
       setEmployeeFormMode('edit');
       setEditingEmployeeId(emp.id);
       setEmpName(emp.name);
+      setEmpPhone(emp.phone || '');
       setEmpStatus(emp.status);
+      setEmpActive(emp.active !== false);
       setEmpTrainingPos(emp.trainingPosition || null);
       setEmpTrainedPoss(emp.trainedPositions || []);
+      setEmpCertificates(emp.certificates || []);
     } else {
       setEmployeeFormMode('create');
       setEditingEmployeeId(null);
       setEmpName('');
-      setEmpStatus('訓練');
+      setEmpPhone('');
+      setEmpStatus('兼職夥伴');
+      setEmpActive(true);
       setEmpTrainingPos(null);
       setEmpTrainedPoss([]);
+      setEmpCertificates([]);
     }
     setIsEmployeeModalOpen(true);
   };
@@ -453,11 +450,18 @@ function App() {
       alert('請輸入員工姓名');
       return;
     }
+    if (!empPhone.trim()) {
+      alert('請輸入聯絡電話');
+      return;
+    }
     const payload = {
       name: empName.trim(),
+      phone: empPhone.trim(),
       status: empStatus,
-      trainingPosition: empStatus === '訓練' ? empTrainingPos : null,
-      trainedPositions: empTrainedPoss
+      active: empActive,
+      trainingPosition: empTrainingPos,
+      trainedPositions: empTrainedPoss,
+      certificates: empCertificates
     };
 
     try {
@@ -520,9 +524,42 @@ function App() {
   }, [currentMonthStart]);
 
   // Worker Identity handlers
-  const handleSaveWorkerName = (name: string) => {
-    setWorkerName(name);
-    localStorage.setItem('scheduler_worker_name', name);
+  const handleWorkerVerify = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedWorkerName) {
+      setWorkerVerifyError('請選擇您的姓名');
+      return;
+    }
+    const matchingEmp = employees.find(
+      emp => emp.name === selectedWorkerName && emp.active !== false
+    );
+    if (!matchingEmp) {
+      setWorkerVerifyError('找不到此員工資料，請聯絡主管。');
+      return;
+    }
+    
+    // Normalize phone numbers to do a robust comparison (strip spaces, dashes, etc.)
+    const cleanInput = workerPhoneInput.replace(/[-\s]/g, '');
+    const cleanDb = (matchingEmp.phone || '').replace(/[-\s]/g, '');
+    
+    if (cleanInput && cleanInput === cleanDb) {
+      setWorkerName(selectedWorkerName);
+      setIsWorkerVerified(true);
+      localStorage.setItem('scheduler_worker_name', selectedWorkerName);
+      localStorage.setItem('scheduler_worker_verified', 'true');
+      setWorkerVerifyError('');
+      setWorkerPhoneInput('');
+    } else {
+      setWorkerVerifyError('電話號碼不正確，請重新輸入。');
+    }
+  };
+
+  const handleWorkerLogout = () => {
+    setWorkerName('');
+    setIsWorkerVerified(false);
+    setSelectedWorkerName('');
+    localStorage.removeItem('scheduler_worker_name');
+    localStorage.removeItem('scheduler_worker_verified');
   };
 
   // Submit worker availability
@@ -571,6 +608,34 @@ function App() {
   // Instant Schedule Assign (Zero-Click Modal)
   const handleInstantAssign = async (avail: WorkerAvailability) => {
     try {
+      // Check staffing limit warning
+      const daySchedules = schedules.filter(s => s.date === avail.date);
+      let wouldExceedOrReach = false;
+      let limitHour = -1;
+      let limitCount = 0;
+      let currentCount = 0;
+
+      for (let hour = 0; hour < 24; hour++) {
+        if (isShiftActiveAtHour(avail.startTime, avail.endTime, hour)) {
+          const target = getStaffingTargetForHour(hour, avail.date);
+          const current = daySchedules.filter(s => isShiftActiveAtHour(s.startTime, s.endTime, hour)).length;
+          if (current >= target) {
+            wouldExceedOrReach = true;
+            limitHour = hour;
+            limitCount = target;
+            currentCount = current;
+            break;
+          }
+        }
+      }
+
+      if (wouldExceedOrReach) {
+        const confirmAssign = window.confirm(
+          `警告：該日期 ${avail.date} 在 ${limitHour}:00-${limitHour + 1}:00 的排班人數 (${currentCount}人) 已達到或超過目標上限 (${limitCount}人)。確定仍要指派此班次嗎？`
+        );
+        if (!confirmAssign) return;
+      }
+
       const derivedColor = getColorFromName(avail.employeeName);
       const payload = {
         title: avail.employeeName.trim(),
@@ -1073,31 +1138,87 @@ function App() {
 
         {/* WORKER ROLE VIEW */}
         {activeRole === 'worker' && (
-          <div className="space-y-6">
-            {/* Name Input Banner Card */}
-            <div className="glass-panel p-6 rounded-2xl border border-[#DAC0A3]/50 flex flex-col sm:flex-row items-center gap-4 justify-between shadow-sm">
-              <div className="space-y-1 text-center sm:text-left">
-                <h2 className="text-lg font-bold text-[#3E2723] flex items-center justify-center sm:justify-start gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-[#795548]"></span>
-                  員工身分確認
-                </h2>
-                <p className="text-xs text-[#6D4C41]">
-                  {workerName ? `您目前是以「${workerName}」的身分填寫班表` : '請先設定您的姓名，以便送出您的可用時間。'}
-                </p>
+          !isWorkerVerified ? (
+            /* Worker Verification Screen */
+            <div className="max-w-md mx-auto my-12 animate-scale-in">
+              <div className="glass-panel p-8 rounded-3xl border border-[#DAC0A3]/50 shadow-2xl flex flex-col space-y-6">
+                <div className="text-center space-y-2">
+                  <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-[#FAF7F2] border border-[#DAC0A3]/50 text-3xl shadow-sm">
+                    👤
+                  </div>
+                  <h2 className="text-xl font-black text-[#3E2723] pt-2">
+                    員工可用時間系統 ☕ 驗證身分
+                  </h2>
+                  <p className="text-xs text-[#6D4C41] font-medium">
+                    請選擇您的姓名並輸入聯絡電話以確認身分
+                  </p>
+                </div>
+
+                <form onSubmit={handleWorkerVerify} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-[#6D4C41] uppercase tracking-wider mb-2">員工姓名</label>
+                    <select
+                      required
+                      value={selectedWorkerName}
+                      onChange={(e) => setSelectedWorkerName(e.target.value)}
+                      className="w-full glass-input px-4 py-2.5 rounded-xl text-sm cursor-pointer"
+                    >
+                      <option value="" className="bg-white text-[#3E2723]">請選擇您的姓名...</option>
+                      {employees.filter(emp => emp.active !== false).map(emp => (
+                        <option key={emp.id} value={emp.name} className="bg-white text-[#3E2723]">
+                          {emp.name} ({emp.status})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-[#6D4C41] uppercase tracking-wider mb-2">聯絡電話</label>
+                    <input
+                      type="tel"
+                      required
+                      placeholder="請輸入您的聯絡電話..."
+                      value={workerPhoneInput}
+                      onChange={(e) => setWorkerPhoneInput(e.target.value)}
+                      className="w-full glass-input px-4 py-2.5 rounded-xl text-sm text-center"
+                    />
+                  </div>
+
+                  {workerVerifyError && (
+                    <div className="text-xs text-red-650 font-bold text-center bg-red-50/50 py-2 rounded-lg border border-red-100 animate-pulse">
+                      {workerVerifyError}
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    className="w-full bg-[#795548] hover:bg-[#5D4037] text-white font-semibold px-4 py-3 rounded-xl transition-all shadow-lg shadow-[#795548]/15 cursor-pointer text-center text-sm"
+                  >
+                    驗證並登入
+                  </button>
+                </form>
               </div>
-              <select
-                value={workerName}
-                onChange={(e) => handleSaveWorkerName(e.target.value)}
-                className="w-full sm:w-60 glass-input px-4 py-2 rounded-xl text-sm cursor-pointer"
-              >
-                <option value="" className="bg-white text-[#3E2723]">請選擇您的姓名...</option>
-                {employees.map(emp => (
-                  <option key={emp.id} value={emp.name} className="bg-white text-[#3E2723]">
-                    {emp.name} ({emp.status}{emp.status === '訓練' && emp.trainingPosition ? ` - 訓練中：${emp.trainingPosition}` : ''}{emp.status === '正式' && emp.trainedPositions && emp.trainedPositions.length > 0 ? ` - 已合格：${emp.trainedPositions.join(', ')}` : ''})
-                  </option>
-                ))}
-              </select>
             </div>
+          ) : (
+            <div className="space-y-6">
+              {/* Name Input Banner Card */}
+              <div className="glass-panel p-6 rounded-2xl border border-[#DAC0A3]/50 flex flex-col sm:flex-row items-center gap-4 justify-between shadow-sm">
+                <div className="space-y-1 text-center sm:text-left">
+                  <h2 className="text-lg font-bold text-[#3E2723] flex items-center justify-center sm:justify-start gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#2E7D32]"></span>
+                    員工身分已驗證
+                  </h2>
+                  <p className="text-xs text-[#6D4C41]">
+                    您目前是以「<span className="font-extrabold text-[#3E2723]">{workerName}</span>」的身分填寫可用時間
+                  </p>
+                </div>
+                <button
+                  onClick={handleWorkerLogout}
+                  className="w-full sm:w-auto bg-white hover:bg-red-50 border border-[#E5DCD5] text-[#5D4037] hover:text-red-650 font-semibold px-5 py-2.5 rounded-xl transition-all cursor-pointer text-center text-sm shadow-sm"
+                >
+                  切換/變更身分
+                </button>
+              </div>
 
             {/* Worker Dashboard Split Grid */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
@@ -1342,6 +1463,7 @@ function App() {
               </a>
             </div>
           </div>
+          )
         )}
 
         {/* MANAGER ROLE VIEW */}
@@ -1526,35 +1648,68 @@ function App() {
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                       </svg>
                     </div>
-                    {/* Status filter */}
-                    <div className="flex items-center gap-1 bg-[#FAF7F2] border border-[#DAC0A3]/50 p-1 rounded-xl">
-                      <button
-                        onClick={() => setEmpStatusFilter('all')}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${empStatusFilter === 'all'
-                            ? 'bg-[#795548] text-white shadow-xs'
-                            : 'text-[#8D6E63] hover:text-[#3E2723]'
-                          }`}
-                      >
-                        全部 ({employees.length})
-                      </button>
-                      <button
-                        onClick={() => setEmpStatusFilter('正式')}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${empStatusFilter === '正式'
-                            ? 'bg-[#795548] text-white shadow-xs'
-                            : 'text-[#8D6E63] hover:text-[#3E2723]'
-                          }`}
-                      >
-                        正式 ({employees.filter(e => e.status === '正式').length})
-                      </button>
-                      <button
-                        onClick={() => setEmpStatusFilter('訓練')}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${empStatusFilter === '訓練'
-                            ? 'bg-[#795548] text-white shadow-xs'
-                            : 'text-[#8D6E63] hover:text-[#3E2723]'
-                          }`}
-                      >
-                        訓練 ({employees.filter(e => e.status === '訓練').length})
-                      </button>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {/* Active Status filter */}
+                      <div className="flex items-center gap-1 bg-[#FAF7F2] border border-[#DAC0A3]/50 p-1 rounded-xl">
+                        <button
+                          onClick={() => setEmpActiveFilter('all')}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${empActiveFilter === 'all'
+                              ? 'bg-[#795548] text-white shadow-xs'
+                              : 'text-[#8D6E63] hover:text-[#3E2723]'
+                            }`}
+                        >
+                          全部 ({employees.length})
+                        </button>
+                        <button
+                          onClick={() => setEmpActiveFilter('active')}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${empActiveFilter === 'active'
+                              ? 'bg-[#795548] text-white shadow-xs'
+                              : 'text-[#8D6E63] hover:text-[#3E2723]'
+                            }`}
+                        >
+                          在職 ({employees.filter(e => e.active !== false).length})
+                        </button>
+                        <button
+                          onClick={() => setEmpActiveFilter('inactive')}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${empActiveFilter === 'inactive'
+                              ? 'bg-[#795548] text-white shadow-xs'
+                              : 'text-[#8D6E63] hover:text-[#3E2723]'
+                            }`}
+                        >
+                          離職 ({employees.filter(e => e.active === false).length})
+                        </button>
+                      </div>
+
+                      {/* Employment Status filter */}
+                      <div className="flex items-center gap-1 bg-[#FAF7F2] border border-[#DAC0A3]/50 p-1 rounded-xl">
+                        <button
+                          onClick={() => setEmpStatusFilter('all')}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${empStatusFilter === 'all'
+                              ? 'bg-[#795548] text-white shadow-xs'
+                              : 'text-[#8D6E63] hover:text-[#3E2723]'
+                            }`}
+                        >
+                          身分: 全部
+                        </button>
+                        <button
+                          onClick={() => setEmpStatusFilter('正式夥伴')}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${empStatusFilter === '正式夥伴'
+                              ? 'bg-[#795548] text-white shadow-xs'
+                              : 'text-[#8D6E63] hover:text-[#3E2723]'
+                            }`}
+                        >
+                          正式夥伴
+                        </button>
+                        <button
+                          onClick={() => setEmpStatusFilter('兼職夥伴')}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${empStatusFilter === '兼職夥伴'
+                              ? 'bg-[#795548] text-white shadow-xs'
+                              : 'text-[#8D6E63] hover:text-[#3E2723]'
+                            }`}
+                        >
+                          兼職夥伴
+                        </button>
+                      </div>
                     </div>
                   </div>
 
@@ -1562,7 +1717,10 @@ function App() {
                   {employees.filter(e => {
                     const matchesSearch = e.name.toLowerCase().includes(empSearch.toLowerCase());
                     const matchesStatus = empStatusFilter === 'all' || e.status === empStatusFilter;
-                    return matchesSearch && matchesStatus;
+                    const matchesActive = empActiveFilter === 'all' ||
+                      (empActiveFilter === 'active' && e.active !== false) ||
+                      (empActiveFilter === 'inactive' && e.active === false);
+                    return matchesSearch && matchesStatus && matchesActive;
                   }).length === 0 ? (
                     <div className="py-16 text-center border-2 border-dashed border-[#DAC0A3]/45 rounded-2xl bg-white/40">
                       <p className="text-sm text-[#6D4C41] font-semibold">沒有符合條件的員工紀錄</p>
@@ -1574,17 +1732,20 @@ function App() {
                         .filter(e => {
                           const matchesSearch = e.name.toLowerCase().includes(empSearch.toLowerCase());
                           const matchesStatus = empStatusFilter === 'all' || e.status === empStatusFilter;
-                          return matchesSearch && matchesStatus;
+                          const matchesActive = empActiveFilter === 'all' ||
+                            (empActiveFilter === 'active' && e.active !== false) ||
+                            (empActiveFilter === 'inactive' && e.active === false);
+                          return matchesSearch && matchesStatus && matchesActive;
                         })
                         .map(emp => {
-                          const isTraining = emp.status === '訓練';
+                          const isTraining = emp.trainingPosition || (emp.trainedPositions && emp.trainedPositions.length < 3);
                           const trainedCount = emp.trainedPositions ? emp.trainedPositions.length : 0;
                           const progressPercent = Math.round((trainedCount / 3) * 100);
 
                           return (
                             <div
                               key={emp.id}
-                              className="glass-panel p-5 rounded-2xl border border-[#DAC0A3]/50 hover:border-[#8D6E63]/80 hover:shadow-md transition-all flex flex-col justify-between gap-4 relative overflow-hidden group/card"
+                              className={`glass-panel p-5 rounded-2xl border border-[#DAC0A3]/50 hover:border-[#8D6E63]/80 hover:shadow-md transition-all flex flex-col justify-between gap-4 relative overflow-hidden group/card ${emp.active === false ? 'opacity-65 bg-gray-50/20 grayscale-[20%]' : ''}`}
                             >
                               <div className="space-y-3">
                                 {/* Header */}
@@ -1593,13 +1754,25 @@ function App() {
                                     <h3 className="text-base font-extrabold text-[#3E2723] flex items-center gap-1.5">
                                       👤 {emp.name}
                                     </h3>
-                                    <span className={`inline-flex items-center gap-1 text-[10px] px-2.5 py-0.5 rounded-full font-bold border ${isTraining
-                                        ? 'bg-amber-50 text-amber-700 border-amber-200'
-                                        : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                      }`}>
-                                      <span className={`w-1.5 h-1.5 rounded-full ${isTraining ? 'bg-amber-500' : 'bg-emerald-500'}`}></span>
-                                      {isTraining ? '訓練夥伴' : '正式夥伴'}
-                                    </span>
+                                    <div className="flex flex-wrap gap-1.5 items-center">
+                                      <span className={`inline-flex items-center gap-1 text-[10px] px-2.5 py-0.5 rounded-full font-bold border ${emp.status === '正式夥伴'
+                                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                          : 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                                        }`}>
+                                        <span className={`w-1.5 h-1.5 rounded-full ${emp.status === '正式夥伴' ? 'bg-emerald-500' : 'bg-indigo-500'}`}></span>
+                                        {emp.status}
+                                      </span>
+                                      {emp.active === false && (
+                                        <span className="inline-flex items-center gap-1 text-[10px] px-2.5 py-0.5 rounded-full font-bold border bg-red-50 text-red-700 border-red-200">
+                                          <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+                                          已離職
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="text-[11px] text-[#6D4C41] font-semibold flex items-center gap-1 mt-1.5">
+                                      <span className="opacity-80">📞</span>
+                                      <span className="font-mono">{emp.phone || '無電話資料'}</span>
+                                    </div>
                                   </div>
 
                                   <div className="flex items-center gap-1 opacity-60 group-hover/card:opacity-100 transition-opacity">
@@ -1665,6 +1838,29 @@ function App() {
                                       <span className="text-xs text-[#6D4C41]/60 italic font-medium">尚未受訓合格任何崗位</span>
                                     )}
                                   </div>
+
+                                  {emp.certificates && emp.certificates.length > 0 && (
+                                    <div className="pt-2 border-t border-[#DAC0A3]/25">
+                                      <span className="text-[10px] font-bold text-[#8D6E63] block uppercase tracking-wider mb-1">持有證照</span>
+                                      <div className="flex flex-wrap gap-1">
+                                        {emp.certificates.map(cert => {
+                                          const isFbi = cert === 'FBI';
+                                          return (
+                                            <span 
+                                              key={cert} 
+                                              className={`inline-block text-[11px] font-extrabold px-2.5 py-0.5 rounded-lg border ${
+                                                isFbi
+                                                  ? 'bg-blue-50 text-blue-750 border-blue-200'
+                                                  : 'bg-amber-50 text-amber-850 border-amber-200'
+                                              }`}
+                                            >
+                                              {isFbi ? '🛡️ FBI' : '☕ 黃金吧檯手'}
+                                            </span>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             </div>
@@ -1911,8 +2107,23 @@ function App() {
                               allEmployees.map(empName => (
                                 <tr key={empName} className="border-b border-[#DAC0A3]/40 hover:bg-[#FAF7F2]/30 transition-colors group">
                                   {/* Sticky Left Column Employee Initials */}
-                                  <td className="sticky left-0 z-10 bg-[#FAF7F2]/95 group-hover:bg-[#F5EBE6] backdrop-blur-sm px-4 py-3.5 text-sm font-extrabold text-[#3E2723] border-r border-b border-[#DAC0A3]/40 shadow-[4px_0_8px_-4px_rgba(100,70,50,0.1)] truncate w-[130px] h-[96px]">
-                                    👤 {empName}
+                                  <td className="sticky left-0 z-10 bg-[#FAF7F2]/95 group-hover:bg-[#F5EBE6] backdrop-blur-sm px-4 py-3.5 text-sm font-extrabold text-[#3E2723] border-r border-b border-[#DAC0A3]/40 shadow-[4px_0_8px_-4px_rgba(100,70,50,0.1)] w-[130px] h-[96px] align-middle">
+                                    <div className="flex flex-col gap-1 justify-center h-full">
+                                      <span className="truncate">👤 {empName}</span>
+                                      {(() => {
+                                        const matchingEmp = employees.find(
+                                          e => e.name.trim().toLowerCase() === empName.trim().toLowerCase()
+                                        );
+                                        if (matchingEmp && matchingEmp.trainingPosition) {
+                                          return (
+                                            <span className="text-[10px] text-amber-700 bg-amber-500/10 border border-amber-500/20 rounded px-1.5 py-0.5 w-fit font-bold select-none leading-none">
+                                              📖 {matchingEmp.trainingPosition}
+                                            </span>
+                                          );
+                                        }
+                                        return null;
+                                      })()}
+                                    </div>
                                   </td>
 
                                   {/* Column cell details */}
@@ -2452,9 +2663,9 @@ function App() {
                   className="w-full glass-input px-4 py-2.5 rounded-xl text-sm cursor-pointer"
                 >
                   <option value="" className="bg-white text-[#3E2723]">請選擇排班夥伴...</option>
-                  {employees.map(emp => (
+                  {employees.filter(emp => emp.active !== false).map(emp => (
                     <option key={emp.id} value={emp.name} className="bg-white text-[#3E2723]">
-                      {emp.name} ({emp.status}{emp.status === '訓練' && emp.trainingPosition ? ` - 訓練中：${emp.trainingPosition}` : ''}{emp.status === '正式' && emp.trainedPositions && emp.trainedPositions.length > 0 ? ` - 已合格：${emp.trainedPositions.join(', ')}` : ''})
+                      {emp.name} ({emp.status}{emp.trainingPosition ? ` - 訓練中：${emp.trainingPosition}` : ''}{emp.trainedPositions && emp.trainedPositions.length > 0 ? ` - 已合格：${emp.trainedPositions.join(', ')}` : ''}{emp.certificates && emp.certificates.length > 0 ? ` - 證照：${emp.certificates.join(', ')}` : ''})
                     </option>
                   ))}
                 </select>
@@ -2679,29 +2890,69 @@ function App() {
                 />
               </div>
 
+              {/* Employee Phone */}
+              <div>
+                <label className="block text-xs font-bold text-[#6D4C41] uppercase tracking-wider mb-2">聯絡電話</label>
+                <input
+                  type="tel"
+                  required
+                  placeholder="輸入聯絡電話 (例如：0912345678)"
+                  value={empPhone}
+                  onChange={(e) => setEmpPhone(e.target.value)}
+                  className="w-full glass-input px-4 py-2.5 rounded-xl text-sm"
+                />
+              </div>
+
               {/* Status Selector */}
               <div>
                 <label className="block text-xs font-bold text-[#6D4C41] uppercase tracking-wider mb-2">身分狀態</label>
                 <div className="grid grid-cols-2 gap-2 bg-[#FAF7F2] p-1.5 rounded-2xl border border-[#DAC0A3]/45">
                   <button
                     type="button"
-                    onClick={() => handleStatusChange('訓練')}
-                    className={`py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${empStatus === '訓練'
-                        ? 'bg-white text-amber-700 shadow-sm border border-amber-200'
+                    onClick={() => handleStatusChange('兼職夥伴')}
+                    className={`py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${empStatus === '兼職夥伴'
+                        ? 'bg-white text-indigo-700 shadow-sm border border-indigo-200'
                         : 'text-[#8D6E63] hover:text-[#3E2723]'
                       }`}
                   >
-                    訓練生 (Rotating)
+                    兼職夥伴 (Part-time)
                   </button>
                   <button
                     type="button"
-                    onClick={() => handleStatusChange('正式')}
-                    className={`py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${empStatus === '正式'
+                    onClick={() => handleStatusChange('正式夥伴')}
+                    className={`py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${empStatus === '正式夥伴'
                         ? 'bg-white text-emerald-700 shadow-sm border border-emerald-200'
                         : 'text-[#8D6E63] hover:text-[#3E2723]'
                       }`}
                   >
-                    正式夥伴 (Qualified)
+                    正式夥伴 (Full-time)
+                  </button>
+                </div>
+              </div>
+
+              {/* Active Status Selector */}
+              <div>
+                <label className="block text-xs font-bold text-[#6D4C41] uppercase tracking-wider mb-2">在職狀態</label>
+                <div className="grid grid-cols-2 gap-2 bg-[#FAF7F2] p-1.5 rounded-2xl border border-[#DAC0A3]/45">
+                  <button
+                    type="button"
+                    onClick={() => setEmpActive(true)}
+                    className={`py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${empActive === true
+                        ? 'bg-white text-emerald-700 shadow-sm border border-emerald-200'
+                        : 'text-[#8D6E63] hover:text-[#3E2723]'
+                      }`}
+                  >
+                    在職 (Active)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEmpActive(false)}
+                    className={`py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${empActive === false
+                        ? 'bg-white text-red-700 shadow-sm border border-red-200'
+                        : 'text-[#8D6E63] hover:text-[#3E2723]'
+                      }`}
+                  >
+                    離職 (Resigned)
                   </button>
                 </div>
               </div>
@@ -2805,6 +3056,36 @@ function App() {
                       )}
                     </div>
                   </div>
+                </div>
+              </div>
+
+              {/* Certificates Selector */}
+              <div>
+                <label className="block text-xs font-bold text-[#6D4C41] uppercase tracking-wider mb-2">持有證照</label>
+                <div className="flex flex-wrap gap-2">
+                  {(['FBI', '黃金吧檯手'] as const).map(cert => {
+                    const hasCert = empCertificates.includes(cert);
+                    return (
+                      <button
+                        key={cert}
+                        type="button"
+                        onClick={() => {
+                          setEmpCertificates(prev => 
+                            prev.includes(cert) 
+                              ? prev.filter(c => c !== cert) 
+                              : [...prev, cert]
+                          );
+                        }}
+                        className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer border ${
+                          hasCert
+                            ? 'bg-[#795548] text-white border-[#795548] shadow-xs'
+                            : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:border-[#8D6E63]'
+                        }`}
+                      >
+                        {cert === 'FBI' ? '🛡️ FBI' : '☕ 黃金吧檯手'}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
