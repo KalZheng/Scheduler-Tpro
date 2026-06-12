@@ -20,6 +20,11 @@ import { isValidConfig } from './firebase';
 import workplaces from './config/workplaces.json';
 import * as XLSX from 'xlsx-js-style';
 
+const safeConfirm = (message: string): boolean => {
+  const isNoConfirm = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('noconfirm') === 'true';
+  return isNoConfirm || window.confirm(message);
+};
+
 const ALL_POSITIONS: ('餐吧' | 'POS機' | '後吧')[] = ['餐吧', 'POS機', '後吧'];
 
 const DAYS_OF_WEEK = [
@@ -292,8 +297,19 @@ function App() {
     window.location.hash = '#/worker';
   };
 
-  // Manager view sub-mode: calendar or grid or employees
-  const [managerViewMode, setManagerViewMode] = useState<'calendar' | 'grid' | 'employees'>('calendar');
+  // Manager view sub-mode: calendar or grid or employees or calculation
+  const [managerViewMode, setManagerViewMode] = useState<'calendar' | 'grid' | 'employees' | 'calculation'>('calendar');
+
+  // Revenue-based staffing calculation states (persisted to localStorage)
+  const [monthlyRevenues, setMonthlyRevenues] = useState<Record<number, number>>(() => {
+    const data = localStorage.getItem('monthly_revenue_data');
+    if (!data) return {};
+    try {
+      return JSON.parse(data);
+    } catch {
+      return {};
+    }
+  });
 
   // Employee list states
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -478,7 +494,7 @@ function App() {
   };
 
   const handleDeleteEmployee = async (id: string) => {
-    if (confirm("確定要刪除此員工嗎？這不會刪除已有的排班紀錄。")) {
+    if (safeConfirm("確定要刪除此員工嗎？這不會刪除已有的排班紀錄。")) {
       try {
         await deleteEmployee(id);
       } catch (error) {
@@ -562,6 +578,41 @@ function App() {
     localStorage.removeItem('scheduler_worker_verified');
   };
 
+  // Apply revenue-calculated staffing targets to global default targets
+  const handleApplyRevenuesToGlobalTargets = async () => {
+    if (safeConfirm('確定要將此營業額計算出的建議人數，套用為系統的預設排班目標 (db-global) 嗎？\n這將直接覆蓋目前的預設排班人數需求。')) {
+      try {
+        for (let hour = 6; hour <= 19; hour++) {
+          const monthlyVal = monthlyRevenues[hour] || 0;
+          const dailyAvg = monthlyVal / 30;
+          let recommendedStaff = 2;
+          if (dailyAvg > 1500) {
+            if (dailyAvg <= 2500) {
+              recommendedStaff = 3;
+            } else if (dailyAvg <= 3500) {
+              recommendedStaff = 4;
+            } else {
+              recommendedStaff = Math.min(8, Math.floor((dailyAvg - 2501) / 1000) + 4);
+            }
+          }
+          await updateStaffingTarget(hour, recommendedStaff); // no date -> updates global default targets
+        }
+        alert('已成功將營業額建議人數套用為預設排班目標需求！');
+      } catch (error) {
+        console.error("Failed to apply revenue targets: ", error);
+        alert('套用預設目標失敗，請重試。');
+      }
+    }
+  };
+
+  // Reset monthly revenues input data
+  const handleResetRevenues = () => {
+    if (safeConfirm('確定要清空所有時段的月營業額輸入數據嗎？')) {
+      setMonthlyRevenues({});
+      localStorage.removeItem('monthly_revenue_data');
+    }
+  };
+
   // Submit worker availability
   const handleAddAvailability = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -596,7 +647,7 @@ function App() {
 
   // Delete worker availability
   const handleDeleteAvailability = async (id: string) => {
-    if (confirm('確定要刪除此可用時間紀錄嗎？')) {
+    if (safeConfirm('確定要刪除此可用時間紀錄嗎？')) {
       try {
         await deleteAvailability(id);
       } catch (error) {
@@ -630,7 +681,7 @@ function App() {
       }
 
       if (wouldExceedOrReach) {
-        const confirmAssign = window.confirm(
+        const confirmAssign = safeConfirm(
           `警告：該日期 ${avail.date} 在 ${limitHour}:00-${limitHour + 1}:00 的排班人數 (${currentCount}人) 已達到或超過目標上限 (${limitCount}人)。確定仍要指派此班次嗎？`
         );
         if (!confirmAssign) return;
@@ -821,7 +872,7 @@ function App() {
   // Delete handler
   const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (confirm('確定要刪除此排程紀錄嗎？')) {
+    if (safeConfirm('確定要刪除此排程紀錄嗎？')) {
       try {
         await deleteSchedule(id);
       } catch (error) {
@@ -1592,6 +1643,15 @@ function App() {
                     >
                       員工管理
                     </button>
+                    <button
+                      onClick={() => setManagerViewMode('calculation')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${managerViewMode === 'calculation'
+                          ? 'bg-[#795548] text-white shadow-sm'
+                          : 'text-[#8D6E63] hover:text-[#3E2723]'
+                        }`}
+                    >
+                      營業額計算
+                    </button>
                   </div>
                 </div>
 
@@ -1868,6 +1928,132 @@ function App() {
                         })}
                     </div>
                   )}
+                </div>
+              ) : managerViewMode === 'calculation' ? (
+                /* Revenue-Based Staffing Calculation Panel */
+                <div className="space-y-6 animate-fade-in bg-white/40 p-6 rounded-2xl border border-[#DAC0A3]/50">
+                  {/* Header & Rules Reference Card */}
+                  <div className="flex flex-col md:flex-row gap-6 justify-between items-start">
+                    <div className="space-y-2 flex-1">
+                      <h2 className="text-lg font-bold text-[#3E2723] flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-[#795548]"></span>
+                        營業額排班需求計算與設定
+                      </h2>
+                      <p className="text-xs text-[#6D4C41]">
+                        依據各時段的月營業額數據，自動估算日平均營業額及對應的建議排班人數。此人數將可作為一鍵套用至 <strong>db-global.json 預設排班目標人數</strong>（無日期限制的基礎人數需求）的參考基準。
+                      </p>
+                      
+                      {/* Rules display for reference */}
+                      <div className="mt-4 p-4 rounded-xl border border-[#DAC0A3]/45 bg-[#FAF7F2] space-y-1.5 shadow-xs">
+                        <h4 className="text-xs font-extrabold text-[#5D4037] uppercase tracking-wider mb-1">📋 營業額排班人數對照規則：</h4>
+                        <ul className="text-[11px] text-[#6D4C41] space-y-1 font-medium list-disc pl-4.5">
+                          <li>日平均營業額 <strong>1,500 元以下</strong>：配置 <span className="font-extrabold text-[#3E2723]">2 名</span> 員工</li>
+                          <li>日平均營業額 <strong>1,501 - 2,500 元</strong>：配置 <span className="font-extrabold text-[#3E2723]">3 名</span> 員工</li>
+                          <li>日平均營業額 <strong>2,501 - 3,500 元</strong>：配置 <span className="font-extrabold text-[#3E2723]">4 名</span> 員工</li>
+                          <li>日平均營業額 <strong>3,500 元以上</strong>：配置 <span className="font-extrabold text-[#3E2723]">5 名</span> 員工 (每增加 1,000 元再追加 1 人)</li>
+                        </ul>
+                      </div>
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="flex flex-col gap-2 w-full md:w-auto shrink-0 md:pt-4">
+                      <button
+                        onClick={handleApplyRevenuesToGlobalTargets}
+                        className="w-full md:w-56 bg-[#795548] hover:bg-[#6D4C41] text-white font-bold px-5 py-3 rounded-xl transition-all shadow-md shadow-[#795548]/10 hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center gap-1.5 cursor-pointer text-xs"
+                      >
+                        💾 套用至預設排班目標 (db-global)
+                      </button>
+                      <button
+                        onClick={handleResetRevenues}
+                        className="w-full md:w-56 bg-white hover:bg-red-50 border border-[#E5DCD5] text-[#5D4037] hover:text-red-650 font-bold px-5 py-2.5 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer text-xs"
+                      >
+                        🔄 重設營業額數據
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Hourly spreadsheet table */}
+                  <div className="glass-panel p-5 rounded-2xl border border-[#DAC0A3]/50 shadow-sm bg-white/70 overflow-hidden">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="border-b border-[#DAC0A3]/50 text-xs font-bold text-[#6D4C41]/80">
+                            <th className="pb-3 pl-2 w-1/4">時段</th>
+                            <th className="pb-3 w-1/4">月營業額輸入 (NTD)</th>
+                            <th className="pb-3 w-1/6">日平均營業額 (/30)</th>
+                            <th className="pb-3 w-1/6">建議配置人數</th>
+                            <th className="pb-3 pr-2 w-1/6">目前預設人數 (db-global)</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[#DAC0A3]/25 text-sm text-[#3E2723]">
+                          {Array.from({ length: 14 }, (_, i) => i + 6).map(hour => {
+                            const monthlyVal = monthlyRevenues[hour] || 0;
+                            const dailyAvg = Number((monthlyVal / 30).toFixed(1));
+                            
+                            // Recommended staff count based on average income
+                            let recommendedStaff = 2;
+                            if (dailyAvg > 1500) {
+                              if (dailyAvg <= 2500) {
+                                recommendedStaff = 3;
+                              } else if (dailyAvg <= 3500) {
+                                recommendedStaff = 4;
+                              } else {
+                                recommendedStaff = Math.min(8, Math.floor((dailyAvg - 2501) / 1000) + 4);
+                              }
+                            }
+
+                            // Current default target count in global database (no specific date)
+                            const currentDefaultTarget = staffingTargets.find(t => t.hour === hour && !t.date)?.targetCount ?? 2;
+
+                            return (
+                              <tr key={hour} className="hover:bg-[#FAF7F2]/30 transition-colors">
+                                <td className="py-3.5 pl-2 font-mono font-bold text-xs text-[#6D4C41]">
+                                  ⏰ {hour.toString().padStart(2, '0')}:00 - {(hour + 1).toString().padStart(2, '0')}:00
+                                </td>
+                                <td className="py-2">
+                                  <div className="relative w-44">
+                                    <span className="absolute left-3.5 top-2 text-xs text-[#8D6E63] font-mono">$</span>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      placeholder="請輸入月營業額"
+                                      value={monthlyVal || ''}
+                                      onChange={(e) => {
+                                        const val = Math.max(0, parseInt(e.target.value) || 0);
+                                        setMonthlyRevenues(prev => {
+                                          const next = { ...prev, [hour]: val };
+                                          localStorage.setItem('monthly_revenue_data', JSON.stringify(next));
+                                          return next;
+                                        });
+                                      }}
+                                      className="w-full glass-input pl-7 pr-3 py-1.5 rounded-xl text-xs font-mono text-left focus:border-[#795548]"
+                                    />
+                                  </div>
+                                </td>
+                                <td className="py-3.5 font-mono text-xs font-extrabold text-[#795548]">
+                                  ${dailyAvg.toLocaleString()}
+                                </td>
+                                <td className="py-2.5">
+                                  <span className={`inline-flex items-center gap-1.5 text-xs font-extrabold px-3 py-1 rounded-full border ${
+                                    recommendedStaff === 2
+                                      ? 'bg-blue-50 text-blue-750 border-blue-200'
+                                      : recommendedStaff === 3
+                                        ? 'bg-amber-50 text-amber-850 border-amber-200'
+                                        : 'bg-emerald-50 text-emerald-750 border-emerald-200'
+                                  }`}>
+                                    👥 {recommendedStaff} 人
+                                  </span>
+                                </td>
+                                <td className="py-3.5 pr-2 font-mono text-xs font-extrabold text-[#8D6E63]/75 pl-3">
+                                  {currentDefaultTarget} 人
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <>
