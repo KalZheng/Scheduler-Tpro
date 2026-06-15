@@ -201,6 +201,36 @@ const calculateDuration = (start: string, end: string): number => {
   return (endMinutes - startMinutes) / 60;
 };
 
+// Check 1: Effective work hours check (1 hour break deducted)
+// Returns true if effective work hours (raw - 1h break) exceed 8 hours
+const isOverEightHours = (start: string, end: string): boolean => {
+  const raw = calculateDuration(start, end);
+  const effective = raw - 1; // deduct mandatory 1-hour break
+  return effective > 8;
+};
+
+// Check 2: Consecutive days check
+// Given a set of date strings (YYYY-MM-DD), returns true if any run of consecutive days >= 7
+const hasSevenConsecutiveDays = (dateStrings: string[]): boolean => {
+  if (dateStrings.length < 7) return false;
+  const sorted = [...dateStrings]
+    .map(s => new Date(s).getTime())
+    .filter(t => !isNaN(t))
+    .sort((a, b) => a - b);
+  const unique = Array.from(new Set(sorted));
+  let streak = 1;
+  for (let i = 1; i < unique.length; i++) {
+    const diffDays = (unique[i] - unique[i - 1]) / (1000 * 60 * 60 * 24);
+    if (diffDays === 1) {
+      streak++;
+      if (streak >= 7) return true;
+    } else {
+      streak = 1;
+    }
+  }
+  return false;
+};
+
 // Automate color mapping based on Employee Name
 const getColorFromName = (name: string): string => {
   if (!name || !name.trim()) return 'indigo';
@@ -624,6 +654,25 @@ function App() {
       alert('請至少選擇一個可用日期。');
       return;
     }
+
+    // Check 2: Consecutive 7 days (combine existing + newly selected dates)
+    const existingDates = availabilities
+      .filter(a => a.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase())
+      .map(a => a.date);
+    const allDates = Array.from(new Set([...existingDates, ...availSelectedDates]));
+    if (hasSevenConsecutiveDays(allDates)) {
+      alert('⚠️ 無法送出：登記後將出現連續 7 天或以上的工作天。\n\n根據勞工法規，員工每 7 天中至少需有 1 天例假日，不可連續工作超過 6 天。\n\n請重新調整您的可用日期。');
+      return;
+    }
+
+    // Check 1: Over 8 effective hours (warn, but still allow)
+    if (isOverEightHours(availStartTime, availEndTime)) {
+      const proceed = window.confirm(
+        `⚠️ 注意：您登記的時段（${availStartTime} - ${availEndTime}）扣除 1 小時休息後，有效工時超過 8 小時。\n\n建議每次排班不超過 8 小時（加上休息共 9 小時）。\n\n確定仍要以此時段送出嗎？`
+      );
+      if (!proceed) return;
+    }
+
     try {
       const promises = availSelectedDates.map(dateStr => {
         return addAvailability({
@@ -829,6 +878,37 @@ function App() {
     if (modalMode === 'create' && selectedDates.length === 0) {
       alert('請至少選擇一個排班日期。');
       return;
+    }
+
+    const targetName = employeeName.trim();
+
+    // Check 2: Consecutive 7 days for schedules
+    if (modalMode === 'create') {
+      const existingScheduleDates = schedules
+        .filter(s => s.employeeName.trim().toLowerCase() === targetName.toLowerCase())
+        .map(s => s.date);
+      const allScheduleDates = Array.from(new Set([...existingScheduleDates, ...selectedDates]));
+      if (hasSevenConsecutiveDays(allScheduleDates)) {
+        alert(`⚠️ 無法排班：為「${targetName}」排班後將出現連續 7 天或以上的班次。\n\n根據勞工法規，員工每 7 天中至少需有 1 天例假日，不可連續排班超過 6 天。\n\n請重新調整排班日期。`);
+        return;
+      }
+    } else if (modalMode === 'edit' && editingId && singleDate) {
+      const existingScheduleDates = schedules
+        .filter(s => s.employeeName.trim().toLowerCase() === targetName.toLowerCase() && s.id !== editingId)
+        .map(s => s.date);
+      const allScheduleDates = Array.from(new Set([...existingScheduleDates, singleDate]));
+      if (hasSevenConsecutiveDays(allScheduleDates)) {
+        alert(`⚠️ 無法排班：為「${targetName}」修改後將出現連續 7 天或以上的班次。\n\n根據勞工法規，員工每 7 天中至少需有 1 天例假日，不可連續排班超過 6 天。\n\n請重新調整排班日期。`);
+        return;
+      }
+    }
+
+    // Check 1: Over 8 effective hours warning for schedules
+    if (isOverEightHours(startTime, endTime)) {
+      const proceed = window.confirm(
+        `⚠️ 注意：此班次（${startTime} - ${endTime}）扣除 1 小時休息後，有效工時超過 8 小時。\n\n建議單次排班不超過 8 小時（含休息共 9 小時）。\n\n確定仍要儲存此排班嗎？`
+      );
+      if (!proceed) return;
     }
 
     try {
@@ -1418,6 +1498,39 @@ function App() {
                       className="w-full glass-input px-4 py-2.5 rounded-xl text-sm min-h-[70px] resize-none"
                     />
                   </div>
+
+                  {/* Inline warning banners */}
+                  {availStartTime && availEndTime && isOverEightHours(availStartTime, availEndTime) && (
+                    <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-amber-50 border border-amber-200">
+                      <span className="text-lg leading-none mt-0.5">⚠️</span>
+                      <div className="space-y-0.5">
+                        <p className="text-xs font-bold text-amber-800">工時超過 8 小時警告</p>
+                        <p className="text-[11px] text-amber-700 leading-snug">
+                          此時段扣除 1 小時休息後，有效工時超過 8 小時（實際工作：{Math.round((calculateDuration(availStartTime, availEndTime) - 1) * 10) / 10} 小時）。送出時將需要確認。
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {(() => {
+                    if (availSelectedDates.length === 0) return null;
+                    const existingDates = availabilities
+                      .filter(a => a.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase())
+                      .map(a => a.date);
+                    const allDates = Array.from(new Set([...existingDates, ...availSelectedDates]));
+                    if (!hasSevenConsecutiveDays(allDates)) return null;
+                    return (
+                      <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-red-50 border border-red-200">
+                        <span className="text-lg leading-none mt-0.5">🚫</span>
+                        <div className="space-y-0.5">
+                          <p className="text-xs font-bold text-red-700">不可連續工作 7 天</p>
+                          <p className="text-[11px] text-red-600 leading-snug">
+                            目前選擇的日期加上已登記的可用日期，將造成連續工作 7 天或以上。依勞工法規，每 7 天至少需有 1 天例假日。請重新選擇日期。
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   <button
                     type="submit"
@@ -2997,14 +3110,54 @@ function App() {
 
               {/* Auto calculated hours warning/info */}
               {startTime && endTime && (
-                <div className="px-4 py-2.5 rounded-xl bg-[#FAF7F2] border border-[#E5DCD5] flex items-center justify-between">
+                <div className={`px-4 py-2.5 rounded-xl border flex items-center justify-between ${
+                  isOverEightHours(startTime, endTime)
+                    ? 'bg-amber-50 border-amber-200'
+                    : 'bg-[#FAF7F2] border-[#E5DCD5]'
+                }`}>
                   <span className="text-xs text-[#6D4C41]">預估單次工時：</span>
-                  <span className="text-sm font-bold text-[#795548] font-mono">
-                    {calculateDuration(startTime, endTime)} 小時
-                    {calculateDuration(startTime, endTime) > 12 && <span className="text-[10px] font-normal text-[#E65100] ml-1 font-sans">(長時間班次)</span>}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-sm font-bold font-mono ${
+                      isOverEightHours(startTime, endTime) ? 'text-amber-700' : 'text-[#795548]'
+                    }`}>
+                      {calculateDuration(startTime, endTime)} 小時（含休息）
+                    </span>
+                    {isOverEightHours(startTime, endTime) && (
+                      <span className="text-[10px] font-bold text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded">⚠️ 超過 8 小時</span>
+                    )}
+                  </div>
                 </div>
               )}
+
+              {/* Consecutive 7 days warning in manager modal */}
+              {(() => {
+                if (!employeeName.trim()) return null;
+                const targetName = employeeName.trim();
+                let datesToCheck: string[] = [];
+                if (modalMode === 'create' && selectedDates.length > 0) {
+                  const existingDates = schedules
+                    .filter(s => s.employeeName.trim().toLowerCase() === targetName.toLowerCase())
+                    .map(s => s.date);
+                  datesToCheck = Array.from(new Set([...existingDates, ...selectedDates]));
+                } else if (modalMode === 'edit' && singleDate) {
+                  const existingDates = schedules
+                    .filter(s => s.employeeName.trim().toLowerCase() === targetName.toLowerCase() && s.id !== editingId)
+                    .map(s => s.date);
+                  datesToCheck = Array.from(new Set([...existingDates, singleDate]));
+                }
+                if (!hasSevenConsecutiveDays(datesToCheck)) return null;
+                return (
+                  <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-red-50 border border-red-200">
+                    <span className="text-base leading-none mt-0.5">🚫</span>
+                    <div className="space-y-0.5">
+                      <p className="text-xs font-bold text-red-700">不可連續排班 7 天</p>
+                      <p className="text-[11px] text-red-600 leading-snug">
+                        此排班將使「{targetName}」出現連續 7 天或以上的班次，違反勞工法規。請調整日期。
+                      </p>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Notes */}
               <div>
