@@ -748,6 +748,8 @@ function App() {
         color: derivedColor
       };
       await addSchedule(payload);
+      // Remove the confirmed availability so it no longer shows as unconfirmed in the grid
+      await deleteAvailability(avail.id);
     } catch (error) {
       console.error("Error doing instant assign: ", error);
       alert('自動排程失敗，請重試。');
