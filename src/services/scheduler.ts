@@ -96,10 +96,6 @@ const inMemoryDb: DbSchema = {
 
 const loadedMonths = new Set<string>();
 
-// Track IDs explicitly deleted by THIS tab so saveDbForDate doesn't restore them from server
-const deletedScheduleIds = new Set<string>();
-const deletedAvailabilityIds = new Set<string>();
-
 const getLocalSchedules = (): WorkSchedule[] => {
   const data = localStorage.getItem('weekly_work_schedules');
   if (!data) return [];
@@ -231,46 +227,9 @@ const loadFileDb = async () => {
 const saveDbForDate = async (dateStr?: string) => {
   const monthStr = dateStr ? dateStr.substring(0, 7) : new Date().toISOString().substring(0, 7);
 
-  // Always GET fresh server state before writing.
-  // This prevents stale in-memory data in one tab from overwriting writes made by another tab.
-  try {
-    const res = await fetch(`/api/db?month=${monthStr}`);
-    if (res.ok) {
-      loadedMonths.add(monthStr);
-      const serverData = await res.json();
-
-      const serverSchedules: WorkSchedule[] = serverData.schedules || [];
-      const serverAvails: WorkerAvailability[] = serverData.availabilities || [];
-
-      // Current in-memory items for this month (already include the latest add/edit from this tab)
-      const memSchedules = inMemoryDb.schedules.filter(s => s.date.substring(0, 7) === monthStr);
-      const memAvails    = inMemoryDb.availabilities.filter(a => a.date.substring(0, 7) === monthStr);
-      const memScheduleIds = new Set(memSchedules.map(s => s.id));
-      const memAvailIds    = new Set(memAvails.map(a => a.id));
-
-      // Merge: keep in-memory items (this tab's latest) PLUS any server-only items added by
-      // other tabs, but exclude IDs that this tab explicitly deleted.
-      const mergedSchedules = [
-        ...memSchedules,
-        ...serverSchedules.filter(s => !memScheduleIds.has(s.id) && !deletedScheduleIds.has(s.id))
-      ];
-      const mergedAvails = [
-        ...memAvails,
-        ...serverAvails.filter(a => !memAvailIds.has(a.id) && !deletedAvailabilityIds.has(a.id))
-      ];
-
-      // Write merged state back into inMemoryDb so listeners and localStorage are consistent
-      inMemoryDb.schedules = [
-        ...inMemoryDb.schedules.filter(s => s.date.substring(0, 7) !== monthStr),
-        ...mergedSchedules
-      ].sort((a, b) => b.createdAt - a.createdAt);
-      inMemoryDb.availabilities = [
-        ...inMemoryDb.availabilities.filter(a => a.date.substring(0, 7) !== monthStr),
-        ...mergedAvails
-      ].sort((a, b) => b.createdAt - a.createdAt);
-    }
-  } catch (e) {
-    console.warn(`[saveDbForDate] Could not fetch fresh state for ${monthStr}, writing in-memory only:`, e);
+  // Ensure target month's data is loaded (first time only — callers sync before mutating for multi-tab safety)
+  if (!loadedMonths.has(monthStr)) {
+    await syncActiveMonth(monthStr);
   }
 
   // Sync to localStorage backup
@@ -285,11 +244,11 @@ const saveDbForDate = async (dateStr?: string) => {
   localStaffingTargetListeners.forEach(listener => listener(inMemoryDb.staffingTargets));
   localEmployeeListeners.forEach(listener => listener(inMemoryDb.employees));
 
-  // POST merged state to local JSON file
+  // POST current in-memory state to local JSON file
   try {
-    const monthSchedules      = inMemoryDb.schedules.filter(s => s.date.substring(0, 7) === monthStr);
+    const monthSchedules = inMemoryDb.schedules.filter(s => s.date.substring(0, 7) === monthStr);
     const monthAvailabilities = inMemoryDb.availabilities.filter(a => a.date.substring(0, 7) === monthStr);
-    const monthTargets        = inMemoryDb.staffingTargets.filter(t => !t.date || t.date.substring(0, 7) === monthStr);
+    const monthTargets = inMemoryDb.staffingTargets.filter(t => !t.date || t.date.substring(0, 7) === monthStr);
 
     const payload = {
       schedules: monthSchedules,
@@ -375,7 +334,8 @@ export const deleteSchedule = async (id: string) => {
     return await deleteDoc(docRef);
   } else {
     const itemToDelete = inMemoryDb.schedules.find(item => item.id === id);
-    deletedScheduleIds.add(id); // Track so saveDbForDate won't restore it from server
+    // Sync before deleting so we don't lose other tabs' recent writes
+    if (itemToDelete) await syncActiveMonth(itemToDelete.date.substring(0, 7));
     inMemoryDb.schedules = inMemoryDb.schedules.filter(item => item.id !== id);
     await saveDbForDate(itemToDelete?.date);
   }
@@ -412,6 +372,11 @@ export const addAvailability = async (availability: Omit<WorkerAvailability, 'id
     const availabilitiesCollection = collection(db, 'availabilities');
     return await addDoc(availabilitiesCollection, newAvail);
   } else {
+    // Sync fresh server state BEFORE adding to prevent stale in-memory from overwriting
+    // changes made by another tab (e.g. manager confirming a schedule while worker adds more).
+    const monthStr = availability.date.substring(0, 7);
+    await syncActiveMonth(monthStr);
+
     const createdItem: WorkerAvailability = {
       id: Math.random().toString(36).substring(2, 9),
       ...newAvail
@@ -428,7 +393,8 @@ export const deleteAvailability = async (id: string) => {
     return await deleteDoc(docRef);
   } else {
     const itemToDelete = inMemoryDb.availabilities.find(item => item.id === id);
-    deletedAvailabilityIds.add(id); // Track so saveDbForDate won't restore it from server
+    // Sync before deleting so we don't lose other tabs' recent writes
+    if (itemToDelete) await syncActiveMonth(itemToDelete.date.substring(0, 7));
     inMemoryDb.availabilities = inMemoryDb.availabilities.filter(item => item.id !== id);
     await saveDbForDate(itemToDelete?.date);
   }
