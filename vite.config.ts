@@ -242,6 +242,8 @@ function localDbPlugin() {
 
 // https://vite.dev/config/
 export default defineConfig({
+  // Base path for GitHub Pages: https://kalzheng.github.io/Scheduler-Tpro/
+  base: '/Scheduler-Tpro/',
   plugins: [react(), tailwindcss(), localDbPlugin()],
   server: {
     watch: {
