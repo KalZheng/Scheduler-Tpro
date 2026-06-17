@@ -2447,9 +2447,10 @@ function App() {
                                         className={`p-1.5 border-r border-[#DAC0A3]/40 text-center w-[100px] h-[96px] relative align-middle transition-colors ${isSelected ? 'bg-[#8D6E63]/5' : ''
                                           }`}
                                       >
-                                        {empSchedules.length > 0 ? (
-                                          // 1. Scheduled shift (solid color pill)
+                                        {empSchedules.length > 0 || empAvails.length > 0 ? (
+                                          // Scheduled shifts + remaining availabilities (both shown together)
                                           <div className="space-y-0.5">
+                                            {/* 1. Scheduled shifts */}
                                             {empSchedules.map(sched => {
                                               const theme = COLOR_THEMES[sched.color] || COLOR_THEMES.indigo;
                                               const cleanNote = getCleanNote(sched.notes);
@@ -2470,10 +2471,7 @@ function App() {
                                                 </div>
                                               );
                                             })}
-                                          </div>
-                                        ) : empAvails.length > 0 ? (
-                                          // 2. Unscheduled Availability (dashed green border pill)
-                                          <div className="space-y-0.5">
+                                            {/* 2. Remaining unconfirmed availabilities (always shown, even when schedules exist) */}
                                             {empAvails.map(avail => {
                                               const cleanNote = getCleanNote(avail.notes);
                                               return (
@@ -2489,7 +2487,6 @@ function App() {
                                                       ({cleanNote})
                                                     </div>
                                                   )}
-
                                                   {/* Hover Instant Schedule Button */}
                                                   <button
                                                     onClick={(e) => {

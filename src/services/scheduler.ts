@@ -385,7 +385,7 @@ export const deleteAvailability = async (id: string) => {
     const docRef = doc(db, 'availabilities', id);
     return await deleteDoc(docRef);
   } else {
-    const itemToDelete = inMemoryDb.availabilities.find(item => item.id !== id);
+    const itemToDelete = inMemoryDb.availabilities.find(item => item.id === id);
     inMemoryDb.availabilities = inMemoryDb.availabilities.filter(item => item.id !== id);
     await saveDbForDate(itemToDelete?.date);
   }
