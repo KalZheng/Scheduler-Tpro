@@ -1178,14 +1178,24 @@ function App() {
     
     const headers = ['人員姓名', ...dateHeaders];
     const rows: string[][] = [];
+    const changedCells = new Set<string>();
 
     // Add employee rows
-    allEmployees.forEach(empName => {
-      const dateCells = exportDates.map(dateObj => {
+    allEmployees.forEach((empName, empIdx) => {
+      const dateCells = exportDates.map((dateObj, dateIdx) => {
         const dateStr = formatDateString(dateObj);
         const empSchedules = schedules.filter(
           s => s.employeeName.trim().toLowerCase() === empName.trim().toLowerCase() && s.date === dateStr
         ).sort((a, b) => compareTimeStrings(a.startTime, b.startTime));
+
+        const hasChangedShift = empSchedules.some(
+          s => s.originalStartTime && s.originalEndTime && (s.startTime !== s.originalStartTime || s.endTime !== s.originalEndTime)
+        );
+
+        if (hasChangedShift) {
+          const cellRef = XLSX.utils.encode_cell({ r: empIdx + 1, c: dateIdx + 1 });
+          changedCells.add(cellRef);
+        }
 
         if (empSchedules.length === 0) return '';
 
@@ -1214,8 +1224,14 @@ function App() {
     for (const cellRef in ws) {
       if (cellRef[0] === '!') continue;
       if (ws[cellRef]) {
+        const isChanged = changedCells.has(cellRef);
         ws[cellRef].s = {
-          alignment: { wrapText: true, vertical: 'center', horizontal: 'center' }
+          alignment: { wrapText: true, vertical: 'center', horizontal: 'center' },
+          ...(isChanged ? {
+            fill: {
+              fgColor: { rgb: "93C5FD" }
+            }
+          } : {})
         };
       }
     }
