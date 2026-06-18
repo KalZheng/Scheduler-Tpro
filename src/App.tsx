@@ -266,6 +266,27 @@ const getCleanNote = (notes?: string): string => {
   return notes.trim();
 };
 
+const getManagerNote = (sched: WorkSchedule): string => {
+  if (sched.managerNotes !== undefined) return sched.managerNotes;
+  const n = sched.notes || '';
+  if (n.startsWith('由登記可用時間自動排入')) {
+    return '';
+  }
+  return n;
+};
+
+const getWorkerNote = (sched: WorkSchedule): string => {
+  if (sched.workerNotes !== undefined) return sched.workerNotes;
+  const n = sched.notes || '';
+  if (n.startsWith('由登記可用時間自動排入: ')) {
+    return n.substring('由登記可用時間自動排入: '.length);
+  }
+  if (n === '由登記可用時間自動排入') {
+    return '';
+  }
+  return '';
+};
+
 function App() {
   const [schedules, setSchedules] = useState<WorkSchedule[]>([]);
   const [availabilities, setAvailabilities] = useState<WorkerAvailability[]>([]);
@@ -405,6 +426,7 @@ function App() {
   const [startTime, setStartTime] = useState('09:00');
   const [endTime, setEndTime] = useState('17:00');
   const [notes, setNotes] = useState('');
+  const [workerNotes, setWorkerNotes] = useState('');
   const [formOriginalStartTime, setFormOriginalStartTime] = useState<string | null>(null);
   const [formOriginalEndTime, setFormOriginalEndTime] = useState<string | null>(null);
 
@@ -737,17 +759,6 @@ function App() {
     }
 
     try {
-      const nextMonthStr = formatDateString(workerNextMonthStart).substring(0, 7);
-      const existingRecords = availabilities.filter(
-        a => a.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase() &&
-             a.date.startsWith(nextMonthStr)
-      );
-
-      // Delete existing records sequentially
-      for (const record of existingRecords) {
-        await deleteAvailability(record.id);
-      }
-
       // Add new records sequentially
       for (const dateStr of availSelectedDates) {
         await addAvailability({
@@ -829,6 +840,8 @@ function App() {
         startTime: avail.startTime,
         endTime: avail.endTime,
         notes: avail.notes ? `由登記可用時間自動排入: ${avail.notes.trim()}` : '由登記可用時間自動排入',
+        workerNotes: avail.notes ? avail.notes.trim() : '',
+        managerNotes: '',
         color: derivedColor,
         originalStartTime: avail.startTime,
         originalEndTime: avail.endTime
@@ -887,6 +900,8 @@ function App() {
         startTime: sTime,
         endTime: eTime,
         notes: avail.notes ? `由登記可用時間自動排入: ${avail.notes.trim()}` : '由登記可用時間自動排入',
+        workerNotes: avail.notes ? avail.notes.trim() : '',
+        managerNotes: '',
         color: derivedColor,
         originalStartTime: sTime,
         originalEndTime: eTime
@@ -988,6 +1003,7 @@ function App() {
     setStartTime('09:00');
     setEndTime('17:00');
     setNotes('');
+    setWorkerNotes('');
     setFormOriginalStartTime(null);
     setFormOriginalEndTime(null);
 
@@ -1008,7 +1024,8 @@ function App() {
     setWorkplace(schedule.workplace || workplaces[0]?.name || '');
     setStartTime(schedule.startTime);
     setEndTime(schedule.endTime);
-    setNotes(schedule.notes || '');
+    setNotes(schedule.managerNotes !== undefined ? schedule.managerNotes : getManagerNote(schedule));
+    setWorkerNotes(schedule.workerNotes !== undefined ? schedule.workerNotes : getWorkerNote(schedule));
     setSingleDate(schedule.date);
     setFormOriginalStartTime(schedule.originalStartTime || schedule.startTime);
     setFormOriginalEndTime(schedule.originalEndTime || schedule.endTime);
@@ -1073,6 +1090,8 @@ function App() {
             startTime,
             endTime,
             notes: notes.trim(),
+            managerNotes: notes.trim(),
+            workerNotes: '',
             color: derivedColor,
             originalStartTime: formOriginalStartTime || undefined,
             originalEndTime: formOriginalEndTime || undefined
@@ -1088,6 +1107,8 @@ function App() {
           startTime,
           endTime,
           notes: notes.trim(),
+          managerNotes: notes.trim(),
+          workerNotes: workerNotes,
           color: derivedColor,
           originalStartTime: formOriginalStartTime || undefined,
           originalEndTime: formOriginalEndTime || undefined
@@ -2128,16 +2149,27 @@ function App() {
                           <div className="flex-1 space-y-1 overflow-y-auto">
                             {daySchedules.map(schedule => {
                               const theme = getScheduleTheme(schedule);
-                              const cleanNote = getCleanNote(schedule.notes);
+                              const mNote = schedule.managerNotes !== undefined ? schedule.managerNotes : getManagerNote(schedule);
+                              const wNote = schedule.workerNotes !== undefined ? schedule.workerNotes : getWorkerNote(schedule);
+                              
+                              let displayNote = '';
+                              if (wNote && mNote) {
+                                displayNote = `同仁: ${wNote} | 主管: ${mNote}`;
+                              } else if (wNote) {
+                                displayNote = `同仁: ${wNote}`;
+                              } else if (mNote) {
+                                displayNote = `主管: ${mNote}`;
+                              }
+                              
                               return (
                                 <div
                                   key={schedule.id}
                                   className={`text-[9px] py-1 px-1.5 rounded border font-semibold flex flex-col gap-0.5 ${theme.bg} ${theme.border} ${theme.text}`}
-                                  title={cleanNote ? `📝 ${cleanNote}` : undefined}
+                                  title={displayNote ? `📝 ${displayNote}` : undefined}
                                 >
                                   <div className="font-mono font-bold leading-tight">{schedule.startTime} - {schedule.endTime}</div>
-                                  {cleanNote && (
-                                    <div className="opacity-95 italic truncate">({cleanNote})</div>
+                                  {displayNote && (
+                                    <div className="opacity-95 italic truncate" title={displayNote}>({displayNote})</div>
                                   )}
                                 </div>
                               );
@@ -3079,19 +3111,19 @@ function App() {
                                             {/* 1. Scheduled shifts */}
                                             {empSchedules.map(sched => {
                                               const theme = getScheduleTheme(sched);
-                                              const cleanNote = getCleanNote(sched.notes);
+                                              const managerNote = sched.managerNotes !== undefined ? sched.managerNotes : getManagerNote(sched);
                                               return (
                                                 <div
                                                   key={sched.id}
                                                   onClick={(e) => handleOpenEditModal(sched, e)}
                                                   className={`text-xs py-1.5 px-2 rounded-md border font-semibold truncate cursor-pointer transition-all hover:scale-[1.02] ${theme.bg} ${theme.border} ${theme.text}`}
-                                                  title={`👤 ${sched.employeeName} (${sched.startTime}-${sched.endTime}) @ 📍 ${sched.workplace}${cleanNote ? ` | 📝 ${cleanNote}` : ''}`}
+                                                  title={`👤 ${sched.employeeName} (${sched.startTime}-${sched.endTime}) @ 📍 ${sched.workplace}${managerNote ? ` | 📝 主管備註: ${managerNote}` : ''}`}
                                                 >
                                                   {sched.startTime}-{sched.endTime}
                                                   <div className="text-[10px] opacity-75 truncate">{sched.workplace}</div>
-                                                  {cleanNote && (
-                                                    <div className="text-[10px] opacity-90 truncate mt-0.5 leading-normal font-medium">
-                                                      ({cleanNote})
+                                                  {managerNote && (
+                                                    <div className="text-[10px] opacity-90 truncate mt-0.5 leading-normal font-medium" title={managerNote}>
+                                                      ({managerNote})
                                                     </div>
                                                   )}
                                                 </div>
@@ -4012,14 +4044,24 @@ function App() {
               })()}
 
               {/* Notes */}
-              <div>
-                <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">備註項目 (選填)</label>
-                <textarea
-                  placeholder="班次注意事項、特別交辦事項..."
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  className="w-full glass-input px-4 py-2.5 rounded-xl text-sm min-h-[70px] resize-none placeholder-[#8D6E63]/50"
-                />
+              <div className="space-y-4">
+                {modalMode === 'edit' && workerNotes && (
+                  <div className="p-3 rounded-xl bg-indigo-50 border border-indigo-200">
+                    <span className="block text-xs font-bold text-indigo-850 mb-1">💬 同仁登記備註</span>
+                    <p className="text-xs text-indigo-900 break-words whitespace-pre-wrap">{workerNotes}</p>
+                  </div>
+                )}
+                <div>
+                  <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">
+                    {modalMode === 'edit' && workerNotes ? '主管備註項目 (選填)' : '備註項目 (選填)'}
+                  </label>
+                  <textarea
+                    placeholder="主管注意事項、特別交辦事項..."
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    className="w-full glass-input px-4 py-2.5 rounded-xl text-sm min-h-[70px] resize-none placeholder-[#8D6E63]/50"
+                  />
+                </div>
               </div>
 
               {/* Actions */}

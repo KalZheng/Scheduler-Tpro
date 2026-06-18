@@ -21,6 +21,8 @@ export interface WorkSchedule {
   endTime: string;   // "HH:MM"
   color: string;     // e.g. "emerald", "indigo", "violet", "amber", "rose"
   notes?: string;
+  workerNotes?: string;
+  managerNotes?: string;
   createdAt: number;
   originalStartTime?: string;
   originalEndTime?: string;
