@@ -710,7 +710,7 @@ function App() {
 
         setAvailSelectedDates([]);
         setAvailNotes('');
-        alert('已成功送出您的不克排班日期（其餘日期已自動登記為早班工作日）！');
+        alert('已成功送出您的不克排班日期！');
       } catch (error) {
         console.error("Error saving availability: ", error);
         alert('送出可用日期失敗，請稍後再試。');
