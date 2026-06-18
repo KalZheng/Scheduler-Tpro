@@ -42,6 +42,7 @@ export interface StaffingTarget {
   hour: number; // 0 to 23
   targetCount: number;
   date?: string; // Optional specific date
+  note?: string; // Optional custom daily note
 }
 
 export interface Employee {
@@ -180,10 +181,10 @@ export const syncActiveMonth = async (monthStr: string) => {
       localStorage.setItem('employees_list', JSON.stringify(inMemoryDb.employees));
 
       // Trigger all active UI listeners
-      localListeners.forEach(listener => listener(inMemoryDb.schedules));
-      localAvailabilityListeners.forEach(listener => listener(inMemoryDb.availabilities));
-      localStaffingTargetListeners.forEach(listener => listener(inMemoryDb.staffingTargets));
-      localEmployeeListeners.forEach(listener => listener(inMemoryDb.employees));
+      localListeners.forEach(listener => listener([...inMemoryDb.schedules]));
+      localAvailabilityListeners.forEach(listener => listener([...inMemoryDb.availabilities]));
+      localStaffingTargetListeners.forEach(listener => listener([...inMemoryDb.staffingTargets]));
+      localEmployeeListeners.forEach(listener => listener([...inMemoryDb.employees]));
     }
   } catch (e) {
     console.error(`Failed to sync month data for ${monthStr}:`, e);
@@ -219,10 +220,10 @@ const loadFileDb = async () => {
     inMemoryDb.employees = getLocalEmployees();
   } finally {
     // Notify all active listeners of loaded values
-    localListeners.forEach(listener => listener(inMemoryDb.schedules));
-    localAvailabilityListeners.forEach(listener => listener(inMemoryDb.availabilities));
-    localStaffingTargetListeners.forEach(listener => listener(inMemoryDb.staffingTargets));
-    localEmployeeListeners.forEach(listener => listener(inMemoryDb.employees));
+    localListeners.forEach(listener => listener([...inMemoryDb.schedules]));
+    localAvailabilityListeners.forEach(listener => listener([...inMemoryDb.availabilities]));
+    localStaffingTargetListeners.forEach(listener => listener([...inMemoryDb.staffingTargets]));
+    localEmployeeListeners.forEach(listener => listener([...inMemoryDb.employees]));
   }
 };
 
@@ -241,10 +242,10 @@ const saveDbForDate = async (dateStr?: string) => {
   localStorage.setItem('employees_list', JSON.stringify(inMemoryDb.employees));
 
   // Trigger active listeners immediately for immediate UI response
-  localListeners.forEach(listener => listener(inMemoryDb.schedules));
-  localAvailabilityListeners.forEach(listener => listener(inMemoryDb.availabilities));
-  localStaffingTargetListeners.forEach(listener => listener(inMemoryDb.staffingTargets));
-  localEmployeeListeners.forEach(listener => listener(inMemoryDb.employees));
+  localListeners.forEach(listener => listener([...inMemoryDb.schedules]));
+  localAvailabilityListeners.forEach(listener => listener([...inMemoryDb.availabilities]));
+  localStaffingTargetListeners.forEach(listener => listener([...inMemoryDb.staffingTargets]));
+  localEmployeeListeners.forEach(listener => listener([...inMemoryDb.employees]));
 
   // POST current in-memory state to local JSON file
   try {
@@ -286,7 +287,7 @@ export const subscribeToSchedules = (callback: (schedules: WorkSchedule[]) => vo
     });
   } else {
     localListeners.push(callback);
-    callback(inMemoryDb.schedules);
+    callback([...inMemoryDb.schedules]);
     return () => {
       localListeners = localListeners.filter(l => l !== callback);
     };
@@ -357,7 +358,7 @@ export const subscribeToAvailabilities = (callback: (availabilities: WorkerAvail
     });
   } else {
     localAvailabilityListeners.push(callback);
-    callback(inMemoryDb.availabilities);
+    callback([...inMemoryDb.availabilities]);
     return () => {
       localAvailabilityListeners = localAvailabilityListeners.filter(l => l !== callback);
     };
@@ -414,7 +415,7 @@ export const subscribeToStaffingTargets = (callback: (targets: StaffingTarget[])
     });
   } else {
     localStaffingTargetListeners.push(callback);
-    callback(inMemoryDb.staffingTargets);
+    callback([...inMemoryDb.staffingTargets]);
     return () => {
       localStaffingTargetListeners = localStaffingTargetListeners.filter(l => l !== callback);
     };
@@ -429,6 +430,10 @@ export const updateStaffingTarget = async (hour: number, targetCount: number, da
     const docRef = doc(db, 'staffing_targets', targetId);
     return await setDoc(docRef, payload, { merge: true });
   } else {
+    if (date) {
+      const monthStr = date.substring(0, 7);
+      await syncActiveMonth(monthStr);
+    }
     const existingIndex = inMemoryDb.staffingTargets.findIndex(t => t.hour === hour && (date ? t.date === date : !t.date));
     if (existingIndex > -1) {
       inMemoryDb.staffingTargets[existingIndex].targetCount = targetCount;
@@ -453,7 +458,7 @@ export const subscribeToEmployees = (callback: (employees: Employee[]) => void) 
     });
   } else {
     localEmployeeListeners.push(callback);
-    callback(inMemoryDb.employees);
+    callback([...inMemoryDb.employees]);
     return () => {
       localEmployeeListeners = localEmployeeListeners.filter(l => l !== callback);
     };
@@ -504,3 +509,25 @@ export const deleteEmployee = async (id: string) => {
     await saveDbForDate();
   }
 };
+
+export const updateDayNote = async (date: string, note: string) => {
+  const targetId = `date-${date}-note`;
+  const payload = { hour: 99, targetCount: 0, date, note };
+
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'staffing_targets', targetId);
+    return await setDoc(docRef, payload, { merge: true });
+  } else {
+    const monthStr = date.substring(0, 7);
+    await syncActiveMonth(monthStr);
+
+    const existingIndex = inMemoryDb.staffingTargets.findIndex(t => t.hour === 99 && t.date === date);
+    if (existingIndex > -1) {
+      inMemoryDb.staffingTargets[existingIndex].note = note;
+    } else {
+      inMemoryDb.staffingTargets.push({ id: targetId, hour: 99, targetCount: 0, date, note });
+    }
+    await saveDbForDate(date);
+  }
+};
+
