@@ -126,15 +126,7 @@ const COLOR_THEMES: Record<string, { bg: string, border: string, text: string, d
   }
 };
 
-// Date helper: Find Monday of the week for a given Date
-const getMondayOfDate = (date: Date): Date => {
-  const d = new Date(date);
-  const day = d.getDay();
-  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-  const monday = new Date(d.setDate(diff));
-  monday.setHours(0, 0, 0, 0);
-  return monday;
-};
+
 
 // Date helper: Generate YYYY-MM-DD string
 const formatDateString = (date: Date): string => {
@@ -167,16 +159,7 @@ const getMonthGridDates = (monthStart: Date): Date[] => {
   return dates;
 };
 
-// Date helper: Get 28 days starting on the Monday of the current week (aligned for 4-row selection)
-const getAlign28Days = (monday: Date): Date[] => {
-  const list = [];
-  for (let i = 0; i < 28; i++) {
-    const d = new Date(monday);
-    d.setDate(monday.getDate() + i);
-    list.push(d);
-  }
-  return list;
-};
+
 
 // Date helper: Get all dates in the currently selected month
 const getDaysInMonth = (monthStart: Date): Date[] => {
@@ -373,6 +356,12 @@ function App() {
   // Worker identity (cached in localStorage)
   const [workerName, setWorkerName] = useState(() => localStorage.getItem('scheduler_worker_name') || '');
   const [isWorkerVerified, setIsWorkerVerified] = useState(() => localStorage.getItem('scheduler_worker_verified') === 'true' && !!localStorage.getItem('scheduler_worker_name'));
+
+  const loggedInEmployee = employees.find(
+    emp => emp.name.trim().toLowerCase() === workerName.trim().toLowerCase() && emp.active !== false
+  );
+  const isFullTime = loggedInEmployee?.status === '正式夥伴';
+
   const [selectedWorkerName, setSelectedWorkerName] = useState('');
   const [workerPhoneInput, setWorkerPhoneInput] = useState('');
   const [workerVerifyError, setWorkerVerifyError] = useState('');
@@ -407,6 +396,8 @@ function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [isFTAssignModalOpen, setIsFTAssignModalOpen] = useState(false);
+  const [pendingAssignAvail, setPendingAssignAvail] = useState<WorkerAvailability | null>(null);
 
   // Form states
   const [employeeName, setEmployeeName] = useState('');
@@ -422,9 +413,8 @@ function App() {
   // Editing Mode: single date picker input
   const [singleDate, setSingleDate] = useState('');
 
-  // Generate date checklist for the modal form (aligned in 2 rows of 7 columns, starting Monday of current week)
-  const pickerWeekStart = getMondayOfDate(new Date());
-  const pickerDates = getAlign28Days(pickerWeekStart);
+  // Generate date checklist for the modal form aligned with the current viewing month
+  const pickerDates = getMonthGridDates(currentMonthStart);
 
   // Date calculations for worker's availability selection (Next Month)
   const workerNextMonthStart = (() => {
@@ -679,8 +669,52 @@ function App() {
       alert('請先輸入您的姓名。');
       return;
     }
-    if (availSelectedDates.length === 0) {
+
+    // For part-time, they must select at least one available day.
+    // For full-time, they can select 0 off-days (meaning they work the entire month).
+    if (!isFullTime && availSelectedDates.length === 0) {
       alert('請至少選擇一個可用日期。');
+      return;
+    }
+
+    if (isFullTime) {
+      try {
+        const nextMonthStr = formatDateString(workerNextMonthStart).substring(0, 7);
+        const existingRecords = availabilities.filter(
+          a => a.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase() &&
+               a.date.startsWith(nextMonthStr)
+        );
+
+        // Delete existing availability records for the month sequentially
+        for (const record of existingRecords) {
+          await deleteAvailability(record.id);
+        }
+
+        // Calculate working days (all month days except selected rest days)
+        const activeMonthDays = getDaysInMonth(workerNextMonthStart);
+        const workDays = activeMonthDays
+          .map(formatDateString)
+          .filter(dateStr => !availSelectedDates.includes(dateStr));
+
+        // Save working days sequentially
+        for (const dateStr of workDays) {
+          await addAvailability({
+            employeeName: workerName.trim(),
+            date: dateStr,
+            workplace: availWorkplace || (workplaces[0]?.name || ''),
+            startTime: '06:30', // default select 早班
+            endTime: '15:30',   // default select 早班
+            notes: availNotes.trim()
+          });
+        }
+
+        setAvailSelectedDates([]);
+        setAvailNotes('');
+        alert('已成功送出您的不克排班日期（其餘日期已自動登記為早班工作日）！');
+      } catch (error) {
+        console.error("Error saving availability: ", error);
+        alert('送出可用日期失敗，請稍後再試。');
+      }
       return;
     }
 
@@ -703,8 +737,20 @@ function App() {
     }
 
     try {
-      const promises = availSelectedDates.map(dateStr => {
-        return addAvailability({
+      const nextMonthStr = formatDateString(workerNextMonthStart).substring(0, 7);
+      const existingRecords = availabilities.filter(
+        a => a.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase() &&
+             a.date.startsWith(nextMonthStr)
+      );
+
+      // Delete existing records sequentially
+      for (const record of existingRecords) {
+        await deleteAvailability(record.id);
+      }
+
+      // Add new records sequentially
+      for (const dateStr of availSelectedDates) {
+        await addAvailability({
           employeeName: workerName.trim(),
           date: dateStr,
           workplace: availWorkplace,
@@ -712,8 +758,8 @@ function App() {
           endTime: availEndTime,
           notes: availNotes.trim()
         });
-      });
-      await Promise.all(promises);
+      }
+
       setAvailSelectedDates([]);
       setAvailNotes('');
       alert('已成功送出您的可用時間！');
@@ -726,7 +772,25 @@ function App() {
 
 
   // Instant Schedule Assign (Zero-Click Modal)
+  // Instant Schedule Assign (Zero-Click Modal)
   const handleInstantAssign = async (avail: WorkerAvailability) => {
+    if (avail.startTime === '00:00' && avail.endTime === '00:00') {
+      alert('此同仁此日登記為休假，無法直接指派排班！');
+      return;
+    }
+
+    const emp = employees.find(
+      e => e.name.trim().toLowerCase() === avail.employeeName.trim().toLowerCase() && e.active !== false
+    );
+    const isFT = emp?.status === '正式夥伴';
+
+    if (isFT) {
+      setPendingAssignAvail(avail);
+      setIsFTAssignModalOpen(true);
+      return;
+    }
+
+    // Part-time worker assign logic
     try {
       // Check staffing limit warning
       const daySchedules = schedules.filter(s => s.date === avail.date);
@@ -774,6 +838,63 @@ function App() {
       await deleteAvailability(avail.id);
     } catch (error) {
       console.error("Error doing instant assign: ", error);
+      alert('自動排程失敗，請重試。');
+    }
+  };
+
+  const executeFTAssign = async (avail: WorkerAvailability, shiftType: '早班' | '晚班') => {
+    setIsFTAssignModalOpen(false);
+    setPendingAssignAvail(null);
+
+    const sTime = shiftType === '早班' ? '06:30' : '08:30';
+    const eTime = shiftType === '早班' ? '15:30' : '17:30';
+
+    try {
+      // Check staffing limit warning
+      const daySchedules = schedules.filter(s => s.date === avail.date);
+      let wouldExceedOrReach = false;
+      let limitHour = -1;
+      let limitCount = 0;
+      let currentCount = 0;
+
+      for (let hour = 0; hour < 24; hour++) {
+        if (isShiftActiveAtHour(sTime, eTime, hour)) {
+          const target = getStaffingTargetForHour(hour, avail.date);
+          const current = daySchedules.filter(s => isShiftActiveAtHour(s.startTime, s.endTime, hour)).length;
+          if (current >= target) {
+            wouldExceedOrReach = true;
+            limitHour = hour;
+            limitCount = target;
+            currentCount = current;
+            break;
+          }
+        }
+      }
+
+      if (wouldExceedOrReach) {
+        const confirmAssign = safeConfirm(
+          `警告：該日期 ${avail.date} 在 ${limitHour}:00-${limitHour + 1}:00 的排班人數 (${currentCount}人) 已達到或超過目標上限 (${limitCount}人)。確定仍要指派此班次嗎？`
+        );
+        if (!confirmAssign) return;
+      }
+
+      const derivedColor = getColorFromName(avail.employeeName);
+      const payload = {
+        title: avail.employeeName.trim(),
+        employeeName: avail.employeeName.trim(),
+        date: avail.date,
+        workplace: avail.workplace,
+        startTime: sTime,
+        endTime: eTime,
+        notes: avail.notes ? `由登記可用時間自動排入: ${avail.notes.trim()}` : '由登記可用時間自動排入',
+        color: derivedColor,
+        originalStartTime: sTime,
+        originalEndTime: eTime
+      };
+      await addSchedule(payload);
+      await deleteAvailability(avail.id);
+    } catch (error) {
+      console.error("Error doing full-time assign: ", error);
       alert('自動排程失敗，請重試。');
     }
   };
@@ -943,7 +1064,7 @@ function App() {
       const derivedColor = getColorFromName(employeeName);
 
       if (modalMode === 'create') {
-        const promises = selectedDates.map(dateStr => {
+        for (const dateStr of selectedDates) {
           const payload = {
             title: employeeName.trim(),
             employeeName: employeeName.trim(),
@@ -956,9 +1077,8 @@ function App() {
             originalStartTime: formOriginalStartTime || undefined,
             originalEndTime: formOriginalEndTime || undefined
           };
-          return addSchedule(payload);
-        });
-        await Promise.all(promises);
+          await addSchedule(payload);
+        }
       } else if (modalMode === 'edit' && editingId) {
         const payload = {
           title: employeeName.trim(),
@@ -996,11 +1116,46 @@ function App() {
   // Delete availability handler
   const handleDeleteAvailability = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (safeConfirm('確定要刪除此可用時間登記嗎？')) {
-      try {
-        await deleteAvailability(id);
-      } catch (error) {
-        console.error("Error deleting availability: ", error);
+    
+    // Check if it is a virtual ID
+    if (id.startsWith('virtual-off-')) {
+      const dateStr = id.replace('virtual-off-', '');
+      if (safeConfirm(`確定要將 ${dateStr} 的休假改為配合排班（早班）嗎？`)) {
+        try {
+          await addAvailability({
+            employeeName: workerName.trim(),
+            date: dateStr,
+            workplace: availWorkplace || (workplaces[0]?.name || ''),
+            startTime: '06:30',
+            endTime: '15:30',
+            notes: ''
+          });
+        } catch (error) {
+          console.error("Error adding availability: ", error);
+        }
+      }
+      return;
+    }
+
+    // Real DB record
+    const avail = availabilities.find(a => a.id === id);
+    if (!avail) return;
+
+    if (avail.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase() && isFullTime) {
+      if (safeConfirm(`確定要將 ${avail.date} 的工作登記改為休假嗎？`)) {
+        try {
+          await deleteAvailability(id);
+        } catch (error) {
+          console.error("Error deleting availability: ", error);
+        }
+      }
+    } else {
+      if (safeConfirm('確定要刪除此可用時間登記嗎？')) {
+        try {
+          await deleteAvailability(id);
+        } catch (error) {
+          console.error("Error deleting availability: ", error);
+        }
       }
     }
   };
@@ -1047,18 +1202,18 @@ function App() {
   };
 
   const handleSelectAllDays = () => {
-    setSelectedDates(pickerDates.map(formatDateString));
+    setSelectedDates(getDaysInMonth(currentMonthStart).map(formatDateString));
   };
 
   const handleSelectMonWedFri = () => {
-    const mwf = pickerDates
+    const mwf = getDaysInMonth(currentMonthStart)
       .filter(d => d.getDay() === 1 || d.getDay() === 3 || d.getDay() === 5)
       .map(formatDateString);
     setSelectedDates(mwf);
   };
 
   const handleSelectTueThu = () => {
-    const tt = pickerDates
+    const tt = getDaysInMonth(currentMonthStart)
       .filter(d => d.getDay() === 2 || d.getDay() === 4)
       .map(formatDateString);
     setSelectedDates(tt);
@@ -1066,6 +1221,40 @@ function App() {
 
   const handleClearAllSelected = () => {
     setSelectedDates([]);
+  };
+
+  const handleEmployeeNameChange = (newName: string) => {
+    setEmployeeName(newName);
+    if (!newName) return;
+
+    const emp = employees.find(
+      x => x.name.trim().toLowerCase() === newName.trim().toLowerCase() && x.active !== false
+    );
+    const isFT = emp?.status === '正式夥伴';
+
+    if (isFT) {
+      setStartTime('06:30');
+      setEndTime('15:30');
+
+      const monthStr = formatDateString(currentMonthStart).substring(0, 7);
+      const empMonthAvails = availabilities.filter(
+        a => a.employeeName.trim().toLowerCase() === newName.trim().toLowerCase() &&
+             a.date.startsWith(monthStr)
+      );
+
+      const activeMonthDays = getDaysInMonth(currentMonthStart);
+      if (empMonthAvails.length > 0) {
+        const workDates = empMonthAvails
+          .filter(a => !(a.startTime === '00:00' && a.endTime === '00:00'))
+          .map(a => a.date);
+        setSelectedDates(workDates);
+      } else {
+        setSelectedDates(activeMonthDays.map(formatDateString));
+      }
+    } else {
+      setStartTime('09:00');
+      setEndTime('17:00');
+    }
   };
 
   const getScheduleTheme = (schedule: WorkSchedule) => {
@@ -1265,6 +1454,68 @@ function App() {
   // Availabilities on selected day
   const dayAvailabilities = getAvailabilitiesForDate(selectedDateStr);
 
+  const getWorkerDisplayAvailabilities = () => {
+    const cleanWorkerName = workerName.trim().toLowerCase();
+    if (!cleanWorkerName) return [];
+
+    const workerAvails = availabilities.filter(
+      a => a.employeeName.trim().toLowerCase() === cleanWorkerName
+    );
+
+    if (!isFullTime) {
+      return workerAvails;
+    }
+
+    const registeredMonths = Array.from(
+      new Set(
+        workerAvails
+          .filter(a => !(a.startTime === '00:00' && a.endTime === '00:00'))
+          .map(a => a.date.substring(0, 7))
+      )
+    );
+
+    const computedOffDays: any[] = [];
+
+    for (const monthStr of registeredMonths) {
+      const [year, month] = monthStr.split('-').map(Number);
+      const monthStartDate = new Date(year, month - 1, 1);
+      const daysInMonth = getDaysInMonth(monthStartDate);
+
+      const workDates = workerAvails
+        .filter(a => a.date.startsWith(monthStr) && !(a.startTime === '00:00' && a.endTime === '00:00'))
+        .map(a => a.date);
+
+      const offDates = daysInMonth
+        .map(formatDateString)
+        .filter(dateStr => !workDates.includes(dateStr));
+
+      const monthNote = workerAvails.find(a => a.date.startsWith(monthStr) && a.notes && a.notes.trim())?.notes || '';
+
+      for (const offDate of offDates) {
+        computedOffDays.push({
+          id: `virtual-off-${offDate}`,
+          employeeName: workerName,
+          date: offDate,
+          workplace: '不克排班',
+          startTime: '00:00',
+          endTime: '00:00',
+          notes: monthNote || '休假',
+          isVirtual: true
+        });
+      }
+    }
+
+    const legacyOffDays = workerAvails.filter(a => a.startTime === '00:00' && a.endTime === '00:00');
+    const allOffDays = [...computedOffDays];
+    for (const legacy of legacyOffDays) {
+      if (!allOffDays.some(o => o.date === legacy.date)) {
+        allOffDays.push(legacy);
+      }
+    }
+
+    return allOffDays;
+  };
+
   return (
     <div className="min-h-screen text-[#3E2723] font-sans pb-12">
       <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-6">
@@ -1450,66 +1701,75 @@ function App() {
                 <div>
                   <h3 className="text-base font-bold text-[#3E2723] flex items-center gap-2">
                     <span className="w-2.5 h-2.5 rounded-full bg-[#2E7D32]"></span>
-                    登記可用時段 ({workerNextMonthStart.getFullYear()}年 {workerNextMonthStart.getMonth() + 1}月)
+                    {isFullTime ? '登記不克排班日期' : '登記可用時段'} ({workerNextMonthStart.getFullYear()}年 {workerNextMonthStart.getMonth() + 1}月)
                   </h3>
                   <p className="text-xs text-[#6D4C41] mt-0.5 font-medium">
-                    請選取日期、地點與可配合排班的時間範圍，店長即可為您安排班表。
+                    {isFullTime 
+                      ? '正式夥伴預設為全配合，請選取您下個月「無法上班/休假/請假」的日期。'
+                      : '請選取日期、地點與可配合排班的時間範圍，店長即可為您安排班表。'}
                   </p>
                 </div>
 
                 <form onSubmit={handleAddAvailability} className="space-y-4 pt-2">
-                  {/* Workplace Selection */}
-                  <div>
-                    <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">可配合地點</label>
-                    <select
-                      value={availWorkplace}
-                      onChange={(e) => setAvailWorkplace(e.target.value)}
-                      className="w-full glass-input px-4 py-2.5 rounded-xl text-sm cursor-pointer"
-                    >
-                      {workplaces.map(loc => (
-                        <option key={loc.id} value={loc.name} className="bg-white text-[#3E2723]">
-                          {loc.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  {!isFullTime && (
+                    <>
+                      {/* Workplace Selection */}
+                      <div>
+                        <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">可配合地點</label>
+                        <select
+                          value={availWorkplace}
+                          onChange={(e) => setAvailWorkplace(e.target.value)}
+                          className="w-full glass-input px-4 py-2.5 rounded-xl text-sm cursor-pointer"
+                        >
+                          {workplaces.map(loc => (
+                            <option key={loc.id} value={loc.name} className="bg-white text-[#3E2723]">
+                              {loc.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
 
-                  {/* Time Inputs */}
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">開始時間</label>
-                      <select
-                        value={availStartTime}
-                        onChange={(e) => setAvailStartTime(e.target.value)}
-                        className="w-full glass-input px-4 py-2.5 rounded-xl text-sm cursor-pointer"
-                      >
-                        {TIME_SLOTS.map(slot => (
-                          <option key={slot} value={slot} className="bg-white text-[#3E2723] font-mono">
-                            {slot}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">最晚結束時間</label>
-                      <select
-                        value={availEndTime}
-                        onChange={(e) => setAvailEndTime(e.target.value)}
-                        className="w-full glass-input px-4 py-2.5 rounded-xl text-sm cursor-pointer"
-                      >
-                        {TIME_SLOTS.map(slot => (
-                          <option key={slot} value={slot} className="bg-white text-[#3E2723] font-mono">
-                            {slot}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
+                      {/* Time Inputs */}
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">開始時間</label>
+                          <select
+                            value={availStartTime}
+                            onChange={(e) => setAvailStartTime(e.target.value)}
+                            className="w-full glass-input px-4 py-2.5 rounded-xl text-sm cursor-pointer"
+                          >
+                            {TIME_SLOTS.map(slot => (
+                              <option key={slot} value={slot} className="bg-white text-[#3E2723] font-mono">
+                                {slot}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">最晚結束時間</label>
+                          <select
+                            value={availEndTime}
+                            onChange={(e) => setAvailEndTime(e.target.value)}
+                            className="w-full glass-input px-4 py-2.5 rounded-xl text-sm cursor-pointer"
+                          >
+                            {TIME_SLOTS.map(slot => (
+                              <option key={slot} value={slot} className="bg-white text-[#3E2723] font-mono">
+                                {slot}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                    </>
+                  )}
 
                   {/* Date Multi-selector */}
                   <div>
                     <div className="flex justify-between items-center mb-2">
-                      <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider">選擇可用日期 (可複選)</label>
+                      <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider">
+                        {isFullTime ? '選擇不克排班日期 (可複選)' : '選擇可用日期 (可複選)'}
+                      </label>
                       <span className="text-[10px] text-[#795548] font-bold bg-[#8D6E63]/10 px-2 py-0.5 rounded font-mono">
                         已選 {availSelectedDates.length} 天
                       </span>
@@ -1586,9 +1846,11 @@ function App() {
 
                   {/* Notes */}
                   <div>
-                    <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">備註事項 (如：只能上早班、偏好時段等)</label>
+                    <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">
+                      {isFullTime ? '請假/休假備註事項 (選填)' : '備註事項 (如：只能上早班、偏好時段等)'}
+                    </label>
                     <textarea
-                      placeholder="填寫特別備註，協助店長協調排班..."
+                      placeholder={isFullTime ? '填寫不克排班原因或備註...' : '填寫特別備註，協助店長協調排班...'}
                       value={availNotes}
                       onChange={(e) => setAvailNotes(e.target.value)}
                       className="w-full glass-input px-4 py-2.5 rounded-xl text-sm min-h-[70px] resize-none"
@@ -1596,7 +1858,7 @@ function App() {
                   </div>
 
                   {/* Inline warning banners */}
-                  {availStartTime && availEndTime && isOverEightHours(availStartTime, availEndTime) && (
+                  {!isFullTime && availStartTime && availEndTime && isOverEightHours(availStartTime, availEndTime) && (
                     <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-amber-50 border border-amber-200">
                       <span className="text-lg leading-none mt-0.5">⚠️</span>
                       <div className="space-y-0.5">
@@ -1608,7 +1870,7 @@ function App() {
                     </div>
                   )}
 
-                  {(() => {
+                  {!isFullTime && (() => {
                     if (availSelectedDates.length === 0) return null;
                     const existingDates = availabilities
                       .filter(a => a.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase())
@@ -1632,7 +1894,7 @@ function App() {
                     type="submit"
                     className="w-full bg-[#795548] hover:bg-[#6D4C41] text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-[#795548]/15 cursor-pointer text-center text-sm"
                   >
-                    送出可用時間
+                    {isFullTime ? '送出不克排班日期' : '送出可用時間'}
                   </button>
                 </form>
               </div>
@@ -1642,25 +1904,28 @@ function App() {
                 <div>
                   <h3 className="text-base font-bold text-[#3E2723] flex items-center gap-2">
                     <span className="w-2.5 h-2.5 rounded-full bg-[#8D6E63]"></span>
-                    您登記的可用時間紀錄
+                    {isFullTime ? '您登記的不克排班日期紀錄' : '您登記的可用時間紀錄'}
                   </h3>
                   <p className="text-xs text-[#6D4C41] mt-0.5 font-medium">
-                    以下為「{workerName || '未填寫姓名'}」已登記並提交的可用時段。店長可以在此時段安排您的排班。
+                    {isFullTime
+                      ? `以下為「${workerName || '未填寫姓名'}」已登記提交的「不克排班/休假」日期。店長排班時會避開這些日期。`
+                      : `以下為「${workerName || '未填寫姓名'}」已登記並提交的可用時段。店長可以在此時段安排您的排班。`}
                   </p>
                 </div>
 
                 <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
                   {!workerName.trim() ? (
                     <div className="py-12 text-center border-2 border-dashed border-[#DAC0A3]/45 rounded-xl">
-                      <p className="text-xs text-[#6D4C41]/80 font-medium">請在上方輸入姓名以檢視您的可用時間紀錄</p>
+                      <p className="text-xs text-[#6D4C41]/80 font-medium">請在上方輸入姓名以檢信您的可用時間紀錄</p>
                     </div>
-                  ) : availabilities.filter(a => a.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase()).length === 0 ? (
+                  ) : getWorkerDisplayAvailabilities().length === 0 ? (
                     <div className="py-12 text-center border-2 border-dashed border-[#DAC0A3]/45 rounded-xl">
-                      <p className="text-xs text-[#6D4C41]/80 font-medium">尚無登記任何可用時間</p>
+                      <p className="text-xs text-[#6D4C41]/80 font-medium">
+                        {isFullTime ? '尚無登記任何不克排班日期' : '尚無登記任何可用時間'}
+                      </p>
                     </div>
                   ) : (
-                    availabilities
-                      .filter(a => a.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase())
+                    getWorkerDisplayAvailabilities()
                       .sort((a, b) => {
                         const dateCompare = b.date.localeCompare(a.date);
                         if (dateCompare !== 0) return dateCompare;
@@ -1671,6 +1936,43 @@ function App() {
                         const dayOfWeekIndex = dateObj.getDay();
                         const mappedDayIndex = dayOfWeekIndex === 0 ? 7 : dayOfWeekIndex;
                         const dayInfo = DAYS_OF_WEEK.find(d => d.value === mappedDayIndex) || DAYS_OF_WEEK[0];
+                        const isOffDay = avail.startTime === '00:00' && avail.endTime === '00:00';
+
+                        if (isOffDay) {
+                          return (
+                            <div
+                              key={avail.id}
+                              className="glass-card p-4 rounded-xl border border-red-200/60 bg-red-50/20 space-y-1"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm font-extrabold text-red-800">
+                                    ❌ {avail.date} ({dayInfo.name})
+                                  </span>
+                                  <span className="text-[10px] px-2 py-0.5 rounded bg-red-100 text-red-700 border border-red-200 font-bold">
+                                    不克排班 (休假)
+                                  </span>
+                                </div>
+                                {new Date().getDate() <= 20 && (
+                                  <button
+                                    onClick={(e) => handleDeleteAvailability(avail.id, e)}
+                                    className="p-1 rounded-lg bg-white hover:bg-red-50 border border-[#DAC0A3]/50 text-[#6D4C41] hover:text-red-650 transition-colors cursor-pointer"
+                                    title="刪除此登記"
+                                  >
+                                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                    </svg>
+                                  </button>
+                                )}
+                              </div>
+                              {avail.notes && (
+                                <p className="text-xs text-red-800/80 font-medium pl-6">
+                                  📝 備註：{getCleanNote(avail.notes) || avail.notes}
+                                </p>
+                              )}
+                            </div>
+                          );
+                        }
 
                         return (
                           <div
@@ -2463,7 +2765,6 @@ function App() {
                           const daySchedules = getSchedulesForDate(dateStr);
                           const totalDayHours = getDateTotalHours(dateStr);
                           const dateAvails = getAvailabilitiesForDate(dateStr);
-                          const availCount = dateAvails.length;
                           const isUnderstaffed = getIsDayUnderstaffed(dateStr);
 
                           const isFirstOfMonth = dateObj.getDate() === 1;
@@ -2498,11 +2799,24 @@ function App() {
                                 </span>
 
                                 {/* Availability Count Badge */}
-                                {availCount > 0 && (
-                                  <span className="text-[9px] px-1 py-0.2 rounded bg-emerald-600/10 border border-emerald-600/20 text-[#2E7D32] font-bold flex items-center gap-0.5" title={`${availCount} 位人員今日可用`}>
-                                    🙋{availCount}
-                                  </span>
-                                )}
+                                {(() => {
+                                  const actualAvailCount = dateAvails.filter(a => !(a.startTime === '00:00' && a.endTime === '00:00')).length;
+                                  const offCount = dateAvails.filter(a => a.startTime === '00:00' && a.endTime === '00:00').length;
+                                  return (
+                                    <div className="flex flex-col gap-0.5 items-end">
+                                      {actualAvailCount > 0 && (
+                                        <span className="text-[9px] px-1 py-0.2 rounded bg-emerald-600/10 border border-emerald-600/20 text-[#2E7D32] font-bold flex items-center gap-0.5" title={`${actualAvailCount} 位人員今日可用`}>
+                                          🙋{actualAvailCount}
+                                        </span>
+                                      )}
+                                      {offCount > 0 && (
+                                        <span className="text-[9px] px-1 py-0.2 rounded bg-red-50 text-red-700 border border-red-200 font-bold flex items-center gap-0.5" title={`${offCount} 位人員今日請假`}>
+                                          ❌{offCount}
+                                        </span>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
 
                                 {/* Total Daily Hours badge (desktop only) */}
                                 {totalDayHours > 0 && (
@@ -2786,6 +3100,26 @@ function App() {
                                             {/* 2. Remaining unconfirmed availabilities (always shown, even when schedules exist) */}
                                             {empAvails.map(avail => {
                                               const cleanNote = getCleanNote(avail.notes);
+                                              const isOffDay = avail.startTime === '00:00' && avail.endTime === '00:00';
+
+                                              if (isOffDay) {
+                                                return (
+                                                  <div
+                                                    key={avail.id}
+                                                    className="text-xs py-2 px-1 border border-red-200 bg-red-50 text-red-700 font-bold rounded-md relative flex flex-col justify-center items-center min-h-[72px] h-auto"
+                                                    title={`不克排班 (休假)${cleanNote ? ` | 📝 ${cleanNote}` : ''}`}
+                                                  >
+                                                    <div className="text-[10px] font-bold leading-none">❌ 休假/請假</div>
+                                                    <div className="text-[9px] opacity-75 mt-1 leading-none truncate w-full">不排班</div>
+                                                    {cleanNote && (
+                                                      <div className="text-[9.5px] opacity-85 mt-1 leading-none truncate w-full">
+                                                        ({cleanNote})
+                                                      </div>
+                                                    )}
+                                                  </div>
+                                                );
+                                              }
+
                                               return (
                                                 <div
                                                   key={avail.id}
@@ -2958,77 +3292,145 @@ function App() {
                       </p>
                     </div>
 
-                    {dayAvailabilities.length === 0 ? (
-                      <div className="py-8 text-center border-2 border-dashed border-[#DAC0A3]/45 rounded-xl">
-                        <p className="text-xs text-[#6D4C41]/80 font-medium">今日尚無同仁填寫可用時間</p>
-                      </div>
-                    ) : (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                        {dayAvailabilities.map(avail => {
-                          const theme = COLOR_THEMES[getColorFromName(avail.employeeName)] || COLOR_THEMES.indigo;
-                          return (
-                            <div
-                              key={avail.id}
-                              className={`glass-card p-3.5 rounded-xl border flex flex-col justify-between gap-3 ${theme.bg} ${theme.border}`}
-                            >
-                              <div className="space-y-1.5">
-                                <div className="flex items-center justify-between">
-                                  <span className={`text-[10px] font-bold flex items-center gap-1 ${theme.text} font-mono`}>
-                                    <span className={`w-1.5 h-1.5 rounded-full ${theme.dot}`}></span>
-                                    登記：{avail.startTime} - {avail.endTime}
-                                  </span>
-                                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-white/80 text-[#5D4037] border border-[#DAC0A3]/40 font-bold">
-                                    📍 {avail.workplace}
-                                  </span>
-                                </div>
-                                <h4 className="font-extrabold text-[#3E2723] text-sm">
-                                  👤 {avail.employeeName}
-                                </h4>
-                                {avail.notes && (
-                                  <p className="text-[10px] text-[#5D4037] bg-white/60 p-1.5 rounded border border-[#DAC0A3]/40 border-dashed truncate">
-                                    📝 {avail.notes}
-                                  </p>
-                                )}
-                              </div>
+                    {(() => {
+                      const availableWorkers = dayAvailabilities.filter(a => !(a.startTime === '00:00' && a.endTime === '00:00'));
+                      const legacyOffWorkers = dayAvailabilities.filter(a => a.startTime === '00:00' && a.endTime === '00:00');
+                      
+                      const monthStr = selectedDateStr.substring(0, 7);
+                      const ftEmployees = employees.filter(e => e.status === '正式夥伴' && e.active !== false);
+                      
+                      const implicitOffWorkers = ftEmployees.filter(emp => {
+                        const empName = emp.name.trim();
+                        const hasRegisteredInMonth = availabilities.some(
+                          a => a.employeeName.trim().toLowerCase() === empName.toLowerCase() &&
+                               a.date.startsWith(monthStr)
+                        );
+                        if (!hasRegisteredInMonth) return false;
 
-                              <div className="flex gap-2 mt-1">
-                                <button
-                                  onClick={() => handleInstantAssign(avail)}
-                                  className="flex-1 py-2 bg-[#2E7D32] hover:bg-[#1B5E20] text-white font-bold rounded-lg text-xs transition-all flex items-center justify-center gap-1 cursor-pointer shadow-sm hover:shadow-[#2E7D32]/10"
-                                >
-                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                                  </svg>
-                                  直接排班
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    setModalMode('create');
-                                    setEditingId(null);
-                                    setEmployeeName(avail.employeeName);
-                                    setWorkplace(avail.workplace);
-                                    setStartTime(avail.startTime);
-                                    setEndTime(avail.endTime);
-                                    setNotes(avail.notes || '');
-                                    setSelectedDates([selectedDateStr]);
-                                    setFormOriginalStartTime(avail.startTime);
-                                    setFormOriginalEndTime(avail.endTime);
-                                    setIsModalOpen(true);
-                                  }}
-                                  className="px-3 py-2 bg-white hover:bg-[#FAF7F2] border border-[#DAC0A3]/60 hover:border-[#8D6E63] text-[#5D4037] font-bold rounded-lg text-xs transition-all flex items-center justify-center gap-1 cursor-pointer"
-                                  title="調整排班細節"
-                                >
-                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
-                                  </svg>
-                                  調整
-                                </button>
+                        const hasAvailToday = dayAvailabilities.some(
+                          a => a.employeeName.trim().toLowerCase() === empName.toLowerCase()
+                        );
+                        return !hasAvailToday;
+                      }).map(emp => {
+                        const monthNotes = availabilities.find(
+                          a => a.employeeName.trim().toLowerCase() === emp.name.trim().toLowerCase() &&
+                               a.date.startsWith(monthStr) &&
+                               a.notes &&
+                               a.notes.trim()
+                        )?.notes || '休假';
+
+                        return {
+                          id: `virtual-off-${emp.name}-${selectedDateStr}`,
+                          employeeName: emp.name,
+                          date: selectedDateStr,
+                          workplace: '不克排班',
+                          startTime: '00:00',
+                          endTime: '00:00',
+                          notes: monthNotes,
+                          isVirtual: true
+                        };
+                      });
+
+                      const offWorkers = [...legacyOffWorkers, ...implicitOffWorkers];
+
+                      return (
+                        <>
+                          {availableWorkers.length === 0 ? (
+                            <div className="py-8 text-center border-2 border-dashed border-[#DAC0A3]/45 rounded-xl">
+                              <p className="text-xs text-[#6D4C41]/80 font-medium">今日尚無同仁填寫可用時間</p>
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                              {availableWorkers.map(avail => {
+                                const theme = COLOR_THEMES[getColorFromName(avail.employeeName)] || COLOR_THEMES.indigo;
+                                return (
+                                  <div
+                                    key={avail.id}
+                                    className={`glass-card p-3.5 rounded-xl border flex flex-col justify-between gap-3 ${theme.bg} ${theme.border}`}
+                                  >
+                                    <div className="space-y-1.5">
+                                      <div className="flex items-center justify-between">
+                                        <span className={`text-[10px] font-bold flex items-center gap-1 ${theme.text} font-mono`}>
+                                          <span className={`w-1.5 h-1.5 rounded-full ${theme.dot}`}></span>
+                                          登記：{avail.startTime} - {avail.endTime}
+                                        </span>
+                                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-white/80 text-[#5D4037] border border-[#DAC0A3]/40 font-bold">
+                                          📍 {avail.workplace}
+                                        </span>
+                                      </div>
+                                      <h4 className="font-extrabold text-[#3E2723] text-sm">
+                                        👤 {avail.employeeName}
+                                      </h4>
+                                      {avail.notes && (
+                                        <p className="text-[10px] text-[#5D4037] bg-white/60 p-1.5 rounded border border-[#DAC0A3]/40 border-dashed truncate">
+                                          📝 {avail.notes}
+                                        </p>
+                                      )}
+                                    </div>
+
+                                    <div className="flex gap-2 mt-1">
+                                      <button
+                                        onClick={() => handleInstantAssign(avail)}
+                                        className="flex-1 py-2 bg-[#2E7D32] hover:bg-[#1B5E20] text-white font-bold rounded-lg text-xs transition-all flex items-center justify-center gap-1 cursor-pointer shadow-sm hover:shadow-[#2E7D32]/10"
+                                      >
+                                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                                        </svg>
+                                        直接排班
+                                      </button>
+                                      <button
+                                        onClick={() => {
+                                          setModalMode('create');
+                                          setEditingId(null);
+                                          setEmployeeName(avail.employeeName);
+                                          setWorkplace(avail.workplace);
+                                          setStartTime(avail.startTime);
+                                          setEndTime(avail.endTime);
+                                          setNotes(avail.notes || '');
+                                          setSelectedDates([selectedDateStr]);
+                                          setFormOriginalStartTime(avail.startTime);
+                                          setFormOriginalEndTime(avail.endTime);
+                                          setIsModalOpen(true);
+                                        }}
+                                        className="px-3 py-2 bg-white hover:bg-[#FAF7F2] border border-[#DAC0A3]/60 hover:border-[#8D6E63] text-[#5D4037] font-bold rounded-lg text-xs transition-all flex items-center justify-center gap-1 cursor-pointer"
+                                        title="調整排班細節"
+                                      >
+                                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+                                        </svg>
+                                        調整
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+
+                          {offWorkers.length > 0 && (
+                            <div className="mt-4 pt-4 border-t border-[#DAC0A3]/30 space-y-2">
+                              <h4 className="text-xs font-bold text-red-700 flex items-center gap-1.5">
+                                <span className="w-1.5 h-1.5 rounded-full bg-red-655 animate-pulse"></span>
+                                今日請假/休假同仁 ({offWorkers.length}人)
+                              </h4>
+                              <div className="flex flex-wrap gap-2">
+                                {offWorkers.map(avail => (
+                                  <div 
+                                    key={avail.id} 
+                                    className="text-xs py-1.5 px-3 bg-red-50 border border-red-200 rounded-xl text-red-700 font-bold flex items-center gap-1.5 shadow-xs"
+                                    title={avail.notes ? `備註: ${getCleanNote(avail.notes)}` : undefined}
+                                  >
+                                    <span>👤 {avail.employeeName}</span>
+                                    <span className="text-[10px] px-1 bg-red-100 text-red-800 rounded font-normal scale-90">休假</span>
+                                    {avail.notes && <span className="opacity-75 font-normal">({getCleanNote(avail.notes)})</span>}
+                                  </div>
+                                ))}
                               </div>
                             </div>
-                          );
-                        })}
-                      </div>
-                    )}
+                          )}
+                        </>
+                      );
+                    })()}
                   </section>
 
                   {/* Daily Staffing Coverage Timeline */}
@@ -3196,6 +3598,57 @@ function App() {
 
       </div>
 
+      {/* Full-Time Direct Assignment Shift Picker Modal */}
+      {isFTAssignModalOpen && pendingAssignAvail && (
+        <div className="fixed inset-0 bg-[#3E2723]/30 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="glass-panel rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl border border-[#DAC0A3]/50 flex flex-col p-6 space-y-4">
+            <div>
+              <h3 className="text-base font-bold text-[#3E2723] flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-[#795548]"></span>
+                指派正式夥伴班次
+              </h3>
+              <p className="text-xs text-[#6D4C41] mt-1 font-medium">
+                同仁：{pendingAssignAvail.employeeName}<br />
+                日期：{pendingAssignAvail.date}
+              </p>
+              <p className="text-[11px] text-[#8D6E63] mt-1.5 leading-normal">
+                請選擇要指派的班次時間（此指派將設定為該班次的原始時間，因此不會觸變工時調整標記的顏色）：
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => executeFTAssign(pendingAssignAvail, '早班')}
+                className="w-full py-3 bg-[#795548] hover:bg-[#5D4037] text-white font-bold rounded-xl text-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-md hover:shadow-[#795548]/10"
+              >
+                ☀️ 早班 (06:30 - 15:30)
+              </button>
+              <button
+                type="button"
+                onClick={() => executeFTAssign(pendingAssignAvail, '晚班')}
+                className="w-full py-3 bg-white hover:bg-[#FAF7F2] border border-[#DAC0A3]/70 hover:border-[#8D6E63] text-[#5D4037] font-bold rounded-xl text-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                🌙 晚班 (08:30 - 17:30)
+              </button>
+            </div>
+
+            <div className="border-t border-[#E5DCD5]/60 pt-3 mt-1.5 flex justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsFTAssignModalOpen(false);
+                  setPendingAssignAvail(null);
+                }}
+                className="px-4 py-2 bg-[#FAF7F2] hover:bg-[#FAF7F2]/80 text-[#6D4C41] font-semibold rounded-lg text-xs transition-colors cursor-pointer border border-[#DAC0A3]/40"
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Add/Edit Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-[#3E2723]/30 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
@@ -3221,51 +3674,57 @@ function App() {
             <form onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto max-h-[80vh]">
 
               {/* Quick Autofill Helper in Add Modal */}
-              {modalMode === 'create' && selectedDates.length === 1 && (
-                <div className="space-y-2">
-                  <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider">
-                    從今日登記可用人員中快速填入
-                  </label>
-                  {getAvailabilitiesForDate(selectedDates[0]).length === 0 ? (
-                    <div className="text-[10px] text-[#6D4C41] py-2 px-3 bg-[#FAF7F2] rounded-xl border border-[#DAC0A3]/40 text-center">
-                      此日無夥伴登記可用時間
-                    </div>
-                  ) : (
-                    <div className="flex flex-col gap-2 p-2 bg-[#FAF7F2] rounded-xl border border-[#DAC0A3]/40">
-                      <div className="flex flex-wrap gap-1.5">
-                        {getAvailabilitiesForDate(selectedDates[0]).map(avail => {
-                          const isCurrentlySelected = employeeName === avail.employeeName &&
-                            workplace === avail.workplace &&
-                            startTime === avail.startTime &&
-                            endTime === avail.endTime;
-                          return (
-                            <button
-                              key={avail.id}
-                              type="button"
+              {modalMode === 'create' && selectedDates.length === 1 && (() => {
+                const availableWorkers = getAvailabilitiesForDate(selectedDates[0]).filter(
+                  avail => !(avail.startTime === '00:00' && avail.endTime === '00:00')
+                );
+
+                return (
+                  <div className="space-y-2">
+                    <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider">
+                      從今日登記可用人員中快速填入
+                    </label>
+                    {availableWorkers.length === 0 ? (
+                      <div className="text-[10px] text-[#6D4C41] py-2 px-3 bg-[#FAF7F2] rounded-xl border border-[#DAC0A3]/40 text-center">
+                        此日無夥伴登記可用時間
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-2 p-2 bg-[#FAF7F2] rounded-xl border border-[#DAC0A3]/40">
+                        <div className="flex flex-wrap gap-1.5">
+                          {availableWorkers.map(avail => {
+                            const isCurrentlySelected = employeeName === avail.employeeName &&
+                              workplace === avail.workplace &&
+                              startTime === avail.startTime &&
+                              endTime === avail.endTime;
+                            return (
+                              <button
+                                key={avail.id}
+                                type="button"
                                 onClick={() => {
                                   setEmployeeName(avail.employeeName);
                                   setWorkplace(avail.workplace);
-                                setStartTime(avail.startTime);
-                                setEndTime(avail.endTime);
-                                setNotes(avail.notes || '');
-                                setFormOriginalStartTime(avail.startTime);
-                                setFormOriginalEndTime(avail.endTime);
-                              }}
-                              className={`text-[10px] px-2.5 py-1.5 rounded-xl border transition-all cursor-pointer font-bold flex items-center gap-1 ${isCurrentlySelected
-                                  ? 'bg-[#795548] border-[#795548] text-white shadow-sm shadow-[#795548]/15'
-                                  : 'bg-white border border-[#DAC0A3]/55 hover:border-[#8D6E63] text-[#5D4037] hover:text-[#3E2723]'
-                                }`}
-                            >
-                              <span>👤 {avail.employeeName}</span>
-                              <span className="opacity-60 text-[9px] font-mono">({avail.startTime}-{avail.endTime} @ {avail.workplace})</span>
-                            </button>
-                          );
-                        })}
+                                  setStartTime(avail.startTime);
+                                  setEndTime(avail.endTime);
+                                  setNotes(avail.notes || '');
+                                  setFormOriginalStartTime(avail.startTime);
+                                  setFormOriginalEndTime(avail.endTime);
+                                }}
+                                className={`text-[10px] px-2.5 py-1.5 rounded-xl border transition-all cursor-pointer font-bold flex items-center gap-1 ${isCurrentlySelected
+                                    ? 'bg-[#795548] border-[#795548] text-white shadow-sm shadow-[#795548]/15'
+                                    : 'bg-white border border-[#DAC0A3]/55 hover:border-[#8D6E63] text-[#5D4037] hover:text-[#3E2723]'
+                                  }`}
+                              >
+                                <span>👤 {avail.employeeName}</span>
+                                <span className="opacity-60 text-[9px] font-mono">({avail.startTime}-{avail.endTime} @ {avail.workplace})</span>
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
-                  )}
-                </div>
-              )}
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Employee Name */}
               <div>
@@ -3273,7 +3732,7 @@ function App() {
                 <select
                   required
                   value={employeeName}
-                  onChange={(e) => setEmployeeName(e.target.value)}
+                  onChange={(e) => handleEmployeeNameChange(e.target.value)}
                   className="w-full glass-input px-4 py-2.5 rounded-xl text-sm cursor-pointer"
                 >
                   <option value="" className="bg-white text-[#3E2723]">請選擇排班夥伴...</option>
@@ -3355,6 +3814,7 @@ function App() {
                         const dateStr = formatDateString(dateObj);
                         const isSelected = selectedDates.includes(dateStr);
                         const isToday = dateStr === todayStr;
+                        const isCurrentMonth = dateObj.getMonth() === currentMonthStart.getMonth();
 
                         return (
                           <button
@@ -3363,7 +3823,9 @@ function App() {
                             onClick={() => toggleDateSelection(dateStr)}
                             className={`relative py-1.5 px-0.5 rounded-lg border text-center transition-all cursor-pointer text-[10px] font-mono font-bold flex flex-col items-center justify-center ${isSelected
                                 ? 'bg-[#795548]/15 border-[#795548] text-[#3E2723] shadow-xs'
-                                : 'bg-white border-[#E5DCD5] text-[#8D6E63] hover:border-[#8D6E63] hover:bg-[#FAF7F2]'
+                                : isCurrentMonth
+                                  ? 'bg-white border-[#E5DCD5] text-[#8D6E63] hover:border-[#8D6E63] hover:bg-[#FAF7F2]'
+                                  : 'bg-[#FAF7F2]/50 border-dashed border-[#E5DCD5]/55 text-[#8D6E63]/40 opacity-40 hover:bg-[#FAF7F2]'
                               } ${isToday ? 'ring-1 ring-[#795548]/40' : ''}`}
                             title={formatDateString(dateObj)}
                           >
@@ -3423,6 +3885,41 @@ function App() {
                 </div>
               </div>
 
+              {/* Quick Shift Presets inside scheduling modal */}
+              <div className="space-y-2">
+                <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider">常用班次快捷鍵</label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStartTime('06:30');
+                      setEndTime('15:30');
+                    }}
+                    className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                      startTime === '06:30' && endTime === '15:30'
+                        ? 'bg-[#795548] text-white border-[#795548]'
+                        : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:border-[#8D6E63] hover:bg-[#FAF7F2]'
+                    }`}
+                  >
+                    ☀️ 早班 (06:30 - 15:30)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStartTime('08:30');
+                      setEndTime('17:30');
+                    }}
+                    className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                      startTime === '08:30' && endTime === '17:30'
+                        ? 'bg-[#795548] text-white border-[#795548]'
+                        : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:border-[#8D6E63] hover:bg-[#FAF7F2]'
+                    }`}
+                  >
+                    🌙 晚班 (08:30 - 17:30)
+                  </button>
+                </div>
+              </div>
+
               {/* Auto calculated hours warning/info */}
               {startTime && endTime && (
                 <div className={`px-4 py-2.5 rounded-xl border flex items-center justify-between ${
@@ -3468,6 +3965,46 @@ function App() {
                       <p className="text-xs font-bold text-red-700">不可連續排班 7 天</p>
                       <p className="text-[11px] text-red-600 leading-snug">
                         此排班將使「{targetName}」出現連續 7 天或以上的班次，違反勞工法規。請調整日期。
+                      </p>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Off-day conflict warning */}
+              {(() => {
+                if (!employeeName.trim()) return null;
+                const targetName = employeeName.trim().toLowerCase();
+                const checkDates = modalMode === 'create' ? selectedDates : [singleDate];
+                
+                const conflictingDates = checkDates.filter(d => {
+                  const monthStr = d.substring(0, 7);
+                  // Find all availability records for this employee in this month
+                  const monthAvails = availabilities.filter(
+                    a => a.employeeName.trim().toLowerCase() === targetName &&
+                         a.date.startsWith(monthStr)
+                  );
+                  // If they haven't registered any availability for this month yet, no conflict
+                  if (monthAvails.length === 0) return false;
+
+                  // They have registered availability. They are available on date d ONLY if
+                  // they have a record on date d and it is not a legacy/explicit off-day.
+                  const isAvailable = monthAvails.some(
+                    a => a.date === d && !(a.startTime === '00:00' && a.endTime === '00:00')
+                  ) || schedules.some(
+                    s => s.employeeName.trim().toLowerCase() === targetName && s.date === d
+                  );
+                  return !isAvailable;
+                });
+
+                if (conflictingDates.length === 0) return null;
+                return (
+                  <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-amber-50 border border-amber-200">
+                    <span className="text-base leading-none mt-0.5">⚠️</span>
+                    <div className="space-y-0.5">
+                      <p className="text-xs font-bold text-amber-700">休假/非配合工作日衝突</p>
+                      <p className="text-[11px] text-amber-600 leading-snug">
+                        「{employeeName.trim()}」在 {conflictingDates.join(', ')} 並無登記配合排班（即休息日或未登記）。確定仍要安排班次嗎？
                       </p>
                     </div>
                   </div>
