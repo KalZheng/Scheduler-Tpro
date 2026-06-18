@@ -114,6 +114,14 @@ const COLOR_THEMES: Record<string, { bg: string, border: string, text: string, d
     dot: 'bg-[#A1887F]',
     hover: 'hover:border-[#BCAAA4]/70 hover:bg-[#D7CCC8]/50',
     badgeBg: 'bg-[#8D6E63]'
+  },
+  lightBlue: {
+    bg: '!bg-[#E0F2FE]',
+    border: '!border-[#bae6fd]',
+    text: 'text-[#0369a1]',
+    dot: 'bg-[#0284c7]',
+    hover: 'hover:border-[#38bdf8] hover:bg-[#e0f2fe]/90',
+    badgeBg: 'bg-[#0284c7]'
   }
 };
 
@@ -375,12 +383,22 @@ function App() {
   const [availNotes, setAvailNotes] = useState('');
   const [availSelectedDates, setAvailSelectedDates] = useState<string[]>([]);
 
+  // Worker confirmed shifts calendar month state
+  const [workerCalendarMonth, setWorkerCalendarMonth] = useState<Date>(() => {
+    const today = new Date();
+    return new Date(today.getFullYear(), today.getMonth() + 1, 1);
+  });
+
   // Month Calendar View states
   const [currentMonthStart, setCurrentMonthStart] = useState<Date>(() => {
     const today = new Date();
-    return new Date(today.getFullYear(), today.getMonth(), 1);
+    return new Date(today.getFullYear(), today.getMonth() + 1, 1);
   });
-  const [selectedDateStr, setSelectedDateStr] = useState<string>(formatDateString(new Date()));
+  const [selectedDateStr, setSelectedDateStr] = useState<string>(() => {
+    const today = new Date();
+    const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+    return formatDateString(nextMonth);
+  });
   const [exportStartDate, setExportStartDate] = useState<string>('');
   const [exportEndDate, setExportEndDate] = useState<string>('');
 
@@ -395,6 +413,8 @@ function App() {
   const [startTime, setStartTime] = useState('09:00');
   const [endTime, setEndTime] = useState('17:00');
   const [notes, setNotes] = useState('');
+  const [formOriginalStartTime, setFormOriginalStartTime] = useState<string | null>(null);
+  const [formOriginalEndTime, setFormOriginalEndTime] = useState<string | null>(null);
 
   // Creation Mode: multiple date selects (aligned in 2 rows of 7 columns)
   const [selectedDates, setSelectedDates] = useState<string[]>([]);
@@ -404,6 +424,14 @@ function App() {
   // Generate date checklist for the modal form (aligned in 2 rows of 7 columns, starting Monday of current week)
   const pickerWeekStart = getMondayOfDate(new Date());
   const pickerDates = getAlign28Days(pickerWeekStart);
+
+  // Date calculations for worker's availability selection (Next Month)
+  const workerNextMonthStart = (() => {
+    const today = new Date();
+    return new Date(today.getFullYear(), today.getMonth() + 1, 1);
+  })();
+  const workerCalendarGridDates = getMonthGridDates(workerNextMonthStart);
+  const workerDaysInMonth = getDaysInMonth(workerNextMonthStart);
 
   const handleStatusChange = (status: '正式夥伴' | '兼職夥伴') => {
     setEmpStatus(status);
@@ -694,16 +722,7 @@ function App() {
     }
   };
 
-  // Delete worker availability
-  const handleDeleteAvailability = async (id: string) => {
-    if (safeConfirm('確定要刪除此可用時間紀錄嗎？')) {
-      try {
-        await deleteAvailability(id);
-      } catch (error) {
-        console.error("Error deleting availability: ", error);
-      }
-    }
-  };
+
 
   // Instant Schedule Assign (Zero-Click Modal)
   const handleInstantAssign = async (avail: WorkerAvailability) => {
@@ -745,7 +764,9 @@ function App() {
         startTime: avail.startTime,
         endTime: avail.endTime,
         notes: avail.notes ? `由登記可用時間自動排入: ${avail.notes.trim()}` : '由登記可用時間自動排入',
-        color: derivedColor
+        color: derivedColor,
+        originalStartTime: avail.startTime,
+        originalEndTime: avail.endTime
       };
       await addSchedule(payload);
       // Remove the confirmed availability so it no longer shows as unconfirmed in the grid
@@ -815,18 +836,18 @@ function App() {
 
   // Quick select shortcuts for worker availability
   const handleSelectAvailAllDays = () => {
-    setAvailSelectedDates(pickerDates.map(formatDateString));
+    setAvailSelectedDates(workerDaysInMonth.map(formatDateString));
   };
 
   const handleSelectAvailMonWedFri = () => {
-    const mwf = pickerDates
+    const mwf = workerDaysInMonth
       .filter(d => d.getDay() === 1 || d.getDay() === 3 || d.getDay() === 5)
       .map(formatDateString);
     setAvailSelectedDates(mwf);
   };
 
   const handleSelectAvailTueThu = () => {
-    const tt = pickerDates
+    const tt = workerDaysInMonth
       .filter(d => d.getDay() === 2 || d.getDay() === 4)
       .map(formatDateString);
     setAvailSelectedDates(tt);
@@ -845,6 +866,8 @@ function App() {
     setStartTime('09:00');
     setEndTime('17:00');
     setNotes('');
+    setFormOriginalStartTime(null);
+    setFormOriginalEndTime(null);
 
     if (defaultDateStr) {
       setSelectedDates([defaultDateStr]);
@@ -865,6 +888,8 @@ function App() {
     setEndTime(schedule.endTime);
     setNotes(schedule.notes || '');
     setSingleDate(schedule.date);
+    setFormOriginalStartTime(schedule.originalStartTime || schedule.startTime);
+    setFormOriginalEndTime(schedule.originalEndTime || schedule.endTime);
 
     setIsModalOpen(true);
   };
@@ -926,7 +951,9 @@ function App() {
             startTime,
             endTime,
             notes: notes.trim(),
-            color: derivedColor
+            color: derivedColor,
+            originalStartTime: formOriginalStartTime || undefined,
+            originalEndTime: formOriginalEndTime || undefined
           };
           return addSchedule(payload);
         });
@@ -940,7 +967,9 @@ function App() {
           startTime,
           endTime,
           notes: notes.trim(),
-          color: derivedColor
+          color: derivedColor,
+          originalStartTime: formOriginalStartTime || undefined,
+          originalEndTime: formOriginalEndTime || undefined
         };
         await updateSchedule(editingId, payload);
       }
@@ -1011,6 +1040,15 @@ function App() {
 
   const handleClearAllSelected = () => {
     setSelectedDates([]);
+  };
+
+  const getScheduleTheme = (schedule: WorkSchedule) => {
+    if (schedule.originalStartTime && schedule.originalEndTime) {
+      if (schedule.startTime !== schedule.originalStartTime || schedule.endTime !== schedule.originalEndTime) {
+        return COLOR_THEMES.lightBlue;
+      }
+    }
+    return COLOR_THEMES[schedule.color] || COLOR_THEMES.indigo;
   };
 
   // Calendar calculations (filtered by the currently active visible month grid)
@@ -1100,7 +1138,10 @@ function App() {
       const dayName = getDayOfWeekName(dateStr);
       const parts = dateStr.split('-');
       const mmdd = parts.length >= 3 ? `${parts[1]}/${parts[2]}` : dateStr;
-      return `${mmdd}\n(${dayName})`;
+      const dayOfWeekIndex = dateObj.getDay();
+      const mappedDayIndex = dayOfWeekIndex === 0 ? 7 : dayOfWeekIndex;
+      const isERP = mappedDayIndex === 1 || mappedDayIndex === 3 || mappedDayIndex === 5;
+      return isERP ? `${mmdd}\n(${dayName} ERP)` : `${mmdd}\n(${dayName})`;
     });
     
     const headers = ['人員姓名', ...dateHeaders];
@@ -1361,7 +1402,7 @@ function App() {
                 <div>
                   <h3 className="text-base font-bold text-[#3E2723] flex items-center gap-2">
                     <span className="w-2.5 h-2.5 rounded-full bg-[#2E7D32]"></span>
-                    登記可用時段
+                    登記可用時段 ({workerNextMonthStart.getFullYear()}年 {workerNextMonthStart.getMonth() + 1}月)
                   </h3>
                   <p className="text-xs text-[#6D4C41] mt-0.5 font-medium">
                     請選取日期、地點與可配合排班的時間範圍，店長即可為您安排班表。
@@ -1447,7 +1488,7 @@ function App() {
                         onClick={handleSelectAvailAllDays}
                         className="text-[10px] px-2.5 py-1 rounded bg-white border border-[#DAC0A3]/65 text-[#6D4C41] hover:border-[#8D6E63] hover:text-[#3E2723] hover:bg-[#FAF7F2] cursor-pointer font-bold transition-all"
                       >
-                        全選 (四週)
+                        全選 (整月)
                       </button>
                       <button
                         type="button"
@@ -1458,28 +1499,33 @@ function App() {
                       </button>
                     </div>
 
-                    {/* 4-Week Calendar checklist grid */}
+                    {/* Monthly Calendar checklist grid */}
                     <div className="p-2 border border-[#DAC0A3]/50 rounded-xl bg-white/40">
                       <div className="grid grid-cols-7 gap-1 text-center text-[10px] text-[#6D4C41]/80 font-bold mb-1">
                         <div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div><div>日</div>
                       </div>
                       <div className="grid grid-cols-7 gap-1">
-                        {pickerDates.map(dateObj => {
+                        {workerCalendarGridDates.map(dateObj => {
                           const dateStr = formatDateString(dateObj);
                           const isSelected = availSelectedDates.includes(dateStr);
                           const isToday = dateStr === todayStr;
+                          const isNextMonth = dateObj.getMonth() === workerNextMonthStart.getMonth() && dateObj.getFullYear() === workerNextMonthStart.getFullYear();
+
+                          if (!isNextMonth) {
+                            return <div key={dateStr} className="h-9" />;
+                          }
 
                           return (
                             <button
                               key={dateStr}
                               type="button"
                               onClick={() => toggleAvailDateSelection(dateStr)}
-                              className={`relative py-1.5 px-0.5 rounded-lg border text-center transition-all cursor-pointer text-[10px] font-mono font-bold flex flex-col items-center justify-center ${isSelected
+                              className={`relative py-1.5 px-0.5 rounded-lg border text-center transition-all cursor-pointer text-[10px] font-mono font-bold flex flex-col items-center justify-center h-9 ${isSelected
                                   ? 'bg-[#8D6E63]/20 border-[#8D6E63] text-[#5D4037] shadow-sm'
                                   : 'bg-white/70 border-[#DAC0A3]/40 text-[#6D4C41] hover:border-[#8D6E63]/60 hover:bg-white'
                                 } ${isToday ? 'ring-1 ring-[#8D6E63]/40' : ''}`}
                             >
-                              <span>{formatMMDD(dateObj)}</span>
+                              <span>{dateObj.getDate()}</span>
                               {isToday && (
                                 <span className="absolute top-0.5 right-0.5 w-1 h-1 rounded-full bg-[#8D6E63]"></span>
                               )}
@@ -1581,43 +1627,165 @@ function App() {
                         return (
                           <div
                             key={avail.id}
-                            className="glass-card p-4 rounded-xl border border-[#DAC0A3]/45 flex items-center justify-between gap-4"
+                            className="glass-card p-4 rounded-xl border border-[#DAC0A3]/45 space-y-1"
                           >
-                            <div className="space-y-1">
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm font-extrabold text-[#3E2723]">
-                                  {avail.date} ({dayInfo.name})
-                                </span>
-                                <span className="text-[10px] px-2 py-0.5 rounded bg-[#F5EBE6] text-[#5D4037] border border-[#DAC0A3]/40 font-bold">
-                                  📍 {avail.workplace}
-                                </span>
-                              </div>
-                              <div className="text-xs text-[#6D4C41]/90 font-medium flex items-center gap-1 font-mono">
-                                🕒 可配合時間：{avail.startTime} - {avail.endTime}
-                              </div>
-                              {avail.notes && (
-                                <p className="text-xs text-[#5D4037] bg-white/50 px-2.5 py-1 rounded border border-[#DAC0A3]/40 border-dashed mt-1 inline-block">
-                                  📝 備註：{avail.notes}
-                                </p>
-                              )}
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-extrabold text-[#3E2723]">
+                                {avail.date} ({dayInfo.name})
+                              </span>
+                              <span className="text-[10px] px-2 py-0.5 rounded bg-[#F5EBE6] text-[#5D4037] border border-[#DAC0A3]/40 font-bold">
+                                📍 {avail.workplace}
+                              </span>
                             </div>
-                            <button
-                              onClick={() => handleDeleteAvailability(avail.id)}
-                              className="p-2 rounded-xl bg-white hover:bg-red-50 text-[#6D4C41] hover:text-red-650 transition-all border border-[#DAC0A3]/65 hover:border-red-200 cursor-pointer"
-                              title="刪除可用時段"
-                            >
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                              </svg>
-                            </button>
+                            <div className="text-xs text-[#6D4C41]/90 font-medium flex items-center gap-1 font-mono">
+                              🕒 可配合時間：{avail.startTime} - {avail.endTime}
+                            </div>
+                            {avail.notes && (
+                              <p className="text-xs text-[#5D4037] bg-white/50 px-2.5 py-1 rounded border border-[#DAC0A3]/40 border-dashed mt-1 inline-block">
+                                📝 備註：{avail.notes}
+                              </p>
+                            )}
                           </div>
                         );
                       })
                   )}
                 </div>
               </div>
-
             </div>
+
+            {/* Confirmed Schedule Calendar Card */}
+              <div className="glass-panel p-6 rounded-2xl border border-[#DAC0A3]/50 shadow-sm space-y-4 bg-white/40">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-[#DAC0A3]/35 pb-3">
+                  <div>
+                    <h3 className="text-base font-bold text-[#3E2723] flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-[#795548]"></span>
+                      您的已確認班表 (個人行事曆)
+                    </h3>
+                    <p className="text-xs text-[#6D4C41] mt-0.5 font-medium">
+                      以下為您在該月份已被主管確認並安排的排班時段。
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const today = new Date();
+                        setWorkerCalendarMonth(new Date(today.getFullYear(), today.getMonth() + 1, 1));
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-white hover:bg-[#FAF7F2] text-[#5D4037] border border-[#DAC0A3]/65 text-xs font-semibold transition-all cursor-pointer"
+                    >
+                      預設
+                    </button>
+                    <div className="flex items-center rounded-lg border border-[#DAC0A3]/60 bg-white overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const prev = new Date(workerCalendarMonth);
+                          prev.setMonth(prev.getMonth() - 1);
+                          setWorkerCalendarMonth(prev);
+                        }}
+                        className="p-1.5 hover:bg-[#FAF7F2] text-[#6D4C41] border-r border-[#DAC0A3]/60 transition-colors cursor-pointer"
+                        title="前一個月"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" />
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = new Date(workerCalendarMonth);
+                          next.setMonth(next.getMonth() + 1);
+                          setWorkerCalendarMonth(next);
+                        }}
+                        className="p-1.5 hover:bg-[#FAF7F2] text-[#6D4C41] transition-colors cursor-pointer"
+                        title="後一個月"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
+                        </svg>
+                      </button>
+                    </div>
+                    <span className="text-sm font-bold text-[#3E2723] ml-1 select-none">
+                      {workerCalendarMonth.getFullYear()}年 {workerCalendarMonth.getMonth() + 1}月
+                    </span>
+                  </div>
+                </div>
+
+                {/* Calendar monthly grid */}
+                <div className="border border-[#DAC0A3]/50 rounded-2xl overflow-hidden bg-white/70">
+                  <div className="grid grid-cols-7 border-b border-[#DAC0A3]/50 bg-[#F5EBE6]/60">
+                    {DAYS_OF_WEEK.map(day => (
+                      <div key={day.value} className="py-2 text-center text-xs font-bold text-[#6D4C41]">
+                        {day.name}
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="grid grid-cols-7 gap-px bg-[#EADBC8]/60">
+                    {getMonthGridDates(workerCalendarMonth).map((dateObj) => {
+                      const dateStr = formatDateString(dateObj);
+                      const isToday = dateStr === todayStr;
+                      const isCurrentMonth = dateObj.getMonth() === workerCalendarMonth.getMonth();
+
+                      // Filter confirmed schedules for this employee on this date
+                      const daySchedules = schedules.filter(
+                        s => s.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase() && s.date === dateStr
+                      ).sort((a, b) => compareTimeStrings(a.startTime, b.startTime));
+
+                      const isFirstOfMonth = dateObj.getDate() === 1;
+                      const dateLabel = isFirstOfMonth ? `${dateObj.getMonth() + 1}/1` : dateObj.getDate().toString();
+
+                      return (
+                        <div
+                          key={dateStr}
+                          className={`min-h-[85px] p-1.5 flex flex-col justify-between select-none relative ${
+                            isToday
+                              ? 'bg-[#FAF7F2]'
+                              : isCurrentMonth
+                                ? 'bg-white/95'
+                                : 'bg-[#FAF7F2]/40 text-[#8D6E63]/40 opacity-40'
+                          }`}
+                        >
+                          {/* Date Label */}
+                          <div className="flex items-center justify-between mb-1">
+                            <span
+                              className={`text-[11px] font-bold font-mono px-1.5 py-0.5 rounded-full ${
+                                isToday
+                                  ? 'bg-[#795548] text-white shadow-sm'
+                                  : 'text-[#3E2723]'
+                              }`}
+                            >
+                              {dateLabel}
+                            </span>
+                          </div>
+
+                          {/* Shifts */}
+                          <div className="flex-1 space-y-1 overflow-y-auto">
+                            {daySchedules.map(schedule => {
+                              const theme = getScheduleTheme(schedule);
+                              const cleanNote = getCleanNote(schedule.notes);
+                              return (
+                                <div
+                                  key={schedule.id}
+                                  className={`text-[9px] py-1 px-1.5 rounded border font-semibold flex flex-col gap-0.5 ${theme.bg} ${theme.border} ${theme.text}`}
+                                  title={cleanNote ? `📝 ${cleanNote}` : undefined}
+                                >
+                                  <div className="font-mono font-bold leading-tight">{schedule.startTime} - {schedule.endTime}</div>
+                                  {cleanNote && (
+                                    <div className="opacity-95 italic truncate">({cleanNote})</div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
 
             {/* Subtle Manager Login link at the bottom of the Worker view */}
             <div className="flex justify-center pt-8 pb-4">
@@ -2305,7 +2473,7 @@ function App() {
                                 {/* Desktop View: lists the shift pills */}
                                 <div className="hidden md:block space-y-1">
                                   {daySchedules.slice(0, 3).map(schedule => {
-                                    const theme = COLOR_THEMES[schedule.color] || COLOR_THEMES.indigo;
+                                    const theme = getScheduleTheme(schedule);
                                     return (
                                       <div
                                         key={schedule.id}
@@ -2329,7 +2497,7 @@ function App() {
                                 {/* Mobile View: displays small colored indicator dots */}
                                 <div className="md:hidden flex flex-wrap gap-0.5 justify-center mt-1">
                                   {daySchedules.map(schedule => {
-                                    const theme = COLOR_THEMES[schedule.color] || COLOR_THEMES.indigo;
+                                    const theme = getScheduleTheme(schedule);
                                     return (
                                       <span
                                         key={schedule.id}
@@ -2353,7 +2521,7 @@ function App() {
                           <thead>
                             <tr className="border-b border-[#DAC0A3]/50 bg-[#F5EBE6]/60">
                               {/* Sticky Employee Row Header */}
-                              <th className="sticky left-0 z-20 bg-[#F5EBE6] px-4 py-4 text-xs font-black text-[#3E2723] border-r border-b border-[#DAC0A3]/50 w-[130px] shadow-[4px_0_8px_-4px_rgba(100,70,50,0.15)]">
+                              <th rowSpan={2} className="sticky left-0 z-20 bg-[#F5EBE6] px-4 py-4 text-xs font-black text-[#3E2723] border-r border-b border-[#DAC0A3]/50 w-[130px] shadow-[4px_0_8px_-4px_rgba(100,70,50,0.15)]">
                                 人員姓名
                               </th>
                               {/* Date headers */}
@@ -2392,6 +2560,38 @@ function App() {
                                         </span>
                                       )}
                                     </div>
+                                  </th>
+                                );
+                              })}
+                            </tr>
+                            <tr className="border-b border-[#DAC0A3]/50 bg-[#F5EBE6]/60">
+                              {/* ERP labels row */}
+                              {gridDates.map(dateObj => {
+                                const dateStr = formatDateString(dateObj);
+                                const isToday = dateStr === todayStr;
+                                const isSelected = dateStr === selectedDateStr;
+                                const dayOfWeekIndex = dateObj.getDay();
+                                const mappedDayIndex = dayOfWeekIndex === 0 ? 7 : dayOfWeekIndex;
+                                const isERP = mappedDayIndex === 1 || mappedDayIndex === 3 || mappedDayIndex === 5;
+
+                                return (
+                                  <th
+                                    key={dateStr + '-erp'}
+                                    onClick={() => setSelectedDateStr(dateStr)}
+                                    className={`px-2 py-1 text-center border-r border-b border-[#DAC0A3]/50 w-[100px] cursor-pointer transition-colors ${isSelected
+                                        ? 'bg-[#8D6E63]/15 text-[#3E2723]'
+                                        : isToday
+                                          ? 'bg-[#F5EBE6] text-[#3E2723] font-black'
+                                          : 'hover:bg-[#FAF7F2]/75'
+                                      }`}
+                                  >
+                                    {isERP ? (
+                                      <span className="inline-block px-1.5 py-0.5 text-[9px] font-black bg-indigo-600/10 text-indigo-750 border border-indigo-600/20 rounded-md">
+                                        ERP
+                                      </span>
+                                    ) : (
+                                      <span className="inline-block h-[15px]"></span>
+                                    )}
                                   </th>
                                 );
                               })}
@@ -2454,7 +2654,7 @@ function App() {
                                           <div className="space-y-0.5">
                                             {/* 1. Scheduled shifts */}
                                             {empSchedules.map(sched => {
-                                              const theme = COLOR_THEMES[sched.color] || COLOR_THEMES.indigo;
+                                              const theme = getScheduleTheme(sched);
                                               const cleanNote = getCleanNote(sched.notes);
                                               return (
                                                 <div
@@ -2519,6 +2719,8 @@ function App() {
                                               setEndTime('17:00');
                                               setNotes('');
                                               setSelectedDates([dateStr]);
+                                              setFormOriginalStartTime(null);
+                                              setFormOriginalEndTime(null);
                                               setIsModalOpen(true);
                                             }}
                                             className="w-full h-full min-h-[72px] rounded-lg border border-transparent hover:border-[#8D6E63]/40 hover:bg-[#FAF7F2] transition-all flex items-center justify-center text-[#E5D3C3] hover:text-[#795548] cursor-pointer"
@@ -2569,7 +2771,7 @@ function App() {
                     ) : (
                       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                         {selectedDateShifts.map(schedule => {
-                          const theme = COLOR_THEMES[schedule.color] || COLOR_THEMES.indigo;
+                          const theme = getScheduleTheme(schedule);
                           const duration = calculateDuration(schedule.startTime, schedule.endTime);
 
                           return (
@@ -2699,6 +2901,8 @@ function App() {
                                     setEndTime(avail.endTime);
                                     setNotes(avail.notes || '');
                                     setSelectedDates([selectedDateStr]);
+                                    setFormOriginalStartTime(avail.startTime);
+                                    setFormOriginalEndTime(avail.endTime);
                                     setIsModalOpen(true);
                                   }}
                                   className="px-3 py-2 bg-white hover:bg-[#FAF7F2] border border-[#DAC0A3]/60 hover:border-[#8D6E63] text-[#5D4037] font-bold rounded-lg text-xs transition-all flex items-center justify-center gap-1 cursor-pointer"
@@ -2928,12 +3132,14 @@ function App() {
                             <button
                               key={avail.id}
                               type="button"
-                              onClick={() => {
-                                setEmployeeName(avail.employeeName);
-                                setWorkplace(avail.workplace);
+                                onClick={() => {
+                                  setEmployeeName(avail.employeeName);
+                                  setWorkplace(avail.workplace);
                                 setStartTime(avail.startTime);
                                 setEndTime(avail.endTime);
                                 setNotes(avail.notes || '');
+                                setFormOriginalStartTime(avail.startTime);
+                                setFormOriginalEndTime(avail.endTime);
                               }}
                               className={`text-[10px] px-2.5 py-1.5 rounded-xl border transition-all cursor-pointer font-bold flex items-center gap-1 ${isCurrentlySelected
                                   ? 'bg-[#795548] border-[#795548] text-white shadow-sm shadow-[#795548]/15'

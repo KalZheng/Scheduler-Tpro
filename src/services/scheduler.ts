@@ -22,6 +22,8 @@ export interface WorkSchedule {
   color: string;     // e.g. "emerald", "indigo", "violet", "amber", "rose"
   notes?: string;
   createdAt: number;
+  originalStartTime?: string;
+  originalEndTime?: string;
 }
 
 export interface WorkerAvailability {
