@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   subscribeToSchedules,
   addSchedule,
@@ -446,6 +446,16 @@ function App() {
   const workerCalendarGridDates = getMonthGridDates(workerNextMonthStart);
   const workerDaysInMonth = getDaysInMonth(workerNextMonthStart);
 
+  const isWorkerEditable = (() => {
+    if (!workerName.trim()) return true;
+    const targetMonthStr = formatDateString(workerNextMonthStart).substring(0, 7);
+    const hasConfirmed = schedules.some(
+      s => s.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase() &&
+           s.date.startsWith(targetMonthStr)
+    );
+    return (new Date().getDate() <= 20) || !hasConfirmed;
+  })();
+
   const handleStatusChange = (status: '正式夥伴' | '兼職夥伴') => {
     setEmpStatus(status);
   };
@@ -610,6 +620,47 @@ function App() {
     }
   }, [currentMonthStart]);
 
+  // Compute full-time worker's database registered rest days
+  const dbRestDates = useMemo(() => {
+    if (!isFullTime || !workerName.trim()) return [];
+    const targetMonthStr = formatDateString(workerNextMonthStart).substring(0, 7);
+    const workerAvails = availabilities.filter(
+      a => a.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase()
+    );
+    const hasRecords = workerAvails.some(a => a.date.startsWith(targetMonthStr));
+    if (!hasRecords) return [];
+
+    const workDates = workerAvails
+      .filter(a => a.date.startsWith(targetMonthStr) && !(a.startTime === '00:00' && a.endTime === '00:00'))
+      .map(a => a.date);
+      
+    const daysInMonth = getDaysInMonth(workerNextMonthStart);
+    const computedRestDates = daysInMonth
+      .map(formatDateString)
+      .filter(dateStr => !workDates.includes(dateStr));
+      
+    const legacyRestDates = workerAvails
+      .filter(a => a.date.startsWith(targetMonthStr) && a.startTime === '00:00' && a.endTime === '00:00')
+      .map(a => a.date);
+      
+    return Array.from(new Set([...computedRestDates, ...legacyRestDates])).sort();
+  }, [availabilities, workerName, isFullTime, workerNextMonthStart]);
+
+  // Keep track of the last synced DB rest dates to detect when DB actually changes
+  const lastSyncedDbRestDatesRef = useRef<string[]>([]);
+
+  // Synchronize full-time worker's calendar selection with registered rest days in the database
+  useEffect(() => {
+    // Only update availSelectedDates if the database state itself has changed
+    const isDbChanged = dbRestDates.length !== lastSyncedDbRestDatesRef.current.length ||
+                        !dbRestDates.every((d, i) => d === lastSyncedDbRestDatesRef.current[i]);
+    
+    if (isDbChanged) {
+      lastSyncedDbRestDatesRef.current = dbRestDates;
+      setAvailSelectedDates(dbRestDates);
+    }
+  }, [dbRestDates]);
+
   // Worker Identity handlers
   const handleWorkerVerify = (e: React.FormEvent) => {
     e.preventDefault();
@@ -689,6 +740,11 @@ function App() {
     e.preventDefault();
     if (!workerName.trim()) {
       alert('請先輸入您的姓名。');
+      return;
+    }
+
+    if (!isWorkerEditable) {
+      alert('已逾本月登記/修改截止時間（20日），且已有已確認之排班，無法再進行登記。');
       return;
     }
 
@@ -1137,12 +1193,60 @@ function App() {
   // Delete availability handler
   const handleDeleteAvailability = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
+
+    if (!isWorkerEditable) {
+      alert('已逾本月登記/修改截止時間（20日），且已有已確認之排班，無法刪除登記。');
+      return;
+    }
     
-    // Check if it is a virtual ID
-    if (id.startsWith('virtual-off-')) {
-      const dateStr = id.replace('virtual-off-', '');
+    // Check if it is a virtual ID or a real rest day record (00:00 - 00:00)
+    const avail = id.startsWith('virtual-off-') ? null : availabilities.find(a => a.id === id);
+    const isRestDay = id.startsWith('virtual-off-') || (avail && avail.startTime === '00:00' && avail.endTime === '00:00');
+
+    if (isRestDay) {
+      const dateStr = id.startsWith('virtual-off-') ? id.replace('virtual-off-', '') : avail!.date;
+      const targetMonthStr = dateStr.substring(0, 7);
+      
+      // Get all availabilities for this worker in this target month
+      const workerAvails = availabilities.filter(
+        a => a.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase() && a.date.startsWith(targetMonthStr)
+      );
+      
+      const workDates = workerAvails
+        .filter(a => !(a.startTime === '00:00' && a.endTime === '00:00'))
+        .map(a => a.date);
+        
+      const daysInMonth = getDaysInMonth(new Date(dateStr));
+      const computedRestDates = daysInMonth
+        .map(formatDateString)
+        .filter(d => !workDates.includes(d));
+        
+      const legacyRestDates = workerAvails
+        .filter(a => a.startTime === '00:00' && a.endTime === '00:00')
+        .map(a => a.date);
+        
+      const allRestDates = Array.from(new Set([...computedRestDates, ...legacyRestDates]));
+      
+      if (allRestDates.length === 1 && allRestDates.includes(dateStr)) {
+        // Deleting the last rest day means they have 0 rest days, which means we should clear their entire month's registration
+        if (safeConfirm(`這是您本月最後一個休假日期。變更此日期將會清除您本月的整月排班登記（避免因無休息日而違反連續工作規定）。確定要清除所有登記嗎？`)) {
+          try {
+            // Delete all worker availabilities for this month
+            for (const record of workerAvails) {
+              await deleteAvailability(record.id);
+            }
+          } catch (error) {
+            console.error("Error clearing availabilities: ", error);
+          }
+        }
+        return;
+      }
+      
       if (safeConfirm(`確定要將 ${dateStr} 的休假改為配合排班（早班）嗎？`)) {
         try {
+          if (avail) {
+            await deleteAvailability(avail.id);
+          }
           await addAvailability({
             employeeName: workerName.trim(),
             date: dateStr,
@@ -1152,20 +1256,19 @@ function App() {
             notes: ''
           });
         } catch (error) {
-          console.error("Error adding availability: ", error);
+          console.error("Error changing rest day to work day: ", error);
         }
       }
       return;
     }
 
-    // Real DB record
-    const avail = availabilities.find(a => a.id === id);
+    // Real work day DB record (avail is found and not 00:00-00:00)
     if (!avail) return;
 
     if (avail.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase() && isFullTime) {
       if (safeConfirm(`確定要將 ${avail.date} 的工作登記改為休假嗎？`)) {
         try {
-          await deleteAvailability(id);
+          await deleteAvailability(avail.id);
         } catch (error) {
           console.error("Error deleting availability: ", error);
         }
@@ -1173,7 +1276,7 @@ function App() {
     } else {
       if (safeConfirm('確定要刪除此可用時間登記嗎？')) {
         try {
-          await deleteAvailability(id);
+          await deleteAvailability(avail.id);
         } catch (error) {
           console.error("Error deleting availability: ", error);
         }
@@ -1731,6 +1834,18 @@ function App() {
                   </p>
                 </div>
 
+                {!isWorkerEditable && (
+                  <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-amber-50 border border-amber-200">
+                    <span className="text-lg leading-none mt-0.5">⚠️</span>
+                    <div className="space-y-0.5">
+                      <p className="text-xs font-bold text-amber-800">登記已截止/鎖定</p>
+                      <p className="text-[11px] text-amber-700 leading-snug">
+                        目前已逾下月排班登記截止時間（每月 20 日），且店長已開始為您確認/安排排班，因此目前已鎖定登記。如有特殊需求，請直接聯繫店長。
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 <form onSubmit={handleAddAvailability} className="space-y-4 pt-2">
                   {!isFullTime && (
                     <>
@@ -1740,7 +1855,10 @@ function App() {
                         <select
                           value={availWorkplace}
                           onChange={(e) => setAvailWorkplace(e.target.value)}
-                          className="w-full glass-input px-4 py-2.5 rounded-xl text-sm cursor-pointer"
+                          disabled={!isWorkerEditable}
+                          className={`w-full glass-input px-4 py-2.5 rounded-xl text-sm ${
+                            !isWorkerEditable ? 'opacity-50 cursor-not-allowed text-[#8D6E63]/60 bg-gray-50/50' : 'cursor-pointer'
+                          }`}
                         >
                           {workplaces.map(loc => (
                             <option key={loc.id} value={loc.name} className="bg-white text-[#3E2723]">
@@ -1757,7 +1875,10 @@ function App() {
                           <select
                             value={availStartTime}
                             onChange={(e) => setAvailStartTime(e.target.value)}
-                            className="w-full glass-input px-4 py-2.5 rounded-xl text-sm cursor-pointer"
+                            disabled={!isWorkerEditable}
+                            className={`w-full glass-input px-4 py-2.5 rounded-xl text-sm ${
+                              !isWorkerEditable ? 'opacity-50 cursor-not-allowed text-[#8D6E63]/60 bg-gray-50/50' : 'cursor-pointer'
+                            }`}
                           >
                             {TIME_SLOTS.map(slot => (
                               <option key={slot} value={slot} className="bg-white text-[#3E2723] font-mono">
@@ -1771,7 +1892,10 @@ function App() {
                           <select
                             value={availEndTime}
                             onChange={(e) => setAvailEndTime(e.target.value)}
-                            className="w-full glass-input px-4 py-2.5 rounded-xl text-sm cursor-pointer"
+                            disabled={!isWorkerEditable}
+                            className={`w-full glass-input px-4 py-2.5 rounded-xl text-sm ${
+                              !isWorkerEditable ? 'opacity-50 cursor-not-allowed text-[#8D6E63]/60 bg-gray-50/50' : 'cursor-pointer'
+                            }`}
                           >
                             {TIME_SLOTS.map(slot => (
                               <option key={slot} value={slot} className="bg-white text-[#3E2723] font-mono">
@@ -1801,28 +1925,40 @@ function App() {
                       <button
                         type="button"
                         onClick={handleSelectAvailMonWedFri}
-                        className="text-[10px] px-2.5 py-1 rounded bg-white border border-[#DAC0A3]/65 text-[#6D4C41] hover:border-[#8D6E63] hover:text-[#3E2723] hover:bg-[#FAF7F2] cursor-pointer font-bold transition-all"
+                        disabled={!isWorkerEditable}
+                        className={`text-[10px] px-2.5 py-1 rounded bg-white border border-[#DAC0A3]/65 text-[#6D4C41] hover:border-[#8D6E63] hover:text-[#3E2723] hover:bg-[#FAF7F2] font-bold transition-all ${
+                          !isWorkerEditable ? 'opacity-50 cursor-not-allowed border-gray-200 text-gray-400' : 'cursor-pointer'
+                        }`}
                       >
                         一/三/五
                       </button>
                       <button
                         type="button"
                         onClick={handleSelectAvailTueThu}
-                        className="text-[10px] px-2.5 py-1 rounded bg-white border border-[#DAC0A3]/65 text-[#6D4C41] hover:border-[#8D6E63] hover:text-[#3E2723] hover:bg-[#FAF7F2] cursor-pointer font-bold transition-all"
+                        disabled={!isWorkerEditable}
+                        className={`text-[10px] px-2.5 py-1 rounded bg-white border border-[#DAC0A3]/65 text-[#6D4C41] hover:border-[#8D6E63] hover:text-[#3E2723] hover:bg-[#FAF7F2] font-bold transition-all ${
+                          !isWorkerEditable ? 'opacity-50 cursor-not-allowed border-gray-200 text-gray-400' : 'cursor-pointer'
+                        }`}
                       >
                         二/四
                       </button>
                       <button
                         type="button"
                         onClick={handleSelectAvailAllDays}
-                        className="text-[10px] px-2.5 py-1 rounded bg-white border border-[#DAC0A3]/65 text-[#6D4C41] hover:border-[#8D6E63] hover:text-[#3E2723] hover:bg-[#FAF7F2] cursor-pointer font-bold transition-all"
+                        disabled={!isWorkerEditable}
+                        className={`text-[10px] px-2.5 py-1 rounded bg-white border border-[#DAC0A3]/65 text-[#6D4C41] hover:border-[#8D6E63] hover:text-[#3E2723] hover:bg-[#FAF7F2] font-bold transition-all ${
+                          !isWorkerEditable ? 'opacity-50 cursor-not-allowed border-gray-200 text-gray-400' : 'cursor-pointer'
+                        }`}
                       >
                         全選 (整月)
                       </button>
                       <button
                         type="button"
                         onClick={handleClearAvailAllSelected}
-                        className="text-[10px] px-2.5 py-1 rounded bg-white border border-[#DAC0A3]/65 text-[#6D4C41]/70 hover:border-[#DAC0A3] cursor-pointer font-bold transition-all"
+                        disabled={!isWorkerEditable}
+                        className={`text-[10px] px-2.5 py-1 rounded bg-white border border-[#DAC0A3]/65 text-[#6D4C41]/70 hover:border-[#DAC0A3] font-bold transition-all ${
+                          !isWorkerEditable ? 'opacity-50 cursor-not-allowed border-gray-200 text-gray-400' : 'cursor-pointer'
+                        }`}
                       >
                         清除
                       </button>
@@ -1849,10 +1985,14 @@ function App() {
                               key={dateStr}
                               type="button"
                               onClick={() => toggleAvailDateSelection(dateStr)}
-                              className={`relative py-1.5 px-0.5 rounded-lg border text-center transition-all cursor-pointer text-[10px] font-mono font-bold flex flex-col items-center justify-center h-9 ${isSelected
-                                  ? 'bg-[#8D6E63]/20 border-[#8D6E63] text-[#5D4037] shadow-sm'
-                                  : 'bg-white/70 border-[#DAC0A3]/40 text-[#6D4C41] hover:border-[#8D6E63]/60 hover:bg-white'
-                                } ${isToday ? 'ring-1 ring-[#8D6E63]/40' : ''}`}
+                              disabled={!isWorkerEditable}
+                              className={`relative py-1.5 px-0.5 rounded-lg border text-center transition-all text-[10px] font-mono font-bold flex flex-col items-center justify-center h-9 ${
+                                !isWorkerEditable
+                                  ? 'bg-gray-100/70 border-gray-200/50 text-gray-400 cursor-not-allowed'
+                                  : isSelected
+                                    ? 'bg-[#8D6E63]/20 border-[#8D6E63] text-[#5D4037] shadow-sm cursor-pointer'
+                                    : 'bg-white/70 border-[#DAC0A3]/40 text-[#6D4C41] hover:border-[#8D6E63]/60 hover:bg-white cursor-pointer'
+                              } ${isToday ? 'ring-1 ring-[#8D6E63]/40' : ''}`}
                             >
                               <span>{dateObj.getDate()}</span>
                               {isToday && (
@@ -1874,7 +2014,10 @@ function App() {
                       placeholder={isFullTime ? '填寫不克排班原因或備註...' : '填寫特別備註，協助店長協調排班...'}
                       value={availNotes}
                       onChange={(e) => setAvailNotes(e.target.value)}
-                      className="w-full glass-input px-4 py-2.5 rounded-xl text-sm min-h-[70px] resize-none"
+                      disabled={!isWorkerEditable}
+                      className={`w-full glass-input px-4 py-2.5 rounded-xl text-sm min-h-[70px] resize-none ${
+                        !isWorkerEditable ? 'opacity-50 cursor-not-allowed bg-gray-50/50 text-[#8D6E63]/60' : ''
+                      }`}
                     />
                   </div>
 
@@ -1913,7 +2056,12 @@ function App() {
 
                   <button
                     type="submit"
-                    className="w-full bg-[#795548] hover:bg-[#6D4C41] text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-[#795548]/15 cursor-pointer text-center text-sm"
+                    disabled={!isWorkerEditable}
+                    className={`w-full font-bold py-3 rounded-xl transition-all text-center text-sm ${
+                      !isWorkerEditable
+                        ? 'bg-gray-300 text-gray-500 cursor-not-allowed shadow-none'
+                        : 'bg-[#795548] hover:bg-[#6D4C41] text-white shadow-lg shadow-[#795548]/15 cursor-pointer'
+                    }`}
                   >
                     {isFullTime ? '送出不克排班日期' : '送出可用時間'}
                   </button>
@@ -1974,7 +2122,7 @@ function App() {
                                     不克排班 (休假)
                                   </span>
                                 </div>
-                                {new Date().getDate() <= 20 && (
+                                {isWorkerEditable && (
                                   <button
                                     onClick={(e) => handleDeleteAvailability(avail.id, e)}
                                     className="p-1 rounded-lg bg-white hover:bg-red-50 border border-[#DAC0A3]/50 text-[#6D4C41] hover:text-red-650 transition-colors cursor-pointer"
@@ -2009,7 +2157,7 @@ function App() {
                                   📍 {avail.workplace}
                                 </span>
                               </div>
-                              {new Date().getDate() <= 20 && (
+                              {isWorkerEditable && (
                                 <button
                                   onClick={(e) => handleDeleteAvailability(avail.id, e)}
                                   className="p-1 rounded-lg bg-white hover:bg-red-50 border border-[#DAC0A3]/50 text-[#6D4C41] hover:text-red-650 transition-colors cursor-pointer"
