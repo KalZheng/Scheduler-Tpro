@@ -26,7 +26,7 @@ const safeConfirm = (message: string): boolean => {
   return isNoConfirm || window.confirm(message);
 };
 
-const ALL_POSITIONS: ('餐吧' | 'POS機' | '後吧')[] = ['餐吧', 'POS機', '後吧'];
+const ALL_POSITIONS: ('餐吧' | 'POS機' | '後吧' | '收班' | '開早')[] = ['餐吧', 'POS機', '後吧', '收班', '開早'];
 
 const DAYS_OF_WEEK = [
   { value: 1, name: '週一', english: 'Monday', short: 'Mon' },
@@ -365,8 +365,8 @@ function App() {
   const [empPhone, setEmpPhone] = useState('');
   const [empStatus, setEmpStatus] = useState<'正式夥伴' | '兼職夥伴'>('兼職夥伴');
   const [empActive, setEmpActive] = useState<boolean>(true);
-  const [empTrainingPos, setEmpTrainingPos] = useState<'餐吧' | 'POS機' | '後吧' | null>(null);
-  const [empTrainedPoss, setEmpTrainedPoss] = useState<('餐吧' | 'POS機' | '後吧')[]>([]);
+  const [empTrainingPos, setEmpTrainingPos] = useState<'餐吧' | 'POS機' | '後吧' | '收班' | '開早' | null>(null);
+  const [empTrainedPoss, setEmpTrainedPoss] = useState<('餐吧' | 'POS機' | '後吧' | '收班' | '開早')[]>([]);
   const [empCertificates, setEmpCertificates] = useState<('FBI' | '黃金吧檯手')[]>([]);
 
   // Search/Filter for employee list
@@ -460,7 +460,7 @@ function App() {
     setEmpStatus(status);
   };
 
-  const handleTagClick = (pos: '餐吧' | 'POS機' | '後吧') => {
+  const handleTagClick = (pos: '餐吧' | 'POS機' | '後吧' | '收班' | '開早') => {
     if (empTrainingPos === pos) {
       // Training -> Trained
       setEmpTrainingPos(null);
@@ -485,13 +485,13 @@ function App() {
     }
   };
 
-  const handleDragStart = (e: React.DragEvent, pos: '餐吧' | 'POS機' | '後吧') => {
+  const handleDragStart = (e: React.DragEvent, pos: '餐吧' | 'POS機' | '後吧' | '收班' | '開早') => {
     e.dataTransfer.setData('text/plain', pos);
   };
 
   const handleDropToAvailable = (e: React.DragEvent) => {
     e.preventDefault();
-    const pos = e.dataTransfer.getData('text/plain') as '餐吧' | 'POS機' | '後吧';
+    const pos = e.dataTransfer.getData('text/plain') as '餐吧' | 'POS機' | '後吧' | '收班' | '開早';
     if (!pos) return;
     if (empTrainingPos === pos) setEmpTrainingPos(null);
     setEmpTrainedPoss(prev => prev.filter(p => p !== pos));
@@ -499,7 +499,7 @@ function App() {
 
   const handleDropToTraining = (e: React.DragEvent) => {
     e.preventDefault();
-    const pos = e.dataTransfer.getData('text/plain') as '餐吧' | 'POS機' | '後吧';
+    const pos = e.dataTransfer.getData('text/plain') as '餐吧' | 'POS機' | '後吧' | '收班' | '開早';
     if (!pos) return;
     setEmpTrainingPos(pos);
     setEmpTrainedPoss(prev => prev.filter(p => p !== pos));
@@ -507,7 +507,7 @@ function App() {
 
   const handleDropToTrained = (e: React.DragEvent) => {
     e.preventDefault();
-    const pos = e.dataTransfer.getData('text/plain') as '餐吧' | 'POS機' | '後吧';
+    const pos = e.dataTransfer.getData('text/plain') as '餐吧' | 'POS機' | '後吧' | '收班' | '開早';
     if (!pos) return;
     if (empTrainingPos === pos) setEmpTrainingPos(null);
     setEmpTrainedPoss(prev => {
@@ -2505,7 +2505,7 @@ function App() {
                         員工清單管理
                       </h2>
                       <p className="text-xs text-[#6D4C41]">
-                        在此管理店內夥伴的培訓進度與在職狀態。培訓完成餐吧、POS機、後吧後將自動晉升為正式夥伴。
+                        在此管理店內夥伴的培訓進度與在職狀態。培訓完成餐吧、POS機、後吧、收班、開早後將自動晉升為正式夥伴。
                       </p>
                     </div>
                     <button

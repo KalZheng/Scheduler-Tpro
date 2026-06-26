@@ -53,8 +53,8 @@ export interface Employee {
   phone: string;
   status: '正式夥伴' | '兼職夥伴';
   active: boolean;
-  trainingPosition?: '餐吧' | 'POS機' | '後吧' | null; // 訓練中崗位 (最多一個)
-  trainedPositions: ('餐吧' | 'POS機' | '後吧')[]; // 已受訓合格崗位 (可多選)
+  trainingPosition?: '餐吧' | 'POS機' | '後吧' | '收班' | '開早' | null; // 訓練中崗位 (最多一個)
+  trainedPositions: ('餐吧' | 'POS機' | '後吧' | '收班' | '開早')[]; // 已受訓合格崗位 (可多選)
   certificates?: ('FBI' | '黃金吧檯手')[]; // 持有證照 (可多選)
   createdAt: number;
 }
