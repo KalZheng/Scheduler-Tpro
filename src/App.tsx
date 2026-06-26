@@ -344,7 +344,7 @@ function App() {
 
   // Manager view sub-mode: calendar or grid or employees or calculation or system
   const [managerViewMode, setManagerViewMode] = useState<'calendar' | 'grid' | 'employees' | 'calculation' | 'system'>('calendar');
-  const [deadlineDay, setDeadlineDay] = useState<number>(20);
+  const [deadlineDay, setDeadlineDay] = useState<number>(30);
 
   // Revenue-based staffing calculation states (persisted to localStorage)
   const [monthlyRevenues, setMonthlyRevenues] = useState<Record<number, number>>(() => {
@@ -1987,10 +1987,10 @@ function App() {
                                 onClick={() => toggleAvailDateSelection(dateStr)}
                                 disabled={!isWorkerEditable}
                                 className={`relative py-1.5 px-0.5 rounded-lg border text-center transition-all text-[10px] font-mono font-bold flex flex-col items-center justify-center h-9 ${!isWorkerEditable
-                                    ? 'bg-gray-100/70 border-gray-200/50 text-gray-400 cursor-not-allowed'
-                                    : isSelected
-                                      ? 'bg-[#8D6E63]/20 border-[#8D6E63] text-[#5D4037] shadow-sm cursor-pointer'
-                                      : 'bg-white/70 border-[#DAC0A3]/40 text-[#6D4C41] hover:border-[#8D6E63]/60 hover:bg-white cursor-pointer'
+                                  ? 'bg-gray-100/70 border-gray-200/50 text-gray-400 cursor-not-allowed'
+                                  : isSelected
+                                    ? 'bg-[#8D6E63]/20 border-[#8D6E63] text-[#5D4037] shadow-sm cursor-pointer'
+                                    : 'bg-white/70 border-[#DAC0A3]/40 text-[#6D4C41] hover:border-[#8D6E63]/60 hover:bg-white cursor-pointer'
                                   } ${isToday ? 'ring-1 ring-[#8D6E63]/40' : ''}`}
                               >
                                 <span>{dateObj.getDate()}</span>
@@ -2056,8 +2056,8 @@ function App() {
                       type="submit"
                       disabled={!isWorkerEditable}
                       className={`w-full font-bold py-3 rounded-xl transition-all text-center text-sm ${!isWorkerEditable
-                          ? 'bg-gray-300 text-gray-500 cursor-not-allowed shadow-none'
-                          : 'bg-[#795548] hover:bg-[#6D4C41] text-white shadow-lg shadow-[#795548]/15 cursor-pointer'
+                        ? 'bg-gray-300 text-gray-500 cursor-not-allowed shadow-none'
+                        : 'bg-[#795548] hover:bg-[#6D4C41] text-white shadow-lg shadow-[#795548]/15 cursor-pointer'
                         }`}
                     >
                       {isFullTime ? '送出不克排班日期' : '送出可用時間'}
@@ -2270,18 +2270,18 @@ function App() {
                         <div
                           key={dateStr}
                           className={`min-h-[85px] p-1.5 flex flex-col justify-between select-none relative ${isToday
-                              ? 'bg-[#FAF7F2]'
-                              : isCurrentMonth
-                                ? 'bg-white/95'
-                                : 'bg-[#FAF7F2]/40 text-[#8D6E63]/40 opacity-40'
+                            ? 'bg-[#FAF7F2]'
+                            : isCurrentMonth
+                              ? 'bg-white/95'
+                              : 'bg-[#FAF7F2]/40 text-[#8D6E63]/40 opacity-40'
                             }`}
                         >
                           {/* Date Label */}
                           <div className="flex items-center justify-between mb-1">
                             <span
                               className={`text-[11px] font-bold font-mono px-1.5 py-0.5 rounded-full ${isToday
-                                  ? 'bg-[#795548] text-white shadow-sm'
-                                  : 'text-[#3E2723]'
+                                ? 'bg-[#795548] text-white shadow-sm'
+                                : 'text-[#3E2723]'
                                 }`}
                             >
                               {dateLabel}
@@ -2739,8 +2739,8 @@ function App() {
                                             <span
                                               key={cert}
                                               className={`inline-block text-[11px] font-extrabold px-2.5 py-0.5 rounded-lg border ${isFbi
-                                                  ? 'bg-blue-50 text-blue-750 border-blue-200'
-                                                  : 'bg-amber-50 text-amber-850 border-amber-200'
+                                                ? 'bg-blue-50 text-blue-750 border-blue-200'
+                                                : 'bg-amber-50 text-amber-850 border-amber-200'
                                                 }`}
                                             >
                                               {isFbi ? '🛡️ FBI' : '☕ 黃金吧檯手'}
@@ -2864,10 +2864,10 @@ function App() {
                                 </td>
                                 <td className="py-2.5">
                                   <span className={`inline-flex items-center gap-1.5 text-xs font-extrabold px-3 py-1 rounded-full border ${recommendedStaff === 2
-                                      ? 'bg-blue-50 text-blue-750 border-blue-200'
-                                      : recommendedStaff === 3
-                                        ? 'bg-amber-50 text-amber-850 border-amber-200'
-                                        : 'bg-emerald-50 text-emerald-750 border-emerald-200'
+                                    ? 'bg-blue-50 text-blue-750 border-blue-200'
+                                    : recommendedStaff === 3
+                                      ? 'bg-amber-50 text-amber-850 border-amber-200'
+                                      : 'bg-emerald-50 text-emerald-750 border-emerald-200'
                                     }`}>
                                     👥 {recommendedStaff} 人
                                   </span>
@@ -4131,8 +4131,8 @@ function App() {
                       setEndTime('15:30');
                     }}
                     className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${startTime === '06:30' && endTime === '15:30'
-                        ? 'bg-[#795548] text-white border-[#795548]'
-                        : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:border-[#8D6E63] hover:bg-[#FAF7F2]'
+                      ? 'bg-[#795548] text-white border-[#795548]'
+                      : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:border-[#8D6E63] hover:bg-[#FAF7F2]'
                       }`}
                   >
                     ☀️ 早班 (06:30 - 15:30)
@@ -4144,8 +4144,8 @@ function App() {
                       setEndTime('17:30');
                     }}
                     className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${startTime === '08:30' && endTime === '17:30'
-                        ? 'bg-[#795548] text-white border-[#795548]'
-                        : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:border-[#8D6E63] hover:bg-[#FAF7F2]'
+                      ? 'bg-[#795548] text-white border-[#795548]'
+                      : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:border-[#8D6E63] hover:bg-[#FAF7F2]'
                       }`}
                   >
                     🌙 晚班 (08:30 - 17:30)
@@ -4156,8 +4156,8 @@ function App() {
               {/* Auto calculated hours warning/info */}
               {startTime && endTime && (
                 <div className={`px-4 py-2.5 rounded-xl border flex items-center justify-between ${isOverEightHours(startTime, endTime)
-                    ? 'bg-amber-50 border-amber-200'
-                    : 'bg-[#FAF7F2] border-[#E5DCD5]'
+                  ? 'bg-amber-50 border-amber-200'
+                  : 'bg-[#FAF7F2] border-[#E5DCD5]'
                   }`}>
                   <span className="text-xs text-[#6D4C41]">預估單次工時：</span>
                   <div className="flex items-center gap-2">
@@ -4509,8 +4509,8 @@ function App() {
                           );
                         }}
                         className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer border ${hasCert
-                            ? 'bg-[#795548] text-white border-[#795548] shadow-xs'
-                            : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:border-[#8D6E63]'
+                          ? 'bg-[#795548] text-white border-[#795548] shadow-xs'
+                          : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:border-[#8D6E63]'
                           }`}
                       >
                         {cert === 'FBI' ? '🛡️ FBI' : '☕ 黃金吧檯手'}
