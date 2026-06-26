@@ -131,9 +131,13 @@ function localDbPlugin() {
 
               const globalPath = path.resolve(dataDir, 'db-global.json');
               let globalTargets = [];
+              let deadlineDay = 20;
               if (fs.existsSync(globalPath)) {
                 const globalData = JSON.parse(fs.readFileSync(globalPath, 'utf-8'));
                 globalTargets = globalData.staffingTargets || [];
+                if (globalData.deadlineDay !== undefined) {
+                  deadlineDay = globalData.deadlineDay;
+                }
               } else {
                 // Initialize default staffing targets if global doesn't exist
                 globalTargets = Array.from({ length: 14 }, (_, i) => ({
@@ -141,7 +145,7 @@ function localDbPlugin() {
                   hour: i + 6,
                   targetCount: 2
                 }));
-                fs.writeFileSync(globalPath, JSON.stringify({ staffingTargets: globalTargets }, null, 2), 'utf-8');
+                fs.writeFileSync(globalPath, JSON.stringify({ staffingTargets: globalTargets, deadlineDay }, null, 2), 'utf-8');
               }
 
               const employeesPath = path.resolve(dataDir, 'db-employees.json');
@@ -165,7 +169,8 @@ function localDbPlugin() {
                 schedules: monthData.schedules || [],
                 availabilities: monthData.availabilities || [],
                 staffingTargets: mergedTargets,
-                employees: globalEmployees
+                employees: globalEmployees,
+                deadlineDay: deadlineDay
               }));
             } catch (error) {
               res.statusCode = 500;
@@ -213,7 +218,8 @@ function localDbPlugin() {
                 // Write global file
                 const globalPath = path.resolve(dataDir, 'db-global.json');
                 fs.writeFileSync(globalPath, JSON.stringify({ 
-                  staffingTargets: globalTargets
+                  staffingTargets: globalTargets,
+                  deadlineDay: parsed.deadlineDay !== undefined ? parsed.deadlineDay : 20
                 }, null, 2), 'utf-8');
 
                 // Write employees file

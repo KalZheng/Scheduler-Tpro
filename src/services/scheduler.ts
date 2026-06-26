@@ -84,19 +84,22 @@ let localListeners: ((schedules: WorkSchedule[]) => void)[] = [];
 let localAvailabilityListeners: ((availabilities: WorkerAvailability[]) => void)[] = [];
 let localStaffingTargetListeners: ((targets: StaffingTarget[]) => void)[] = [];
 let localEmployeeListeners: ((employees: Employee[]) => void)[] = [];
+let localDeadlineDayListeners: ((day: number) => void)[] = [];
 
 interface DbSchema {
   schedules: WorkSchedule[];
   availabilities: WorkerAvailability[];
   staffingTargets: StaffingTarget[];
   employees: Employee[];
+  deadlineDay?: number;
 }
 
 const inMemoryDb: DbSchema = {
   schedules: [],
   availabilities: [],
   staffingTargets: [],
-  employees: []
+  employees: [],
+  deadlineDay: 20
 };
 
 const loadedMonths = new Set<string>();
@@ -144,6 +147,13 @@ const getLocalEmployees = (): Employee[] => {
   }
 };
 
+const getLocalDeadlineDay = (): number => {
+  const data = localStorage.getItem('scheduler_deadline_day');
+  if (!data) return 20;
+  const num = parseInt(data, 10);
+  return isNaN(num) ? 20 : num;
+};
+
 // Sync and merge data of a specific month into memory
 export const syncActiveMonth = async (monthStr: string) => {
   if (isValidConfig && db) return; // Skip if Cloud DB is enabled
@@ -176,17 +186,24 @@ export const syncActiveMonth = async (monthStr: string) => {
       // Merge employees
       inMemoryDb.employees = (data.employees || []).map(migrateEmployee);
 
+      // Merge deadlineDay
+      if (data.deadlineDay !== undefined) {
+        inMemoryDb.deadlineDay = data.deadlineDay;
+      }
+
       // Update LocalStorage backup
       localStorage.setItem('weekly_work_schedules', JSON.stringify(inMemoryDb.schedules));
       localStorage.setItem('weekly_worker_availabilities', JSON.stringify(inMemoryDb.availabilities));
       localStorage.setItem('hourly_staffing_targets', JSON.stringify(inMemoryDb.staffingTargets));
       localStorage.setItem('employees_list', JSON.stringify(inMemoryDb.employees));
+      localStorage.setItem('scheduler_deadline_day', (inMemoryDb.deadlineDay || 20).toString());
 
       // Trigger all active UI listeners
       localListeners.forEach(listener => listener([...inMemoryDb.schedules]));
       localAvailabilityListeners.forEach(listener => listener([...inMemoryDb.availabilities]));
       localStaffingTargetListeners.forEach(listener => listener([...inMemoryDb.staffingTargets]));
       localEmployeeListeners.forEach(listener => listener([...inMemoryDb.employees]));
+      localDeadlineDayListeners.forEach(listener => listener(inMemoryDb.deadlineDay || 20));
     }
   } catch (e) {
     console.error(`Failed to sync month data for ${monthStr}:`, e);
@@ -205,12 +222,16 @@ const loadFileDb = async () => {
       inMemoryDb.availabilities = data.availabilities || [];
       inMemoryDb.staffingTargets = data.staffingTargets || [];
       inMemoryDb.employees = (data.employees || []).map(migrateEmployee);
+      if (data.deadlineDay !== undefined) {
+        inMemoryDb.deadlineDay = data.deadlineDay;
+      }
       
       // Update local storage backup
       localStorage.setItem('weekly_work_schedules', JSON.stringify(inMemoryDb.schedules));
       localStorage.setItem('weekly_worker_availabilities', JSON.stringify(inMemoryDb.availabilities));
       localStorage.setItem('hourly_staffing_targets', JSON.stringify(inMemoryDb.staffingTargets));
       localStorage.setItem('employees_list', JSON.stringify(inMemoryDb.employees));
+      localStorage.setItem('scheduler_deadline_day', (inMemoryDb.deadlineDay || 20).toString());
     } else {
       throw new Error("Local DB API response not OK");
     }
@@ -220,12 +241,14 @@ const loadFileDb = async () => {
     inMemoryDb.availabilities = getLocalAvailabilities();
     inMemoryDb.staffingTargets = getLocalStaffingTargets();
     inMemoryDb.employees = getLocalEmployees();
+    inMemoryDb.deadlineDay = getLocalDeadlineDay();
   } finally {
     // Notify all active listeners of loaded values
     localListeners.forEach(listener => listener([...inMemoryDb.schedules]));
     localAvailabilityListeners.forEach(listener => listener([...inMemoryDb.availabilities]));
     localStaffingTargetListeners.forEach(listener => listener([...inMemoryDb.staffingTargets]));
     localEmployeeListeners.forEach(listener => listener([...inMemoryDb.employees]));
+    localDeadlineDayListeners.forEach(listener => listener(inMemoryDb.deadlineDay || 20));
   }
 };
 
@@ -242,12 +265,14 @@ const saveDbForDate = async (dateStr?: string) => {
   localStorage.setItem('weekly_worker_availabilities', JSON.stringify(inMemoryDb.availabilities));
   localStorage.setItem('hourly_staffing_targets', JSON.stringify(inMemoryDb.staffingTargets));
   localStorage.setItem('employees_list', JSON.stringify(inMemoryDb.employees));
+  localStorage.setItem('scheduler_deadline_day', (inMemoryDb.deadlineDay || 20).toString());
 
   // Trigger active listeners immediately for immediate UI response
   localListeners.forEach(listener => listener([...inMemoryDb.schedules]));
   localAvailabilityListeners.forEach(listener => listener([...inMemoryDb.availabilities]));
   localStaffingTargetListeners.forEach(listener => listener([...inMemoryDb.staffingTargets]));
   localEmployeeListeners.forEach(listener => listener([...inMemoryDb.employees]));
+  localDeadlineDayListeners.forEach(listener => listener(inMemoryDb.deadlineDay || 20));
 
   // POST current in-memory state to local JSON file
   try {
@@ -259,7 +284,8 @@ const saveDbForDate = async (dateStr?: string) => {
       schedules: monthSchedules,
       availabilities: monthAvailabilities,
       staffingTargets: monthTargets,
-      employees: inMemoryDb.employees
+      employees: inMemoryDb.employees,
+      deadlineDay: inMemoryDb.deadlineDay || 20
     };
 
     await fetch(`/api/db?month=${monthStr}`, {
@@ -532,4 +558,35 @@ export const updateDayNote = async (date: string, note: string) => {
     await saveDbForDate(date);
   }
 };
+
+export const subscribeToDeadlineDay = (callback: (day: number) => void) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    return onSnapshot(docRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        callback(data.deadlineDay !== undefined ? data.deadlineDay : 20);
+      } else {
+        callback(20);
+      }
+    });
+  } else {
+    localDeadlineDayListeners.push(callback);
+    callback(inMemoryDb.deadlineDay || 20);
+    return () => {
+      localDeadlineDayListeners = localDeadlineDayListeners.filter(l => l !== callback);
+    };
+  }
+};
+
+export const updateDeadlineDay = async (day: number) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    return await setDoc(docRef, { deadlineDay: day }, { merge: true });
+  } else {
+    inMemoryDb.deadlineDay = day;
+    await saveDbForDate();
+  }
+};
+
 

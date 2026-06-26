@@ -14,7 +14,9 @@ import {
   addEmployee,
   updateEmployee,
   deleteEmployee,
-  updateDayNote
+  updateDayNote,
+  subscribeToDeadlineDay,
+  updateDeadlineDay
 } from './services/scheduler';
 import type { WorkSchedule, WorkerAvailability, StaffingTarget, Employee } from './services/scheduler';
 import { isValidConfig } from './firebase';
@@ -43,11 +45,11 @@ const getDatesInRange = (startStr: string, endStr: string): Date[] => {
   const dates: Date[] = [];
   const start = new Date(startStr);
   const end = new Date(endStr);
-  
+
   if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) {
     return [];
   }
-  
+
   const current = new Date(start);
   while (current <= end) {
     dates.push(new Date(current));
@@ -340,8 +342,9 @@ function App() {
     window.location.hash = '#/worker';
   };
 
-  // Manager view sub-mode: calendar or grid or employees or calculation
-  const [managerViewMode, setManagerViewMode] = useState<'calendar' | 'grid' | 'employees' | 'calculation'>('calendar');
+  // Manager view sub-mode: calendar or grid or employees or calculation or system
+  const [managerViewMode, setManagerViewMode] = useState<'calendar' | 'grid' | 'employees' | 'calculation' | 'system'>('calendar');
+  const [deadlineDay, setDeadlineDay] = useState<number>(20);
 
   // Revenue-based staffing calculation states (persisted to localStorage)
   const [monthlyRevenues, setMonthlyRevenues] = useState<Record<number, number>>(() => {
@@ -451,9 +454,9 @@ function App() {
     const targetMonthStr = formatDateString(workerNextMonthStart).substring(0, 7);
     const hasConfirmed = schedules.some(
       s => s.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase() &&
-           s.date.startsWith(targetMonthStr)
+        s.date.startsWith(targetMonthStr)
     );
-    return (new Date().getDate() <= 20) || !hasConfirmed;
+    return (new Date().getDate() <= deadlineDay) || !hasConfirmed;
   })();
 
   const handleStatusChange = (status: '正式夥伴' | '兼職夥伴') => {
@@ -597,12 +600,16 @@ function App() {
     const unsubEmployees = subscribeToEmployees((data) => {
       setEmployees(data);
     });
+    const unsubDeadlineDay = subscribeToDeadlineDay((day) => {
+      setDeadlineDay(day);
+    });
 
     return () => {
       unsubSchedules();
       unsubAvailabilities();
       unsubStaffingTargets();
       unsubEmployees();
+      unsubDeadlineDay();
     };
   }, []);
 
@@ -633,16 +640,16 @@ function App() {
     const workDates = workerAvails
       .filter(a => a.date.startsWith(targetMonthStr) && !(a.startTime === '00:00' && a.endTime === '00:00'))
       .map(a => a.date);
-      
+
     const daysInMonth = getDaysInMonth(workerNextMonthStart);
     const computedRestDates = daysInMonth
       .map(formatDateString)
       .filter(dateStr => !workDates.includes(dateStr));
-      
+
     const legacyRestDates = workerAvails
       .filter(a => a.date.startsWith(targetMonthStr) && a.startTime === '00:00' && a.endTime === '00:00')
       .map(a => a.date);
-      
+
     return Array.from(new Set([...computedRestDates, ...legacyRestDates])).sort();
   }, [availabilities, workerName, isFullTime, workerNextMonthStart]);
 
@@ -653,8 +660,8 @@ function App() {
   useEffect(() => {
     // Only update availSelectedDates if the database state itself has changed
     const isDbChanged = dbRestDates.length !== lastSyncedDbRestDatesRef.current.length ||
-                        !dbRestDates.every((d, i) => d === lastSyncedDbRestDatesRef.current[i]);
-    
+      !dbRestDates.every((d, i) => d === lastSyncedDbRestDatesRef.current[i]);
+
     if (isDbChanged) {
       lastSyncedDbRestDatesRef.current = dbRestDates;
       setAvailSelectedDates(dbRestDates);
@@ -675,11 +682,11 @@ function App() {
       setWorkerVerifyError('找不到此員工資料，請聯絡主管。');
       return;
     }
-    
+
     // Normalize phone numbers to do a robust comparison (strip spaces, dashes, etc.)
     const cleanInput = workerPhoneInput.replace(/[-\s]/g, '');
     const cleanDb = (matchingEmp.phone || '').replace(/[-\s]/g, '');
-    
+
     if (cleanInput && cleanInput === cleanDb) {
       setWorkerName(selectedWorkerName);
       setIsWorkerVerified(true);
@@ -744,7 +751,7 @@ function App() {
     }
 
     if (!isWorkerEditable) {
-      alert('已逾本月登記/修改截止時間（20日），且已有已確認之排班，無法再進行登記。');
+      alert(`已逾本月登記/修改截止時間（${deadlineDay}日），且已有已確認之排班，無法再進行登記。`);
       return;
     }
 
@@ -760,7 +767,7 @@ function App() {
         const nextMonthStr = formatDateString(workerNextMonthStart).substring(0, 7);
         const existingRecords = availabilities.filter(
           a => a.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase() &&
-               a.date.startsWith(nextMonthStr)
+            a.date.startsWith(nextMonthStr)
         );
 
         // Delete existing availability records for the month sequentially
@@ -1195,10 +1202,10 @@ function App() {
     e.stopPropagation();
 
     if (!isWorkerEditable) {
-      alert('已逾本月登記/修改截止時間（20日），且已有已確認之排班，無法刪除登記。');
+      alert(`已逾本月登記/修改截止時間（${deadlineDay}日），且已有已確認之排班，無法刪除登記。`);
       return;
     }
-    
+
     // Check if it is a virtual ID or a real rest day record (00:00 - 00:00)
     const avail = id.startsWith('virtual-off-') ? null : availabilities.find(a => a.id === id);
     const isRestDay = id.startsWith('virtual-off-') || (avail && avail.startTime === '00:00' && avail.endTime === '00:00');
@@ -1206,27 +1213,27 @@ function App() {
     if (isRestDay) {
       const dateStr = id.startsWith('virtual-off-') ? id.replace('virtual-off-', '') : avail!.date;
       const targetMonthStr = dateStr.substring(0, 7);
-      
+
       // Get all availabilities for this worker in this target month
       const workerAvails = availabilities.filter(
         a => a.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase() && a.date.startsWith(targetMonthStr)
       );
-      
+
       const workDates = workerAvails
         .filter(a => !(a.startTime === '00:00' && a.endTime === '00:00'))
         .map(a => a.date);
-        
+
       const daysInMonth = getDaysInMonth(new Date(dateStr));
       const computedRestDates = daysInMonth
         .map(formatDateString)
         .filter(d => !workDates.includes(d));
-        
+
       const legacyRestDates = workerAvails
         .filter(a => a.startTime === '00:00' && a.endTime === '00:00')
         .map(a => a.date);
-        
+
       const allRestDates = Array.from(new Set([...computedRestDates, ...legacyRestDates]));
-      
+
       if (allRestDates.length === 1 && allRestDates.includes(dateStr)) {
         // Deleting the last rest day means they have 0 rest days, which means we should clear their entire month's registration
         if (safeConfirm(`這是您本月最後一個休假日期。變更此日期將會清除您本月的整月排班登記（避免因無休息日而違反連續工作規定）。確定要清除所有登記嗎？`)) {
@@ -1241,7 +1248,7 @@ function App() {
         }
         return;
       }
-      
+
       if (safeConfirm(`確定要將 ${dateStr} 的休假改為配合排班（早班）嗎？`)) {
         try {
           if (avail) {
@@ -1363,7 +1370,7 @@ function App() {
       const monthStr = formatDateString(currentMonthStart).substring(0, 7);
       const empMonthAvails = availabilities.filter(
         a => a.employeeName.trim().toLowerCase() === newName.trim().toLowerCase() &&
-             a.date.startsWith(monthStr)
+          a.date.startsWith(monthStr)
       );
 
       const activeMonthDays = getDaysInMonth(currentMonthStart);
@@ -1481,14 +1488,14 @@ function App() {
       const mappedDayIndex = dayOfWeekIndex === 0 ? 7 : dayOfWeekIndex;
       const isERP = mappedDayIndex === 1 || mappedDayIndex === 3 || mappedDayIndex === 5;
       const customNote = getDayNote(dateStr);
-      
+
       let headerVal = isERP ? `${mmdd}\n(${dayName} ERP)` : `${mmdd}\n(${dayName})`;
       if (customNote) {
         headerVal += `\n[${customNote}]`;
       }
       return headerVal;
     });
-    
+
     const headers = ['人員姓名', ...dateHeaders];
     const rows: string[][] = [];
     const changedCells = new Set<string>();
@@ -1514,7 +1521,7 @@ function App() {
 
         return empSchedules.map(sched => {
           const note = getCleanNote(sched.notes);
-          return note 
+          return note
             ? `${sched.startTime}-${sched.endTime}\n(${note})`
             : `${sched.startTime}-${sched.endTime}`;
         }).join('\n');
@@ -1532,7 +1539,7 @@ function App() {
 
     // Generate XLSX workbook & sheet
     const ws = XLSX.utils.aoa_to_sheet(aoaData);
-    
+
     // Enable wrap text style and center alignment on all cells
     for (const cellRef in ws) {
       if (cellRef[0] === '!') continue;
@@ -1548,13 +1555,13 @@ function App() {
         };
       }
     }
-    
+
     // Auto-fit column widths
     const maxCols = headers.length;
     const colWidths = Array(maxCols).fill({ wch: 10 });
     // First column 'Personnel Name' should be wider
     colWidths[0] = { wch: 15 };
-    
+
     // Set column widths in the sheet
     ws['!cols'] = colWidths;
 
@@ -1706,8 +1713,8 @@ function App() {
                   window.location.hash = '#/worker';
                 }}
                 className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 cursor-pointer ${activeRole === 'worker'
-                    ? 'bg-[#6D4C41] text-white shadow-md shadow-[#6D4C41]/15'
-                    : 'text-[#8D6E63] hover:text-[#5D4037] hover:bg-[#F5EBE6]/60'
+                  ? 'bg-[#6D4C41] text-white shadow-md shadow-[#6D4C41]/15'
+                  : 'text-[#8D6E63] hover:text-[#5D4037] hover:bg-[#F5EBE6]/60'
                   }`}
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1720,8 +1727,8 @@ function App() {
                   window.location.hash = '#/manager';
                 }}
                 className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 cursor-pointer ${activeRole === 'manager'
-                    ? 'bg-[#6D4C41] text-white shadow-md shadow-[#6D4C41]/15'
-                    : 'text-[#8D6E63] hover:text-[#5D4037] hover:bg-[#F5EBE6]/60'
+                  ? 'bg-[#6D4C41] text-white shadow-md shadow-[#6D4C41]/15'
+                  : 'text-[#8D6E63] hover:text-[#5D4037] hover:bg-[#F5EBE6]/60'
                   }`}
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1817,309 +1824,334 @@ function App() {
                 </button>
               </div>
 
-            {/* Worker Dashboard Split Grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+              {/* Worker Dashboard Split Grid */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
 
-              {/* Submission Form Card */}
-              <div className="glass-panel p-6 rounded-2xl border border-[#DAC0A3]/50 lg:col-span-5 space-y-4 shadow-sm">
-                <div>
-                  <h3 className="text-base font-bold text-[#3E2723] flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-[#2E7D32]"></span>
-                    {isFullTime ? '登記不克排班日期' : '登記可用時段'} ({workerNextMonthStart.getFullYear()}年 {workerNextMonthStart.getMonth() + 1}月)
-                  </h3>
-                  <p className="text-xs text-[#6D4C41] mt-0.5 font-medium">
-                    {isFullTime 
-                      ? '正式夥伴預設為全配合，請選取您下個月「無法上班/休假/請假」的日期。'
-                      : '請選取日期、地點與可配合排班的時間範圍，店長即可為您安排班表。'}
-                  </p>
-                </div>
-
-                {!isWorkerEditable && (
-                  <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-amber-50 border border-amber-200">
-                    <span className="text-lg leading-none mt-0.5">⚠️</span>
-                    <div className="space-y-0.5">
-                      <p className="text-xs font-bold text-amber-800">登記已截止/鎖定</p>
-                      <p className="text-[11px] text-amber-700 leading-snug">
-                        目前已逾下月排班登記截止時間（每月 20 日），且店長已開始為您確認/安排排班，因此目前已鎖定登記。如有特殊需求，請直接聯繫店長。
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                <form onSubmit={handleAddAvailability} className="space-y-4 pt-2">
-                  {!isFullTime && (
-                    <>
-                      {/* Workplace Selection */}
-                      <div>
-                        <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">可配合地點</label>
-                        <select
-                          value={availWorkplace}
-                          onChange={(e) => setAvailWorkplace(e.target.value)}
-                          disabled={!isWorkerEditable}
-                          className={`w-full glass-input px-4 py-2.5 rounded-xl text-sm ${
-                            !isWorkerEditable ? 'opacity-50 cursor-not-allowed text-[#8D6E63]/60 bg-gray-50/50' : 'cursor-pointer'
-                          }`}
-                        >
-                          {workplaces.map(loc => (
-                            <option key={loc.id} value={loc.name} className="bg-white text-[#3E2723]">
-                              {loc.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      {/* Time Inputs */}
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">開始時間</label>
-                          <select
-                            value={availStartTime}
-                            onChange={(e) => setAvailStartTime(e.target.value)}
-                            disabled={!isWorkerEditable}
-                            className={`w-full glass-input px-4 py-2.5 rounded-xl text-sm ${
-                              !isWorkerEditable ? 'opacity-50 cursor-not-allowed text-[#8D6E63]/60 bg-gray-50/50' : 'cursor-pointer'
-                            }`}
-                          >
-                            {TIME_SLOTS.map(slot => (
-                              <option key={slot} value={slot} className="bg-white text-[#3E2723] font-mono">
-                                {slot}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">最晚結束時間</label>
-                          <select
-                            value={availEndTime}
-                            onChange={(e) => setAvailEndTime(e.target.value)}
-                            disabled={!isWorkerEditable}
-                            className={`w-full glass-input px-4 py-2.5 rounded-xl text-sm ${
-                              !isWorkerEditable ? 'opacity-50 cursor-not-allowed text-[#8D6E63]/60 bg-gray-50/50' : 'cursor-pointer'
-                            }`}
-                          >
-                            {TIME_SLOTS.map(slot => (
-                              <option key={slot} value={slot} className="bg-white text-[#3E2723] font-mono">
-                                {slot}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      </div>
-
-                    </>
-                  )}
-
-                  {/* Date Multi-selector */}
+                {/* Submission Form Card */}
+                <div className="glass-panel p-6 rounded-2xl border border-[#DAC0A3]/50 lg:col-span-5 space-y-4 shadow-sm">
                   <div>
-                    <div className="flex justify-between items-center mb-2">
-                      <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider">
-                        {isFullTime ? '選擇不克排班日期 (可複選)' : '選擇可用日期 (可複選)'}
-                      </label>
-                      <span className="text-[10px] text-[#795548] font-bold bg-[#8D6E63]/10 px-2 py-0.5 rounded font-mono">
-                        已選 {availSelectedDates.length} 天
-                      </span>
-                    </div>
-
-                    {/* Shortcuts */}
-                    <div className="flex flex-wrap gap-1.5 mb-2.5">
-                      <button
-                        type="button"
-                        onClick={handleSelectAvailMonWedFri}
-                        disabled={!isWorkerEditable}
-                        className={`text-[10px] px-2.5 py-1 rounded bg-white border border-[#DAC0A3]/65 text-[#6D4C41] hover:border-[#8D6E63] hover:text-[#3E2723] hover:bg-[#FAF7F2] font-bold transition-all ${
-                          !isWorkerEditable ? 'opacity-50 cursor-not-allowed border-gray-200 text-gray-400' : 'cursor-pointer'
-                        }`}
-                      >
-                        一/三/五
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleSelectAvailTueThu}
-                        disabled={!isWorkerEditable}
-                        className={`text-[10px] px-2.5 py-1 rounded bg-white border border-[#DAC0A3]/65 text-[#6D4C41] hover:border-[#8D6E63] hover:text-[#3E2723] hover:bg-[#FAF7F2] font-bold transition-all ${
-                          !isWorkerEditable ? 'opacity-50 cursor-not-allowed border-gray-200 text-gray-400' : 'cursor-pointer'
-                        }`}
-                      >
-                        二/四
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleSelectAvailAllDays}
-                        disabled={!isWorkerEditable}
-                        className={`text-[10px] px-2.5 py-1 rounded bg-white border border-[#DAC0A3]/65 text-[#6D4C41] hover:border-[#8D6E63] hover:text-[#3E2723] hover:bg-[#FAF7F2] font-bold transition-all ${
-                          !isWorkerEditable ? 'opacity-50 cursor-not-allowed border-gray-200 text-gray-400' : 'cursor-pointer'
-                        }`}
-                      >
-                        全選 (整月)
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleClearAvailAllSelected}
-                        disabled={!isWorkerEditable}
-                        className={`text-[10px] px-2.5 py-1 rounded bg-white border border-[#DAC0A3]/65 text-[#6D4C41]/70 hover:border-[#DAC0A3] font-bold transition-all ${
-                          !isWorkerEditable ? 'opacity-50 cursor-not-allowed border-gray-200 text-gray-400' : 'cursor-pointer'
-                        }`}
-                      >
-                        清除
-                      </button>
-                    </div>
-
-                    {/* Monthly Calendar checklist grid */}
-                    <div className="p-2 border border-[#DAC0A3]/50 rounded-xl bg-white/40">
-                      <div className="grid grid-cols-7 gap-1 text-center text-[10px] text-[#6D4C41]/80 font-bold mb-1">
-                        <div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div><div>日</div>
-                      </div>
-                      <div className="grid grid-cols-7 gap-1">
-                        {workerCalendarGridDates.map(dateObj => {
-                          const dateStr = formatDateString(dateObj);
-                          const isSelected = availSelectedDates.includes(dateStr);
-                          const isToday = dateStr === todayStr;
-                          const isNextMonth = dateObj.getMonth() === workerNextMonthStart.getMonth() && dateObj.getFullYear() === workerNextMonthStart.getFullYear();
-
-                          if (!isNextMonth) {
-                            return <div key={dateStr} className="h-9" />;
-                          }
-
-                          return (
-                            <button
-                              key={dateStr}
-                              type="button"
-                              onClick={() => toggleAvailDateSelection(dateStr)}
-                              disabled={!isWorkerEditable}
-                              className={`relative py-1.5 px-0.5 rounded-lg border text-center transition-all text-[10px] font-mono font-bold flex flex-col items-center justify-center h-9 ${
-                                !isWorkerEditable
-                                  ? 'bg-gray-100/70 border-gray-200/50 text-gray-400 cursor-not-allowed'
-                                  : isSelected
-                                    ? 'bg-[#8D6E63]/20 border-[#8D6E63] text-[#5D4037] shadow-sm cursor-pointer'
-                                    : 'bg-white/70 border-[#DAC0A3]/40 text-[#6D4C41] hover:border-[#8D6E63]/60 hover:bg-white cursor-pointer'
-                              } ${isToday ? 'ring-1 ring-[#8D6E63]/40' : ''}`}
-                            >
-                              <span>{dateObj.getDate()}</span>
-                              {isToday && (
-                                <span className="absolute top-0.5 right-0.5 w-1 h-1 rounded-full bg-[#8D6E63]"></span>
-                              )}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
+                    <h3 className="text-base font-bold text-[#3E2723] flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-[#2E7D32]"></span>
+                      {isFullTime ? '登記不克排班日期' : '登記可用時段'} ({workerNextMonthStart.getFullYear()}年 {workerNextMonthStart.getMonth() + 1}月)
+                    </h3>
+                    <p className="text-xs text-[#6D4C41] mt-0.5 font-medium">
+                      {isFullTime
+                        ? '正式夥伴預設為全配合，請選取您下個月「無法上班/休假/請假」的日期。'
+                        : '請選取日期、地點與可配合排班的時間範圍，店長即可為您安排班表。'}
+                    </p>
                   </div>
 
-                  {/* Notes */}
-                  <div>
-                    <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">
-                      {isFullTime ? '請假/休假備註事項 (選填)' : '備註事項 (如：只能上早班、偏好時段等)'}
-                    </label>
-                    <textarea
-                      placeholder={isFullTime ? '填寫不克排班原因或備註...' : '填寫特別備註，協助店長協調排班...'}
-                      value={availNotes}
-                      onChange={(e) => setAvailNotes(e.target.value)}
-                      disabled={!isWorkerEditable}
-                      className={`w-full glass-input px-4 py-2.5 rounded-xl text-sm min-h-[70px] resize-none ${
-                        !isWorkerEditable ? 'opacity-50 cursor-not-allowed bg-gray-50/50 text-[#8D6E63]/60' : ''
-                      }`}
-                    />
-                  </div>
-
-                  {/* Inline warning banners */}
-                  {!isFullTime && availStartTime && availEndTime && isOverEightHours(availStartTime, availEndTime) && (
+                  {!isWorkerEditable && (
                     <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-amber-50 border border-amber-200">
                       <span className="text-lg leading-none mt-0.5">⚠️</span>
                       <div className="space-y-0.5">
-                        <p className="text-xs font-bold text-amber-800">工時超過 8 小時警告</p>
+                        <p className="text-xs font-bold text-amber-800">登記已截止/鎖定</p>
                         <p className="text-[11px] text-amber-700 leading-snug">
-                          此時段扣除 1 小時休息後，有效工時超過 8 小時（實際工作：{Math.round((calculateDuration(availStartTime, availEndTime) - 1) * 10) / 10} 小時）。送出時將需要確認。
+                          目前已逾下月排班登記截止時間（每月 {deadlineDay} 日），且店長已開始為您確認/安排排班，因此目前已鎖定登記。如有特殊需求，請直接聯繫店長。
                         </p>
                       </div>
                     </div>
                   )}
 
-                  {!isFullTime && (() => {
-                    if (availSelectedDates.length === 0) return null;
-                    const existingDates = availabilities
-                      .filter(a => a.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase())
-                      .map(a => a.date);
-                    const allDates = Array.from(new Set([...existingDates, ...availSelectedDates]));
-                    if (!hasSevenConsecutiveDays(allDates)) return null;
-                    return (
-                      <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-red-50 border border-red-200">
-                        <span className="text-lg leading-none mt-0.5">🚫</span>
+                  <form onSubmit={handleAddAvailability} className="space-y-4 pt-2">
+                    {!isFullTime && (
+                      <>
+                        {/* Workplace Selection */}
+                        <div>
+                          <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">可配合地點</label>
+                          <select
+                            value={availWorkplace}
+                            onChange={(e) => setAvailWorkplace(e.target.value)}
+                            disabled={!isWorkerEditable}
+                            className={`w-full glass-input px-4 py-2.5 rounded-xl text-sm ${!isWorkerEditable ? 'opacity-50 cursor-not-allowed text-[#8D6E63]/60 bg-gray-50/50' : 'cursor-pointer'
+                              }`}
+                          >
+                            {workplaces.map(loc => (
+                              <option key={loc.id} value={loc.name} className="bg-white text-[#3E2723]">
+                                {loc.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* Time Inputs */}
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">開始時間</label>
+                            <select
+                              value={availStartTime}
+                              onChange={(e) => setAvailStartTime(e.target.value)}
+                              disabled={!isWorkerEditable}
+                              className={`w-full glass-input px-4 py-2.5 rounded-xl text-sm ${!isWorkerEditable ? 'opacity-50 cursor-not-allowed text-[#8D6E63]/60 bg-gray-50/50' : 'cursor-pointer'
+                                }`}
+                            >
+                              {TIME_SLOTS.map(slot => (
+                                <option key={slot} value={slot} className="bg-white text-[#3E2723] font-mono">
+                                  {slot}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">最晚結束時間</label>
+                            <select
+                              value={availEndTime}
+                              onChange={(e) => setAvailEndTime(e.target.value)}
+                              disabled={!isWorkerEditable}
+                              className={`w-full glass-input px-4 py-2.5 rounded-xl text-sm ${!isWorkerEditable ? 'opacity-50 cursor-not-allowed text-[#8D6E63]/60 bg-gray-50/50' : 'cursor-pointer'
+                                }`}
+                            >
+                              {TIME_SLOTS.map(slot => (
+                                <option key={slot} value={slot} className="bg-white text-[#3E2723] font-mono">
+                                  {slot}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+
+                      </>
+                    )}
+
+                    {/* Date Multi-selector */}
+                    <div>
+                      <div className="flex justify-between items-center mb-2">
+                        <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider">
+                          {isFullTime ? '選擇不克排班日期 (可複選)' : '選擇可用日期 (可複選)'}
+                        </label>
+                        <span className="text-[10px] text-[#795548] font-bold bg-[#8D6E63]/10 px-2 py-0.5 rounded font-mono">
+                          已選 {availSelectedDates.length} 天
+                        </span>
+                      </div>
+
+                      {/* Shortcuts */}
+                      <div className="flex flex-wrap gap-1.5 mb-2.5">
+                        <button
+                          type="button"
+                          onClick={handleSelectAvailMonWedFri}
+                          disabled={!isWorkerEditable}
+                          className={`text-[10px] px-2.5 py-1 rounded bg-white border border-[#DAC0A3]/65 text-[#6D4C41] hover:border-[#8D6E63] hover:text-[#3E2723] hover:bg-[#FAF7F2] font-bold transition-all ${!isWorkerEditable ? 'opacity-50 cursor-not-allowed border-gray-200 text-gray-400' : 'cursor-pointer'
+                            }`}
+                        >
+                          一/三/五
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleSelectAvailTueThu}
+                          disabled={!isWorkerEditable}
+                          className={`text-[10px] px-2.5 py-1 rounded bg-white border border-[#DAC0A3]/65 text-[#6D4C41] hover:border-[#8D6E63] hover:text-[#3E2723] hover:bg-[#FAF7F2] font-bold transition-all ${!isWorkerEditable ? 'opacity-50 cursor-not-allowed border-gray-200 text-gray-400' : 'cursor-pointer'
+                            }`}
+                        >
+                          二/四
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleSelectAvailAllDays}
+                          disabled={!isWorkerEditable}
+                          className={`text-[10px] px-2.5 py-1 rounded bg-white border border-[#DAC0A3]/65 text-[#6D4C41] hover:border-[#8D6E63] hover:text-[#3E2723] hover:bg-[#FAF7F2] font-bold transition-all ${!isWorkerEditable ? 'opacity-50 cursor-not-allowed border-gray-200 text-gray-400' : 'cursor-pointer'
+                            }`}
+                        >
+                          全選 (整月)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleClearAvailAllSelected}
+                          disabled={!isWorkerEditable}
+                          className={`text-[10px] px-2.5 py-1 rounded bg-white border border-[#DAC0A3]/65 text-[#6D4C41]/70 hover:border-[#DAC0A3] font-bold transition-all ${!isWorkerEditable ? 'opacity-50 cursor-not-allowed border-gray-200 text-gray-400' : 'cursor-pointer'
+                            }`}
+                        >
+                          清除
+                        </button>
+                      </div>
+
+                      {/* Monthly Calendar checklist grid */}
+                      <div className="p-2 border border-[#DAC0A3]/50 rounded-xl bg-white/40">
+                        <div className="grid grid-cols-7 gap-1 text-center text-[10px] text-[#6D4C41]/80 font-bold mb-1">
+                          <div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div><div>日</div>
+                        </div>
+                        <div className="grid grid-cols-7 gap-1">
+                          {workerCalendarGridDates.map(dateObj => {
+                            const dateStr = formatDateString(dateObj);
+                            const isSelected = availSelectedDates.includes(dateStr);
+                            const isToday = dateStr === todayStr;
+                            const isNextMonth = dateObj.getMonth() === workerNextMonthStart.getMonth() && dateObj.getFullYear() === workerNextMonthStart.getFullYear();
+
+                            if (!isNextMonth) {
+                              return <div key={dateStr} className="h-9" />;
+                            }
+
+                            return (
+                              <button
+                                key={dateStr}
+                                type="button"
+                                onClick={() => toggleAvailDateSelection(dateStr)}
+                                disabled={!isWorkerEditable}
+                                className={`relative py-1.5 px-0.5 rounded-lg border text-center transition-all text-[10px] font-mono font-bold flex flex-col items-center justify-center h-9 ${!isWorkerEditable
+                                    ? 'bg-gray-100/70 border-gray-200/50 text-gray-400 cursor-not-allowed'
+                                    : isSelected
+                                      ? 'bg-[#8D6E63]/20 border-[#8D6E63] text-[#5D4037] shadow-sm cursor-pointer'
+                                      : 'bg-white/70 border-[#DAC0A3]/40 text-[#6D4C41] hover:border-[#8D6E63]/60 hover:bg-white cursor-pointer'
+                                  } ${isToday ? 'ring-1 ring-[#8D6E63]/40' : ''}`}
+                              >
+                                <span>{dateObj.getDate()}</span>
+                                {isToday && (
+                                  <span className="absolute top-0.5 right-0.5 w-1 h-1 rounded-full bg-[#8D6E63]"></span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Notes */}
+                    <div>
+                      <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">
+                        {isFullTime ? '請假/休假備註事項 (選填)' : '備註事項 (如：只能上早班、偏好時段等)'}
+                      </label>
+                      <textarea
+                        placeholder={isFullTime ? '填寫不克排班原因或備註...' : '填寫特別備註，協助店長協調排班...'}
+                        value={availNotes}
+                        onChange={(e) => setAvailNotes(e.target.value)}
+                        disabled={!isWorkerEditable}
+                        className={`w-full glass-input px-4 py-2.5 rounded-xl text-sm min-h-[70px] resize-none ${!isWorkerEditable ? 'opacity-50 cursor-not-allowed bg-gray-50/50 text-[#8D6E63]/60' : ''
+                          }`}
+                      />
+                    </div>
+
+                    {/* Inline warning banners */}
+                    {!isFullTime && availStartTime && availEndTime && isOverEightHours(availStartTime, availEndTime) && (
+                      <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-amber-50 border border-amber-200">
+                        <span className="text-lg leading-none mt-0.5">⚠️</span>
                         <div className="space-y-0.5">
-                          <p className="text-xs font-bold text-red-700">不可連續工作 7 天</p>
-                          <p className="text-[11px] text-red-600 leading-snug">
-                            目前選擇的日期加上已登記的可用日期，將造成連續工作 7 天或以上。依勞工法規，每 7 天至少需有 1 天例假日。請重新選擇日期。
+                          <p className="text-xs font-bold text-amber-800">工時超過 8 小時警告</p>
+                          <p className="text-[11px] text-amber-700 leading-snug">
+                            此時段扣除 1 小時休息後，有效工時超過 8 小時（實際工作：{Math.round((calculateDuration(availStartTime, availEndTime) - 1) * 10) / 10} 小時）。送出時將需要確認。
                           </p>
                         </div>
                       </div>
-                    );
-                  })()}
+                    )}
 
-                  <button
-                    type="submit"
-                    disabled={!isWorkerEditable}
-                    className={`w-full font-bold py-3 rounded-xl transition-all text-center text-sm ${
-                      !isWorkerEditable
-                        ? 'bg-gray-300 text-gray-500 cursor-not-allowed shadow-none'
-                        : 'bg-[#795548] hover:bg-[#6D4C41] text-white shadow-lg shadow-[#795548]/15 cursor-pointer'
-                    }`}
-                  >
-                    {isFullTime ? '送出不克排班日期' : '送出可用時間'}
-                  </button>
-                </form>
-              </div>
+                    {!isFullTime && (() => {
+                      if (availSelectedDates.length === 0) return null;
+                      const existingDates = availabilities
+                        .filter(a => a.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase())
+                        .map(a => a.date);
+                      const allDates = Array.from(new Set([...existingDates, ...availSelectedDates]));
+                      if (!hasSevenConsecutiveDays(allDates)) return null;
+                      return (
+                        <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-red-50 border border-red-200">
+                          <span className="text-lg leading-none mt-0.5">🚫</span>
+                          <div className="space-y-0.5">
+                            <p className="text-xs font-bold text-red-700">不可連續工作 7 天</p>
+                            <p className="text-[11px] text-red-600 leading-snug">
+                              目前選擇的日期加上已登記的可用日期，將造成連續工作 7 天或以上。依勞工法規，每 7 天至少需有 1 天例假日。請重新選擇日期。
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })()}
 
-              {/* Submitted Availabilities List */}
-              <div className="glass-panel p-6 rounded-2xl border border-[#DAC0A3]/50 lg:col-span-7 space-y-4 shadow-sm">
-                <div>
-                  <h3 className="text-base font-bold text-[#3E2723] flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-[#8D6E63]"></span>
-                    {isFullTime ? '您登記的不克排班日期紀錄' : '您登記的可用時間紀錄'}
-                  </h3>
-                  <p className="text-xs text-[#6D4C41] mt-0.5 font-medium">
-                    {isFullTime
-                      ? `以下為「${workerName || '未填寫姓名'}」已登記提交的「不克排班/休假」日期。店長排班時會避開這些日期。`
-                      : `以下為「${workerName || '未填寫姓名'}」已登記並提交的可用時段。店長可以在此時段安排您的排班。`}
-                  </p>
+                    <button
+                      type="submit"
+                      disabled={!isWorkerEditable}
+                      className={`w-full font-bold py-3 rounded-xl transition-all text-center text-sm ${!isWorkerEditable
+                          ? 'bg-gray-300 text-gray-500 cursor-not-allowed shadow-none'
+                          : 'bg-[#795548] hover:bg-[#6D4C41] text-white shadow-lg shadow-[#795548]/15 cursor-pointer'
+                        }`}
+                    >
+                      {isFullTime ? '送出不克排班日期' : '送出可用時間'}
+                    </button>
+                  </form>
                 </div>
 
-                <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
-                  {!workerName.trim() ? (
-                    <div className="py-12 text-center border-2 border-dashed border-[#DAC0A3]/45 rounded-xl">
-                      <p className="text-xs text-[#6D4C41]/80 font-medium">請在上方輸入姓名以檢信您的可用時間紀錄</p>
-                    </div>
-                  ) : getWorkerDisplayAvailabilities().length === 0 ? (
-                    <div className="py-12 text-center border-2 border-dashed border-[#DAC0A3]/45 rounded-xl">
-                      <p className="text-xs text-[#6D4C41]/80 font-medium">
-                        {isFullTime ? '尚無登記任何不克排班日期' : '尚無登記任何可用時間'}
-                      </p>
-                    </div>
-                  ) : (
-                    getWorkerDisplayAvailabilities()
-                      .sort((a, b) => {
-                        const dateCompare = b.date.localeCompare(a.date);
-                        if (dateCompare !== 0) return dateCompare;
-                        return compareTimeStrings(a.startTime, b.startTime);
-                      })
-                      .map(avail => {
-                        const dateObj = new Date(avail.date);
-                        const dayOfWeekIndex = dateObj.getDay();
-                        const mappedDayIndex = dayOfWeekIndex === 0 ? 7 : dayOfWeekIndex;
-                        const dayInfo = DAYS_OF_WEEK.find(d => d.value === mappedDayIndex) || DAYS_OF_WEEK[0];
-                        const isOffDay = avail.startTime === '00:00' && avail.endTime === '00:00';
+                {/* Submitted Availabilities List */}
+                <div className="glass-panel p-6 rounded-2xl border border-[#DAC0A3]/50 lg:col-span-7 space-y-4 shadow-sm">
+                  <div>
+                    <h3 className="text-base font-bold text-[#3E2723] flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-[#8D6E63]"></span>
+                      {isFullTime ? '您登記的不克排班日期紀錄' : '您登記的可用時間紀錄'}
+                    </h3>
+                    <p className="text-xs text-[#6D4C41] mt-0.5 font-medium">
+                      {isFullTime
+                        ? `以下為「${workerName || '未填寫姓名'}」已登記提交的「不克排班/休假」日期。店長排班時會避開這些日期。`
+                        : `以下為「${workerName || '未填寫姓名'}」已登記並提交的可用時段。店長可以在此時段安排您的排班。`}
+                    </p>
+                  </div>
 
-                        if (isOffDay) {
+                  <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
+                    {!workerName.trim() ? (
+                      <div className="py-12 text-center border-2 border-dashed border-[#DAC0A3]/45 rounded-xl">
+                        <p className="text-xs text-[#6D4C41]/80 font-medium">請在上方輸入姓名以檢信您的可用時間紀錄</p>
+                      </div>
+                    ) : getWorkerDisplayAvailabilities().length === 0 ? (
+                      <div className="py-12 text-center border-2 border-dashed border-[#DAC0A3]/45 rounded-xl">
+                        <p className="text-xs text-[#6D4C41]/80 font-medium">
+                          {isFullTime ? '尚無登記任何不克排班日期' : '尚無登記任何可用時間'}
+                        </p>
+                      </div>
+                    ) : (
+                      getWorkerDisplayAvailabilities()
+                        .sort((a, b) => {
+                          const dateCompare = b.date.localeCompare(a.date);
+                          if (dateCompare !== 0) return dateCompare;
+                          return compareTimeStrings(a.startTime, b.startTime);
+                        })
+                        .map(avail => {
+                          const dateObj = new Date(avail.date);
+                          const dayOfWeekIndex = dateObj.getDay();
+                          const mappedDayIndex = dayOfWeekIndex === 0 ? 7 : dayOfWeekIndex;
+                          const dayInfo = DAYS_OF_WEEK.find(d => d.value === mappedDayIndex) || DAYS_OF_WEEK[0];
+                          const isOffDay = avail.startTime === '00:00' && avail.endTime === '00:00';
+
+                          if (isOffDay) {
+                            return (
+                              <div
+                                key={avail.id}
+                                className="glass-card p-4 rounded-xl border border-red-200/60 bg-red-50/20 space-y-1"
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-sm font-extrabold text-red-800">
+                                      ❌ {avail.date} ({dayInfo.name})
+                                    </span>
+                                    <span className="text-[10px] px-2 py-0.5 rounded bg-red-100 text-red-700 border border-red-200 font-bold">
+                                      不克排班 (休假)
+                                    </span>
+                                  </div>
+                                  {isWorkerEditable && (
+                                    <button
+                                      onClick={(e) => handleDeleteAvailability(avail.id, e)}
+                                      className="p-1 rounded-lg bg-white hover:bg-red-50 border border-[#DAC0A3]/50 text-[#6D4C41] hover:text-red-650 transition-colors cursor-pointer"
+                                      title="刪除此登記"
+                                    >
+                                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                      </svg>
+                                    </button>
+                                  )}
+                                </div>
+                                {avail.notes && (
+                                  <p className="text-xs text-red-800/80 font-medium pl-6">
+                                    📝 備註：{getCleanNote(avail.notes) || avail.notes}
+                                  </p>
+                                )}
+                              </div>
+                            );
+                          }
+
                           return (
                             <div
                               key={avail.id}
-                              className="glass-card p-4 rounded-xl border border-red-200/60 bg-red-50/20 space-y-1"
+                              className="glass-card p-4 rounded-xl border border-[#DAC0A3]/45 space-y-1"
                             >
                               <div className="flex items-center justify-between gap-2">
                                 <div className="flex items-center gap-2">
-                                  <span className="text-sm font-extrabold text-red-800">
-                                    ❌ {avail.date} ({dayInfo.name})
+                                  <span className="text-sm font-extrabold text-[#3E2723]">
+                                    {avail.date} ({dayInfo.name})
                                   </span>
-                                  <span className="text-[10px] px-2 py-0.5 rounded bg-red-100 text-red-700 border border-red-200 font-bold">
-                                    不克排班 (休假)
+                                  <span className="text-[10px] px-2 py-0.5 rounded bg-[#F5EBE6] text-[#5D4037] border border-[#DAC0A3]/40 font-bold">
+                                    📍 {avail.workplace}
                                   </span>
                                 </div>
                                 {isWorkerEditable && (
@@ -2134,58 +2166,23 @@ function App() {
                                   </button>
                                 )}
                               </div>
+                              <div className="text-xs text-[#6D4C41]/90 font-medium flex items-center gap-1 font-mono">
+                                🕒 可配合時間：{avail.startTime} - {avail.endTime}
+                              </div>
                               {avail.notes && (
-                                <p className="text-xs text-red-800/80 font-medium pl-6">
-                                  📝 備註：{getCleanNote(avail.notes) || avail.notes}
+                                <p className="text-xs text-[#5D4037] bg-white/50 px-2.5 py-1 rounded border border-[#DAC0A3]/40 border-dashed mt-1 inline-block">
+                                  📝 備註：{avail.notes}
                                 </p>
                               )}
                             </div>
                           );
-                        }
-
-                        return (
-                          <div
-                            key={avail.id}
-                            className="glass-card p-4 rounded-xl border border-[#DAC0A3]/45 space-y-1"
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm font-extrabold text-[#3E2723]">
-                                  {avail.date} ({dayInfo.name})
-                                </span>
-                                <span className="text-[10px] px-2 py-0.5 rounded bg-[#F5EBE6] text-[#5D4037] border border-[#DAC0A3]/40 font-bold">
-                                  📍 {avail.workplace}
-                                </span>
-                              </div>
-                              {isWorkerEditable && (
-                                <button
-                                  onClick={(e) => handleDeleteAvailability(avail.id, e)}
-                                  className="p-1 rounded-lg bg-white hover:bg-red-50 border border-[#DAC0A3]/50 text-[#6D4C41] hover:text-red-650 transition-colors cursor-pointer"
-                                  title="刪除此登記"
-                                >
-                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                  </svg>
-                                </button>
-                              )}
-                            </div>
-                            <div className="text-xs text-[#6D4C41]/90 font-medium flex items-center gap-1 font-mono">
-                              🕒 可配合時間：{avail.startTime} - {avail.endTime}
-                            </div>
-                            {avail.notes && (
-                              <p className="text-xs text-[#5D4037] bg-white/50 px-2.5 py-1 rounded border border-[#DAC0A3]/40 border-dashed mt-1 inline-block">
-                                📝 備註：{avail.notes}
-                              </p>
-                            )}
-                          </div>
-                        );
-                      })
-                  )}
+                        })
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {/* Confirmed Schedule Calendar Card */}
+              {/* Confirmed Schedule Calendar Card */}
               <div className="glass-panel p-6 rounded-2xl border border-[#DAC0A3]/50 shadow-sm space-y-4 bg-white/40">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-[#DAC0A3]/35 pb-3">
                   <div>
@@ -2272,22 +2269,20 @@ function App() {
                       return (
                         <div
                           key={dateStr}
-                          className={`min-h-[85px] p-1.5 flex flex-col justify-between select-none relative ${
-                            isToday
+                          className={`min-h-[85px] p-1.5 flex flex-col justify-between select-none relative ${isToday
                               ? 'bg-[#FAF7F2]'
                               : isCurrentMonth
                                 ? 'bg-white/95'
                                 : 'bg-[#FAF7F2]/40 text-[#8D6E63]/40 opacity-40'
-                          }`}
+                            }`}
                         >
                           {/* Date Label */}
                           <div className="flex items-center justify-between mb-1">
                             <span
-                              className={`text-[11px] font-bold font-mono px-1.5 py-0.5 rounded-full ${
-                                isToday
+                              className={`text-[11px] font-bold font-mono px-1.5 py-0.5 rounded-full ${isToday
                                   ? 'bg-[#795548] text-white shadow-sm'
                                   : 'text-[#3E2723]'
-                              }`}
+                                }`}
                             >
                               {dateLabel}
                             </span>
@@ -2299,7 +2294,7 @@ function App() {
                               const theme = getScheduleTheme(schedule);
                               const mNote = schedule.managerNotes !== undefined ? schedule.managerNotes : getManagerNote(schedule);
                               const wNote = schedule.workerNotes !== undefined ? schedule.workerNotes : getWorkerNote(schedule);
-                              
+
                               let displayNote = '';
                               if (wNote && mNote) {
                                 displayNote = `同仁: ${wNote} | 主管: ${mNote}`;
@@ -2308,7 +2303,7 @@ function App() {
                               } else if (mNote) {
                                 displayNote = `主管: ${mNote}`;
                               }
-                              
+
                               return (
                                 <div
                                   key={schedule.id}
@@ -2330,16 +2325,16 @@ function App() {
                 </div>
               </div>
 
-            {/* Subtle Manager Login link at the bottom of the Worker view */}
-            <div className="flex justify-center pt-8 pb-4">
-              <a
-                href="#/manager"
-                className="text-[10px] text-[#6D4C41]/35 hover:text-[#795548] font-bold flex items-center gap-1 transition-all select-none"
-              >
-                🔒 管理登入
-              </a>
+              {/* Subtle Manager Login link at the bottom of the Worker view */}
+              <div className="flex justify-center pt-8 pb-4">
+                <a
+                  href="#/manager"
+                  className="text-[10px] text-[#6D4C41]/35 hover:text-[#795548] font-bold flex items-center gap-1 transition-all select-none"
+                >
+                  🔒 管理登入
+                </a>
+              </div>
             </div>
-          </div>
           )
         )}
 
@@ -2445,8 +2440,8 @@ function App() {
                     <button
                       onClick={() => setManagerViewMode('calendar')}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${managerViewMode === 'calendar'
-                          ? 'bg-[#795548] text-white shadow-sm'
-                          : 'text-[#8D6E63] hover:text-[#3E2723]'
+                        ? 'bg-[#795548] text-white shadow-sm'
+                        : 'text-[#8D6E63] hover:text-[#3E2723]'
                         }`}
                     >
                       日曆檢視
@@ -2454,8 +2449,8 @@ function App() {
                     <button
                       onClick={() => setManagerViewMode('grid')}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${managerViewMode === 'grid'
-                          ? 'bg-[#795548] text-white shadow-sm'
-                          : 'text-[#8D6E63] hover:text-[#3E2723]'
+                        ? 'bg-[#795548] text-white shadow-sm'
+                        : 'text-[#8D6E63] hover:text-[#3E2723]'
                         }`}
                     >
                       網格總覽
@@ -2463,8 +2458,8 @@ function App() {
                     <button
                       onClick={() => setManagerViewMode('employees')}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${managerViewMode === 'employees'
-                          ? 'bg-[#795548] text-white shadow-sm'
-                          : 'text-[#8D6E63] hover:text-[#3E2723]'
+                        ? 'bg-[#795548] text-white shadow-sm'
+                        : 'text-[#8D6E63] hover:text-[#3E2723]'
                         }`}
                     >
                       員工管理
@@ -2472,11 +2467,20 @@ function App() {
                     <button
                       onClick={() => setManagerViewMode('calculation')}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${managerViewMode === 'calculation'
-                          ? 'bg-[#795548] text-white shadow-sm'
-                          : 'text-[#8D6E63] hover:text-[#3E2723]'
+                        ? 'bg-[#795548] text-white shadow-sm'
+                        : 'text-[#8D6E63] hover:text-[#3E2723]'
                         }`}
                     >
                       營業額計算
+                    </button>
+                    <button
+                      onClick={() => setManagerViewMode('system')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${managerViewMode === 'system'
+                        ? 'bg-[#795548] text-white shadow-sm'
+                        : 'text-[#8D6E63] hover:text-[#3E2723]'
+                        }`}
+                    >
+                      系統管理
                     </button>
                   </div>
                 </div>
@@ -2540,8 +2544,8 @@ function App() {
                         <button
                           onClick={() => setEmpActiveFilter('all')}
                           className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${empActiveFilter === 'all'
-                              ? 'bg-[#795548] text-white shadow-xs'
-                              : 'text-[#8D6E63] hover:text-[#3E2723]'
+                            ? 'bg-[#795548] text-white shadow-xs'
+                            : 'text-[#8D6E63] hover:text-[#3E2723]'
                             }`}
                         >
                           全部 ({employees.length})
@@ -2549,8 +2553,8 @@ function App() {
                         <button
                           onClick={() => setEmpActiveFilter('active')}
                           className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${empActiveFilter === 'active'
-                              ? 'bg-[#795548] text-white shadow-xs'
-                              : 'text-[#8D6E63] hover:text-[#3E2723]'
+                            ? 'bg-[#795548] text-white shadow-xs'
+                            : 'text-[#8D6E63] hover:text-[#3E2723]'
                             }`}
                         >
                           在職 ({employees.filter(e => e.active !== false).length})
@@ -2558,8 +2562,8 @@ function App() {
                         <button
                           onClick={() => setEmpActiveFilter('inactive')}
                           className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${empActiveFilter === 'inactive'
-                              ? 'bg-[#795548] text-white shadow-xs'
-                              : 'text-[#8D6E63] hover:text-[#3E2723]'
+                            ? 'bg-[#795548] text-white shadow-xs'
+                            : 'text-[#8D6E63] hover:text-[#3E2723]'
                             }`}
                         >
                           離職 ({employees.filter(e => e.active === false).length})
@@ -2571,8 +2575,8 @@ function App() {
                         <button
                           onClick={() => setEmpStatusFilter('all')}
                           className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${empStatusFilter === 'all'
-                              ? 'bg-[#795548] text-white shadow-xs'
-                              : 'text-[#8D6E63] hover:text-[#3E2723]'
+                            ? 'bg-[#795548] text-white shadow-xs'
+                            : 'text-[#8D6E63] hover:text-[#3E2723]'
                             }`}
                         >
                           身分: 全部
@@ -2580,8 +2584,8 @@ function App() {
                         <button
                           onClick={() => setEmpStatusFilter('正式夥伴')}
                           className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${empStatusFilter === '正式夥伴'
-                              ? 'bg-[#795548] text-white shadow-xs'
-                              : 'text-[#8D6E63] hover:text-[#3E2723]'
+                            ? 'bg-[#795548] text-white shadow-xs'
+                            : 'text-[#8D6E63] hover:text-[#3E2723]'
                             }`}
                         >
                           正式夥伴
@@ -2589,8 +2593,8 @@ function App() {
                         <button
                           onClick={() => setEmpStatusFilter('兼職夥伴')}
                           className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${empStatusFilter === '兼職夥伴'
-                              ? 'bg-[#795548] text-white shadow-xs'
-                              : 'text-[#8D6E63] hover:text-[#3E2723]'
+                            ? 'bg-[#795548] text-white shadow-xs'
+                            : 'text-[#8D6E63] hover:text-[#3E2723]'
                             }`}
                         >
                           兼職夥伴
@@ -2642,8 +2646,8 @@ function App() {
                                     </h3>
                                     <div className="flex flex-wrap gap-1.5 items-center">
                                       <span className={`inline-flex items-center gap-1 text-[10px] px-2.5 py-0.5 rounded-full font-bold border ${emp.status === '正式夥伴'
-                                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                          : 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                        : 'bg-indigo-50 text-indigo-700 border-indigo-200'
                                         }`}>
                                         <span className={`w-1.5 h-1.5 rounded-full ${emp.status === '正式夥伴' ? 'bg-emerald-500' : 'bg-indigo-500'}`}></span>
                                         {emp.status}
@@ -2732,13 +2736,12 @@ function App() {
                                         {emp.certificates.map(cert => {
                                           const isFbi = cert === 'FBI';
                                           return (
-                                            <span 
-                                              key={cert} 
-                                              className={`inline-block text-[11px] font-extrabold px-2.5 py-0.5 rounded-lg border ${
-                                                isFbi
+                                            <span
+                                              key={cert}
+                                              className={`inline-block text-[11px] font-extrabold px-2.5 py-0.5 rounded-lg border ${isFbi
                                                   ? 'bg-blue-50 text-blue-750 border-blue-200'
                                                   : 'bg-amber-50 text-amber-850 border-amber-200'
-                                              }`}
+                                                }`}
                                             >
                                               {isFbi ? '🛡️ FBI' : '☕ 黃金吧檯手'}
                                             </span>
@@ -2768,7 +2771,7 @@ function App() {
                       <p className="text-xs text-[#6D4C41]">
                         依據各時段的月營業額數據，自動估算日平均營業額及對應的建議排班人數。此人數將可作為一鍵套用至 <strong>db-global.json 預設排班目標人數</strong>（無日期限制的基礎人數需求）的參考基準。
                       </p>
-                      
+
                       {/* Rules display for reference */}
                       <div className="mt-4 p-4 rounded-xl border border-[#DAC0A3]/45 bg-[#FAF7F2] space-y-1.5 shadow-xs">
                         <h4 className="text-xs font-extrabold text-[#5D4037] uppercase tracking-wider mb-1">📋 營業額排班人數對照規則：</h4>
@@ -2815,7 +2818,7 @@ function App() {
                           {Array.from({ length: 14 }, (_, i) => i + 6).map(hour => {
                             const monthlyVal = monthlyRevenues[hour] || 0;
                             const dailyAvg = Number((monthlyVal / 30).toFixed(1));
-                            
+
                             // Recommended staff count based on average income
                             let recommendedStaff = 2;
                             if (dailyAvg > 1500) {
@@ -2860,13 +2863,12 @@ function App() {
                                   ${dailyAvg.toLocaleString()}
                                 </td>
                                 <td className="py-2.5">
-                                  <span className={`inline-flex items-center gap-1.5 text-xs font-extrabold px-3 py-1 rounded-full border ${
-                                    recommendedStaff === 2
+                                  <span className={`inline-flex items-center gap-1.5 text-xs font-extrabold px-3 py-1 rounded-full border ${recommendedStaff === 2
                                       ? 'bg-blue-50 text-blue-750 border-blue-200'
                                       : recommendedStaff === 3
                                         ? 'bg-amber-50 text-amber-850 border-amber-200'
                                         : 'bg-emerald-50 text-emerald-750 border-emerald-200'
-                                  }`}>
+                                    }`}>
                                     👥 {recommendedStaff} 人
                                   </span>
                                 </td>
@@ -2878,6 +2880,59 @@ function App() {
                           })}
                         </tbody>
                       </table>
+                    </div>
+                  </div>
+                </div>
+              ) : managerViewMode === 'system' ? (
+                /* System Management Panel */
+                <div className="space-y-6 animate-fade-in bg-white/40 p-6 rounded-2xl border border-[#DAC0A3]/50">
+                  <div className="space-y-2">
+                    <h2 className="text-lg font-bold text-[#3E2723] flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-[#795548]"></span>
+                      系統管理設定
+                    </h2>
+                    <p className="text-xs text-[#6D4C41]">
+                      在此管理系統的全域規則與設定參數。
+                    </p>
+                  </div>
+
+                  <div className="glass-panel p-6 rounded-2xl border border-[#DAC0A3]/50 shadow-sm bg-white/70 space-y-4 max-w-xl">
+                    <h3 className="text-sm font-bold text-[#3E2723]">📅 夥伴排班截止日期設定</h3>
+                    <p className="text-xs text-[#6D4C41] leading-relaxed">
+                      設定每個月員工截止/鎖定排班登記的日期。一旦超過該日期且已有確認之排班，員工將被鎖定無法自行登記或修改可用時間/休假。
+                    </p>
+
+                    <div className="flex items-center gap-3 pt-2">
+                      <span className="text-xs font-semibold text-[#6D4C41]">截止日期：每月的第</span>
+                      <input
+                        type="number"
+                        min="1"
+                        max="31"
+                        value={deadlineDay}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value, 10);
+                          if (!isNaN(val) && val >= 1 && val <= 31) {
+                            setDeadlineDay(val);
+                          }
+                        }}
+                        className="w-20 glass-input px-3 py-1.5 rounded-lg text-center font-mono text-sm"
+                      />
+                      <span className="text-xs font-semibold text-[#6D4C41]">天 (1 - 31日)</span>
+
+                      <button
+                        onClick={async () => {
+                          try {
+                            await updateDeadlineDay(deadlineDay);
+                            alert(`已成功更新截止日期為每月 ${deadlineDay} 日！`);
+                          } catch (err) {
+                            console.error("Failed to update deadline day:", err);
+                            alert("更新失敗，請稍後再試。");
+                          }
+                        }}
+                        className="ml-auto bg-[#795548] hover:bg-[#6D4C41] text-white font-bold px-4 py-2 rounded-xl transition-all shadow-md text-xs cursor-pointer"
+                      >
+                        儲存設定
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -2894,18 +2949,18 @@ function App() {
                     <div className="flex flex-wrap items-center gap-3">
                       <div className="flex items-center gap-2 text-xs md:text-sm text-[#6D4C41]">
                         <span>匯出區間：</span>
-                        <input 
-                          type="date" 
-                          value={exportStartDate} 
-                          onChange={(e) => setExportStartDate(e.target.value)} 
-                          className="bg-white border border-[#DAC0A3]/50 rounded px-2.5 py-1.5 outline-none font-mono text-xs text-[#3E2723] focus:border-[#795548]" 
+                        <input
+                          type="date"
+                          value={exportStartDate}
+                          onChange={(e) => setExportStartDate(e.target.value)}
+                          className="bg-white border border-[#DAC0A3]/50 rounded px-2.5 py-1.5 outline-none font-mono text-xs text-[#3E2723] focus:border-[#795548]"
                         />
                         <span>至</span>
-                        <input 
-                          type="date" 
-                          value={exportEndDate} 
-                          onChange={(e) => setExportEndDate(e.target.value)} 
-                          className="bg-white border border-[#DAC0A3]/50 rounded px-2.5 py-1.5 outline-none font-mono text-xs text-[#3E2723] focus:border-[#795548]" 
+                        <input
+                          type="date"
+                          value={exportEndDate}
+                          onChange={(e) => setExportEndDate(e.target.value)}
+                          className="bg-white border border-[#DAC0A3]/50 rounded px-2.5 py-1.5 outline-none font-mono text-xs text-[#3E2723] focus:border-[#795548]"
                         />
                       </div>
                       <button
@@ -2955,24 +3010,24 @@ function App() {
                               key={dateStr}
                               onClick={() => setSelectedDateStr(dateStr)}
                               className={`min-h-[75px] md:min-h-[110px] p-1.5 flex flex-col justify-between transition-colors cursor-pointer select-none relative group ${isSelected
-                                  ? 'bg-[#8D6E63]/10'
-                                  : isToday
-                                    ? 'bg-[#FAF7F2]'
-                                    : isCurrentMonth
-                                      ? 'bg-white/90 hover:bg-[#FAF7F2]'
-                                      : 'bg-[#FAF7F2]/50 text-[#8D6E63]/40 opacity-50 hover:bg-[#FAF7F2]'
+                                ? 'bg-[#8D6E63]/10'
+                                : isToday
+                                  ? 'bg-[#FAF7F2]'
+                                  : isCurrentMonth
+                                    ? 'bg-white/90 hover:bg-[#FAF7F2]'
+                                    : 'bg-[#FAF7F2]/50 text-[#8D6E63]/40 opacity-50 hover:bg-[#FAF7F2]'
                                 }`}
                             >
                               {/* Date cell header */}
                               <div className="flex items-center justify-between mb-1">
                                 <span
                                   className={`text-xs font-bold font-mono px-1.5 py-0.5 rounded-full flex items-center justify-center ${isToday
-                                      ? 'bg-[#795548] text-white shadow-sm shadow-[#795548]/20'
-                                      : isSelected
-                                        ? 'text-[#5D4037] bg-[#8D6E63]/10'
-                                        : isCurrentMonth
-                                          ? 'text-[#3E2723] font-extrabold'
-                                          : 'text-[#8D6E63]/60'
+                                    ? 'bg-[#795548] text-white shadow-sm shadow-[#795548]/20'
+                                    : isSelected
+                                      ? 'text-[#5D4037] bg-[#8D6E63]/10'
+                                      : isCurrentMonth
+                                        ? 'text-[#3E2723] font-extrabold'
+                                        : 'text-[#8D6E63]/60'
                                     }`}
                                 >
                                   {dateLabel}
@@ -3096,10 +3151,10 @@ function App() {
                                     key={dateStr}
                                     onClick={() => setSelectedDateStr(dateStr)}
                                     className={`px-2 py-2 text-center text-xs font-bold border-r border-b border-[#DAC0A3]/50 w-[100px] cursor-pointer transition-colors ${isSelected
-                                        ? 'bg-[#8D6E63]/15 text-[#3E2723]'
-                                        : isToday
-                                          ? 'bg-[#F5EBE6] text-[#3E2723] font-black'
-                                          : 'hover:bg-[#FAF7F2]/75 text-[#6D4C41]'
+                                      ? 'bg-[#8D6E63]/15 text-[#3E2723]'
+                                      : isToday
+                                        ? 'bg-[#F5EBE6] text-[#3E2723] font-black'
+                                        : 'hover:bg-[#FAF7F2]/75 text-[#6D4C41]'
                                       }`}
                                   >
                                     <div className="font-mono text-sm font-extrabold">{dateObj.getDate()}</div>
@@ -3108,8 +3163,8 @@ function App() {
                                     <div className="mt-1 flex items-center justify-center gap-1">
                                       {totalDayHours > 0 && (
                                         <span className={`text-[8px] font-black px-1.5 py-0.2 rounded-md ${isUnderstaffed
-                                            ? 'bg-[#E65100]/10 text-[#BF360C] border border-[#E65100]/20'
-                                            : 'bg-emerald-600/10 text-[#2E7D32] border border-emerald-600/20'
+                                          ? 'bg-[#E65100]/10 text-[#BF360C] border border-[#E65100]/20'
+                                          : 'bg-emerald-600/10 text-[#2E7D32] border border-emerald-600/20'
                                           }`}>
                                           {totalDayHours}h
                                         </span>
@@ -3134,10 +3189,10 @@ function App() {
                                     key={dateStr + '-erp'}
                                     onClick={() => setSelectedDateStr(dateStr)}
                                     className={`px-2 py-1 text-center border-r border-b border-[#DAC0A3]/50 w-[100px] cursor-pointer transition-colors ${isSelected
-                                        ? 'bg-[#8D6E63]/15 text-[#3E2723]'
-                                        : isToday
-                                          ? 'bg-[#F5EBE6] text-[#3E2723] font-black'
-                                          : 'hover:bg-[#FAF7F2]/75'
+                                      ? 'bg-[#8D6E63]/15 text-[#3E2723]'
+                                      : isToday
+                                        ? 'bg-[#F5EBE6] text-[#3E2723] font-black'
+                                        : 'hover:bg-[#FAF7F2]/75'
                                       }`}
                                   >
                                     {isERP ? (
@@ -3163,16 +3218,16 @@ function App() {
                                   <th
                                     key={dateStr + '-note'}
                                     className={`px-1 py-1.5 text-center border-r border-b border-[#DAC0A3]/50 w-[100px] transition-colors relative group/note ${isSelected
-                                        ? 'bg-[#8D6E63]/10 text-[#3E2723]'
-                                        : isToday
-                                          ? 'bg-[#FAF7F2]'
-                                          : 'bg-white/50 hover:bg-[#FAF7F2]/80'
+                                      ? 'bg-[#8D6E63]/10 text-[#3E2723]'
+                                      : isToday
+                                        ? 'bg-[#FAF7F2]'
+                                        : 'bg-white/50 hover:bg-[#FAF7F2]/80'
                                       }`}
                                   >
                                     <div className="flex flex-col items-center justify-between min-h-[36px] gap-1">
                                       {note ? (
-                                        <span 
-                                          className="text-[9px] font-bold text-[#5D4037] break-words line-clamp-2 px-1 max-w-[92px] leading-tight select-text" 
+                                        <span
+                                          className="text-[9px] font-bold text-[#5D4037] break-words line-clamp-2 px-1 max-w-[92px] leading-tight select-text"
                                           title={note}
                                         >
                                           {note}
@@ -3182,7 +3237,7 @@ function App() {
                                           無日備註
                                         </span>
                                       )}
-                                      
+
                                       <button
                                         onClick={(e) => {
                                           e.stopPropagation();
@@ -3475,15 +3530,15 @@ function App() {
                     {(() => {
                       const availableWorkers = dayAvailabilities.filter(a => !(a.startTime === '00:00' && a.endTime === '00:00'));
                       const legacyOffWorkers = dayAvailabilities.filter(a => a.startTime === '00:00' && a.endTime === '00:00');
-                      
+
                       const monthStr = selectedDateStr.substring(0, 7);
                       const ftEmployees = employees.filter(e => e.status === '正式夥伴' && e.active !== false);
-                      
+
                       const implicitOffWorkers = ftEmployees.filter(emp => {
                         const empName = emp.name.trim();
                         const hasRegisteredInMonth = availabilities.some(
                           a => a.employeeName.trim().toLowerCase() === empName.toLowerCase() &&
-                               a.date.startsWith(monthStr)
+                            a.date.startsWith(monthStr)
                         );
                         if (!hasRegisteredInMonth) return false;
 
@@ -3494,9 +3549,9 @@ function App() {
                       }).map(emp => {
                         const monthNotes = availabilities.find(
                           a => a.employeeName.trim().toLowerCase() === emp.name.trim().toLowerCase() &&
-                               a.date.startsWith(monthStr) &&
-                               a.notes &&
-                               a.notes.trim()
+                            a.date.startsWith(monthStr) &&
+                            a.notes &&
+                            a.notes.trim()
                         )?.notes || '休假';
 
                         return {
@@ -3595,8 +3650,8 @@ function App() {
                               </h4>
                               <div className="flex flex-wrap gap-2">
                                 {offWorkers.map(avail => (
-                                  <div 
-                                    key={avail.id} 
+                                  <div
+                                    key={avail.id}
                                     className="text-xs py-1.5 px-3 bg-red-50 border border-red-200 rounded-xl text-red-700 font-bold flex items-center gap-1.5 shadow-xs"
                                     title={avail.notes ? `備註: ${getCleanNote(avail.notes)}` : undefined}
                                   >
@@ -3890,8 +3945,8 @@ function App() {
                                   setFormOriginalEndTime(avail.endTime);
                                 }}
                                 className={`text-[10px] px-2.5 py-1.5 rounded-xl border transition-all cursor-pointer font-bold flex items-center gap-1 ${isCurrentlySelected
-                                    ? 'bg-[#795548] border-[#795548] text-white shadow-sm shadow-[#795548]/15'
-                                    : 'bg-white border border-[#DAC0A3]/55 hover:border-[#8D6E63] text-[#5D4037] hover:text-[#3E2723]'
+                                  ? 'bg-[#795548] border-[#795548] text-white shadow-sm shadow-[#795548]/15'
+                                  : 'bg-white border border-[#DAC0A3]/55 hover:border-[#8D6E63] text-[#5D4037] hover:text-[#3E2723]'
                                   }`}
                               >
                                 <span>👤 {avail.employeeName}</span>
@@ -4002,10 +4057,10 @@ function App() {
                             type="button"
                             onClick={() => toggleDateSelection(dateStr)}
                             className={`relative py-1.5 px-0.5 rounded-lg border text-center transition-all cursor-pointer text-[10px] font-mono font-bold flex flex-col items-center justify-center ${isSelected
-                                ? 'bg-[#795548]/15 border-[#795548] text-[#3E2723] shadow-xs'
-                                : isCurrentMonth
-                                  ? 'bg-white border-[#E5DCD5] text-[#8D6E63] hover:border-[#8D6E63] hover:bg-[#FAF7F2]'
-                                  : 'bg-[#FAF7F2]/50 border-dashed border-[#E5DCD5]/55 text-[#8D6E63]/40 opacity-40 hover:bg-[#FAF7F2]'
+                              ? 'bg-[#795548]/15 border-[#795548] text-[#3E2723] shadow-xs'
+                              : isCurrentMonth
+                                ? 'bg-white border-[#E5DCD5] text-[#8D6E63] hover:border-[#8D6E63] hover:bg-[#FAF7F2]'
+                                : 'bg-[#FAF7F2]/50 border-dashed border-[#E5DCD5]/55 text-[#8D6E63]/40 opacity-40 hover:bg-[#FAF7F2]'
                               } ${isToday ? 'ring-1 ring-[#795548]/40' : ''}`}
                             title={formatDateString(dateObj)}
                           >
@@ -4075,11 +4130,10 @@ function App() {
                       setStartTime('06:30');
                       setEndTime('15:30');
                     }}
-                    className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
-                      startTime === '06:30' && endTime === '15:30'
+                    className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${startTime === '06:30' && endTime === '15:30'
                         ? 'bg-[#795548] text-white border-[#795548]'
                         : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:border-[#8D6E63] hover:bg-[#FAF7F2]'
-                    }`}
+                      }`}
                   >
                     ☀️ 早班 (06:30 - 15:30)
                   </button>
@@ -4089,11 +4143,10 @@ function App() {
                       setStartTime('08:30');
                       setEndTime('17:30');
                     }}
-                    className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
-                      startTime === '08:30' && endTime === '17:30'
+                    className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${startTime === '08:30' && endTime === '17:30'
                         ? 'bg-[#795548] text-white border-[#795548]'
                         : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:border-[#8D6E63] hover:bg-[#FAF7F2]'
-                    }`}
+                      }`}
                   >
                     🌙 晚班 (08:30 - 17:30)
                   </button>
@@ -4102,16 +4155,14 @@ function App() {
 
               {/* Auto calculated hours warning/info */}
               {startTime && endTime && (
-                <div className={`px-4 py-2.5 rounded-xl border flex items-center justify-between ${
-                  isOverEightHours(startTime, endTime)
+                <div className={`px-4 py-2.5 rounded-xl border flex items-center justify-between ${isOverEightHours(startTime, endTime)
                     ? 'bg-amber-50 border-amber-200'
                     : 'bg-[#FAF7F2] border-[#E5DCD5]'
-                }`}>
+                  }`}>
                   <span className="text-xs text-[#6D4C41]">預估單次工時：</span>
                   <div className="flex items-center gap-2">
-                    <span className={`text-sm font-bold font-mono ${
-                      isOverEightHours(startTime, endTime) ? 'text-amber-700' : 'text-[#795548]'
-                    }`}>
+                    <span className={`text-sm font-bold font-mono ${isOverEightHours(startTime, endTime) ? 'text-amber-700' : 'text-[#795548]'
+                      }`}>
                       {calculateDuration(startTime, endTime)} 小時（含休息）
                     </span>
                     {isOverEightHours(startTime, endTime) && (
@@ -4156,13 +4207,13 @@ function App() {
                 if (!employeeName.trim()) return null;
                 const targetName = employeeName.trim().toLowerCase();
                 const checkDates = modalMode === 'create' ? selectedDates : [singleDate];
-                
+
                 const conflictingDates = checkDates.filter(d => {
                   const monthStr = d.substring(0, 7);
                   // Find all availability records for this employee in this month
                   const monthAvails = availabilities.filter(
                     a => a.employeeName.trim().toLowerCase() === targetName &&
-                         a.date.startsWith(monthStr)
+                      a.date.startsWith(monthStr)
                   );
                   // If they haven't registered any availability for this month yet, no conflict
                   if (monthAvails.length === 0) return false;
@@ -4292,8 +4343,8 @@ function App() {
                     type="button"
                     onClick={() => handleStatusChange('兼職夥伴')}
                     className={`py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${empStatus === '兼職夥伴'
-                        ? 'bg-white text-indigo-700 shadow-sm border border-indigo-200'
-                        : 'text-[#8D6E63] hover:text-[#3E2723]'
+                      ? 'bg-white text-indigo-700 shadow-sm border border-indigo-200'
+                      : 'text-[#8D6E63] hover:text-[#3E2723]'
                       }`}
                   >
                     兼職夥伴 (Part-time)
@@ -4302,8 +4353,8 @@ function App() {
                     type="button"
                     onClick={() => handleStatusChange('正式夥伴')}
                     className={`py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${empStatus === '正式夥伴'
-                        ? 'bg-white text-emerald-700 shadow-sm border border-emerald-200'
-                        : 'text-[#8D6E63] hover:text-[#3E2723]'
+                      ? 'bg-white text-emerald-700 shadow-sm border border-emerald-200'
+                      : 'text-[#8D6E63] hover:text-[#3E2723]'
                       }`}
                   >
                     正式夥伴 (Full-time)
@@ -4319,8 +4370,8 @@ function App() {
                     type="button"
                     onClick={() => setEmpActive(true)}
                     className={`py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${empActive === true
-                        ? 'bg-white text-emerald-700 shadow-sm border border-emerald-200'
-                        : 'text-[#8D6E63] hover:text-[#3E2723]'
+                      ? 'bg-white text-emerald-700 shadow-sm border border-emerald-200'
+                      : 'text-[#8D6E63] hover:text-[#3E2723]'
                       }`}
                   >
                     在職 (Active)
@@ -4329,8 +4380,8 @@ function App() {
                     type="button"
                     onClick={() => setEmpActive(false)}
                     className={`py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${empActive === false
-                        ? 'bg-white text-red-700 shadow-sm border border-red-200'
-                        : 'text-[#8D6E63] hover:text-[#3E2723]'
+                      ? 'bg-white text-red-700 shadow-sm border border-red-200'
+                      : 'text-[#8D6E63] hover:text-[#3E2723]'
                       }`}
                   >
                     離職 (Resigned)
@@ -4451,17 +4502,16 @@ function App() {
                         key={cert}
                         type="button"
                         onClick={() => {
-                          setEmpCertificates(prev => 
-                            prev.includes(cert) 
-                              ? prev.filter(c => c !== cert) 
+                          setEmpCertificates(prev =>
+                            prev.includes(cert)
+                              ? prev.filter(c => c !== cert)
                               : [...prev, cert]
                           );
                         }}
-                        className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer border ${
-                          hasCert
+                        className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer border ${hasCert
                             ? 'bg-[#795548] text-white border-[#795548] shadow-xs'
                             : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:border-[#8D6E63]'
-                        }`}
+                          }`}
                       >
                         {cert === 'FBI' ? '🛡️ FBI' : '☕ 黃金吧檯手'}
                       </button>

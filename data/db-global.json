@@ -70,5 +70,6 @@
       "hour": 19,
       "targetCount": 2
     }
-  ]
+  ],
+  "deadlineDay": 30
 }
