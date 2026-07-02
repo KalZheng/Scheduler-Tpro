@@ -12,11 +12,11 @@ const firebaseConfig = {
 
 // Check if Firebase config is provided and not default template values
 export const isValidConfig = !!(
-  firebaseConfig.apiKey && 
-  firebaseConfig.apiKey !== 'your-api-key' && 
+  firebaseConfig.apiKey &&
+  firebaseConfig.apiKey !== 'your-api-key' &&
   !firebaseConfig.apiKey.startsWith('YOUR_') &&
   firebaseConfig.projectId &&
-  firebaseConfig.projectId !== 'scheduler-f07db'
+  firebaseConfig.projectId !== 'scheduler'
 );
 
 let dbInstance: any = null;
