@@ -23,6 +23,15 @@ import { isValidConfig } from './firebase';
 import workplaces from './config/workplaces.json';
 import * as XLSX from 'xlsx-js-style';
 
+export interface WorkerAvailConfig {
+  date: string;
+  startIdx: number;
+  endIdx: number;
+  workplace: string;
+  notes: string;
+}
+
+
 const safeConfirm = (message: string): boolean => {
   const isNoConfirm = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('noconfirm') === 'true';
   return isNoConfirm || window.confirm(message);
@@ -391,11 +400,14 @@ function App() {
   const [workerVerifyError, setWorkerVerifyError] = useState('');
 
   // Worker availability submission form states
-  const [availWorkplace, setAvailWorkplace] = useState(workplaces[0]?.name || '');
-  const [availStartTime, setAvailStartTime] = useState('09:00');
-  const [availEndTime, setAvailEndTime] = useState('17:00');
   const [availNotes, setAvailNotes] = useState('');
   const [availSelectedDates, setAvailSelectedDates] = useState<string[]>([]);
+
+
+  // Modal and config state for per-day availability settings
+  const [isWorkerAvailModalOpen, setIsWorkerAvailModalOpen] = useState(false);
+  const [availConfigs, setAvailConfigs] = useState<WorkerAvailConfig[]>([]);
+
 
   // Worker confirmed shifts calendar month state
   const [workerCalendarMonth, setWorkerCalendarMonth] = useState<Date>(() => {
@@ -755,10 +767,13 @@ function App() {
       return;
     }
 
-    // For part-time, they must select at least one available day.
-    // For full-time, they can select 0 off-days (meaning they work the entire month).
     if (!isFullTime && availSelectedDates.length === 0) {
       alert('請至少選擇一個可用日期。');
+      return;
+    }
+
+    if (!isFullTime) {
+      handleOpenWorkerAvailModal();
       return;
     }
 
@@ -786,7 +801,7 @@ function App() {
           await addAvailability({
             employeeName: workerName.trim(),
             date: dateStr,
-            workplace: availWorkplace || (workplaces[0]?.name || ''),
+            workplace: workplaces[0]?.name || '',
             startTime: '06:30', // default select 早班
             endTime: '15:30',   // default select 早班
             notes: availNotes.trim()
@@ -802,41 +817,152 @@ function App() {
       }
       return;
     }
+  };
 
-    // Check 2: Consecutive 7 days (combine existing + newly selected dates)
+  // Open the Part-Time availability configurations modal
+  const handleOpenWorkerAvailModal = () => {
+    if (!workerName.trim()) {
+      alert('請先輸入您的姓名。');
+      return;
+    }
+
+    if (availSelectedDates.length === 0) {
+      alert('請至少選擇一個可用日期。');
+      return;
+    }
+
+    // Sort selected dates chronologically
+    const sortedDates = [...availSelectedDates].sort((a, b) => a.localeCompare(b));
+    
+    // Initialize configurations
+    const initialConfigs: WorkerAvailConfig[] = sortedDates.map(date => {
+      // Find existing config or fallback to default
+      const existing = availConfigs.find(c => c.date === date);
+      if (existing) return existing;
+
+      // Default start 09:00 (index 6), end 17:00 (index 22), first workplace
+      return {
+        date,
+        startIdx: 6,
+        endIdx: 22,
+        workplace: workplaces[0]?.name || '',
+        notes: ''
+      };
+    });
+
+    setAvailConfigs(initialConfigs);
+    setIsWorkerAvailModalOpen(true);
+  };
+
+  // Update a single config in the list
+  const updateAvailConfig = (index: number, updates: Partial<WorkerAvailConfig>) => {
+    setAvailConfigs(prev => prev.map((config, idx) => {
+      if (idx === index) {
+        const newConfig = { ...config, ...updates };
+        // Enforce start time is less than or equal to end time
+        if (newConfig.startIdx > newConfig.endIdx) {
+          if (updates.startIdx !== undefined) {
+            newConfig.endIdx = newConfig.startIdx;
+          } else if (updates.endIdx !== undefined) {
+            newConfig.startIdx = newConfig.endIdx;
+          }
+        }
+        return newConfig;
+      }
+      return config;
+    }));
+  };
+
+  // Remove a config from the modal and deselect it in the calendar
+  const removeAvailConfig = (index: number) => {
+    const configToRemove = availConfigs[index];
+    if (!configToRemove) return;
+
+    setAvailConfigs(prev => prev.filter((_, idx) => idx !== index));
+    setAvailSelectedDates(prev => prev.filter(d => d !== configToRemove.date));
+  };
+
+  // Synchronize first card's details to all other cards in the list
+  const handleSyncAllAvailConfigs = () => {
+    if (availConfigs.length < 2) return;
+    const base = availConfigs[0];
+    setAvailConfigs(prev => prev.map((config, idx) => {
+      if (idx === 0) return config;
+      return {
+        ...config,
+        startIdx: base.startIdx,
+        endIdx: base.endIdx,
+        workplace: base.workplace
+      };
+    }));
+  };
+
+  // Submit all PT availability configurations
+  const handleWorkerAvailModalSubmit = async () => {
+    if (!workerName.trim()) {
+      alert('請先輸入您的姓名。');
+      return;
+    }
+
+    if (!isWorkerEditable) {
+      alert(`已逾本月登記/修改截止時間（${deadlineDay}日），且已有已確認之排班，無法再進行登記。`);
+      return;
+    }
+
+    if (availConfigs.length === 0) {
+      alert('請至少選擇一個可用日期。');
+      return;
+    }
+
+    // Check consecutive 7 days limit
     const existingDates = availabilities
       .filter(a => a.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase())
       .map(a => a.date);
-    const allDates = Array.from(new Set([...existingDates, ...availSelectedDates]));
+    const activeDates = availConfigs.map(c => c.date);
+    const allDates = Array.from(new Set([...existingDates, ...activeDates]));
+    
     if (hasSevenConsecutiveDays(allDates)) {
       alert('⚠️ 無法送出：登記後將出現連續 7 天或以上的工作天。\n\n根據勞工法規，員工每 7 天中至少需有 1 天例假日，不可連續工作超過 6 天。\n\n請重新調整您的可用日期。');
       return;
     }
 
-    // Check 1: Over 8 effective hours (warn, but still allow)
-    if (isOverEightHours(availStartTime, availEndTime)) {
+    // Check for shifts exceeding 8 effective working hours (warn but allow)
+    let hasOverEight = false;
+    for (const config of availConfigs) {
+      const tStart = TIME_SLOTS[config.startIdx];
+      const tEnd = TIME_SLOTS[config.endIdx];
+      if (isOverEightHours(tStart, tEnd)) {
+        hasOverEight = true;
+        break;
+      }
+    }
+
+    if (hasOverEight) {
       const proceed = window.confirm(
-        `⚠️ 注意：您登記的時段（${availStartTime} - ${availEndTime}）扣除 1 小時休息後，有效工時超過 8 小時。\n\n建議每次排班不超過 8 小時（加上休息共 9 小時）。\n\n確定仍要以此時段送出嗎？`
+        `⚠️ 注意：您登記的某些時段扣除 1 小時休息後，有效工時超過 8 小時。\n\n建議每次排班工作時間不超過 8 小時（加上休息共 9 小時）。\n\n確定仍要以這些時段送出嗎？`
       );
       if (!proceed) return;
     }
 
     try {
-      // Add new records sequentially
-      for (const dateStr of availSelectedDates) {
+      // Add each configured availability sequentially
+      for (const config of availConfigs) {
         await addAvailability({
           employeeName: workerName.trim(),
-          date: dateStr,
-          workplace: availWorkplace,
-          startTime: availStartTime,
-          endTime: availEndTime,
-          notes: availNotes.trim()
+          date: config.date,
+          workplace: config.workplace,
+          startTime: TIME_SLOTS[config.startIdx],
+          endTime: TIME_SLOTS[config.endIdx],
+          notes: config.notes.trim()
         });
       }
 
+      setIsWorkerAvailModalOpen(false);
       setAvailSelectedDates([]);
-      setAvailNotes('');
-      alert('已成功送出您的可用時間！');
+      setAvailConfigs([]);
+      setTimeout(() => {
+        alert('已成功送出您的可用時間！');
+      }, 100);
     } catch (error) {
       console.error("Error saving availability: ", error);
       alert('送出可用時間失敗，請稍後再試。');
@@ -1257,7 +1383,7 @@ function App() {
           await addAvailability({
             employeeName: workerName.trim(),
             date: dateStr,
-            workplace: availWorkplace || (workplaces[0]?.name || ''),
+            workplace: workplaces[0]?.name || '',
             startTime: '06:30',
             endTime: '15:30',
             notes: ''
@@ -1832,12 +1958,12 @@ function App() {
                   <div>
                     <h3 className="text-base font-bold text-[#3E2723] flex items-center gap-2">
                       <span className="w-2.5 h-2.5 rounded-full bg-[#2E7D32]"></span>
-                      {isFullTime ? '登記不克排班日期' : '登記可用時段'} ({workerNextMonthStart.getFullYear()}年 {workerNextMonthStart.getMonth() + 1}月)
+                      {isFullTime ? '登記不克排班日期' : '登記可用日期'} ({workerNextMonthStart.getFullYear()}年 {workerNextMonthStart.getMonth() + 1}月)
                     </h3>
                     <p className="text-xs text-[#6D4C41] mt-0.5 font-medium">
                       {isFullTime
                         ? '正式夥伴預設為全配合，請選取您下個月「無法上班/休假/請假」的日期。'
-                        : '請選取日期、地點與可配合排班的時間範圍，店長即可為您安排班表。'}
+                        : '請選取您可以配合的日期，下一步即可設定地點與時間。'}
                     </p>
                   </div>
 
@@ -1854,65 +1980,6 @@ function App() {
                   )}
 
                   <form onSubmit={handleAddAvailability} className="space-y-4 pt-2">
-                    {!isFullTime && (
-                      <>
-                        {/* Workplace Selection */}
-                        <div>
-                          <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">可配合地點</label>
-                          <select
-                            value={availWorkplace}
-                            onChange={(e) => setAvailWorkplace(e.target.value)}
-                            disabled={!isWorkerEditable}
-                            className={`w-full glass-input px-4 py-2.5 rounded-xl text-sm ${!isWorkerEditable ? 'opacity-50 cursor-not-allowed text-[#8D6E63]/60 bg-gray-50/50' : 'cursor-pointer'
-                              }`}
-                          >
-                            {workplaces.map(loc => (
-                              <option key={loc.id} value={loc.name} className="bg-white text-[#3E2723]">
-                                {loc.name}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-
-                        {/* Time Inputs */}
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">開始時間</label>
-                            <select
-                              value={availStartTime}
-                              onChange={(e) => setAvailStartTime(e.target.value)}
-                              disabled={!isWorkerEditable}
-                              className={`w-full glass-input px-4 py-2.5 rounded-xl text-sm ${!isWorkerEditable ? 'opacity-50 cursor-not-allowed text-[#8D6E63]/60 bg-gray-50/50' : 'cursor-pointer'
-                                }`}
-                            >
-                              {TIME_SLOTS.map(slot => (
-                                <option key={slot} value={slot} className="bg-white text-[#3E2723] font-mono">
-                                  {slot}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                          <div>
-                            <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">最晚結束時間</label>
-                            <select
-                              value={availEndTime}
-                              onChange={(e) => setAvailEndTime(e.target.value)}
-                              disabled={!isWorkerEditable}
-                              className={`w-full glass-input px-4 py-2.5 rounded-xl text-sm ${!isWorkerEditable ? 'opacity-50 cursor-not-allowed text-[#8D6E63]/60 bg-gray-50/50' : 'cursor-pointer'
-                                }`}
-                            >
-                              {TIME_SLOTS.map(slot => (
-                                <option key={slot} value={slot} className="bg-white text-[#3E2723] font-mono">
-                                  {slot}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        </div>
-
-                      </>
-                    )}
-
                     {/* Date Multi-selector */}
                     <div>
                       <div className="flex justify-between items-center mb-2">
@@ -2004,65 +2071,36 @@ function App() {
                       </div>
                     </div>
 
-                    {/* Notes */}
-                    <div>
-                      <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">
-                        {isFullTime ? '請假/休假備註事項 (選填)' : '備註事項 (如：只能上早班、偏好時段等)'}
-                      </label>
-                      <textarea
-                        placeholder={isFullTime ? '填寫不克排班原因或備註...' : '填寫特別備註，協助店長協調排班...'}
-                        value={availNotes}
-                        onChange={(e) => setAvailNotes(e.target.value)}
-                        disabled={!isWorkerEditable}
-                        className={`w-full glass-input px-4 py-2.5 rounded-xl text-sm min-h-[70px] resize-none ${!isWorkerEditable ? 'opacity-50 cursor-not-allowed bg-gray-50/50 text-[#8D6E63]/60' : ''
-                          }`}
-                      />
-                    </div>
-
-                    {/* Inline warning banners */}
-                    {!isFullTime && availStartTime && availEndTime && isOverEightHours(availStartTime, availEndTime) && (
-                      <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-amber-50 border border-amber-200">
-                        <span className="text-lg leading-none mt-0.5">⚠️</span>
-                        <div className="space-y-0.5">
-                          <p className="text-xs font-bold text-amber-800">工時超過 8 小時警告</p>
-                          <p className="text-[11px] text-amber-700 leading-snug">
-                            此時段扣除 1 小時休息後，有效工時超過 8 小時（實際工作：{Math.round((calculateDuration(availStartTime, availEndTime) - 1) * 10) / 10} 小時）。送出時將需要確認。
-                          </p>
-                        </div>
+                    {/* Notes for Full-Time only */}
+                    {isFullTime && (
+                      <div>
+                        <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">
+                          請假/休假備註事項 (選填)
+                        </label>
+                        <textarea
+                          placeholder="填寫不克排班原因或備註..."
+                          value={availNotes}
+                          onChange={(e) => setAvailNotes(e.target.value)}
+                          disabled={!isWorkerEditable}
+                          className={`w-full glass-input px-4 py-2.5 rounded-xl text-sm min-h-[70px] resize-none ${!isWorkerEditable ? 'opacity-50 cursor-not-allowed bg-gray-50/50 text-[#8D6E63]/60' : ''
+                            }`}
+                        />
                       </div>
                     )}
 
-                    {!isFullTime && (() => {
-                      if (availSelectedDates.length === 0) return null;
-                      const existingDates = availabilities
-                        .filter(a => a.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase())
-                        .map(a => a.date);
-                      const allDates = Array.from(new Set([...existingDates, ...availSelectedDates]));
-                      if (!hasSevenConsecutiveDays(allDates)) return null;
-                      return (
-                        <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-red-50 border border-red-200">
-                          <span className="text-lg leading-none mt-0.5">🚫</span>
-                          <div className="space-y-0.5">
-                            <p className="text-xs font-bold text-red-700">不可連續工作 7 天</p>
-                            <p className="text-[11px] text-red-600 leading-snug">
-                              目前選擇的日期加上已登記的可用日期，將造成連續工作 7 天或以上。依勞工法規，每 7 天至少需有 1 天例假日。請重新選擇日期。
-                            </p>
-                          </div>
-                        </div>
-                      );
-                    })()}
-
                     <button
-                      type="submit"
+                      type={isFullTime ? "submit" : "button"}
+                      onClick={!isFullTime ? handleOpenWorkerAvailModal : undefined}
                       disabled={!isWorkerEditable}
                       className={`w-full font-bold py-3 rounded-xl transition-all text-center text-sm ${!isWorkerEditable
                         ? 'bg-gray-300 text-gray-500 cursor-not-allowed shadow-none'
                         : 'bg-[#795548] hover:bg-[#6D4C41] text-white shadow-lg shadow-[#795548]/15 cursor-pointer'
                         }`}
                     >
-                      {isFullTime ? '送出不克排班日期' : '送出可用時間'}
+                      {isFullTime ? '送出不克排班日期' : '下一步：設定時間與地點 →'}
                     </button>
                   </form>
+
                 </div>
 
                 {/* Submitted Availabilities List */}
@@ -3833,7 +3871,184 @@ function App() {
 
       </div>
 
+      {/* Part-Time Worker Availability Config Modal */}
+      {isWorkerAvailModalOpen && (
+        <div className="fixed inset-0 bg-[#3E2723]/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="glass-panel rounded-2xl w-full max-w-2xl shadow-2xl border border-[#DAC0A3]/50 flex flex-col max-h-[90vh]">
+
+            {/* Modal Header */}
+            <div className="p-5 border-b border-[#DAC0A3]/35 flex items-center justify-between shrink-0">
+              <div>
+                <h3 className="text-base font-bold text-[#3E2723] flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-[#795548]"></span>
+                  設定可用時段
+                </h3>
+                <p className="text-xs text-[#6D4C41] mt-0.5">請為每個已選日期設定可配合的時間與地點</p>
+              </div>
+              <button
+                onClick={() => setIsWorkerAvailModalOpen(false)}
+                className="text-[#6D4C41] hover:text-[#3E2723] p-1.5 rounded-lg hover:bg-[#FAF7F2] transition-colors cursor-pointer"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Sync All Button */}
+            {availConfigs.length > 1 && (
+              <div className="px-5 pt-4 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleSyncAllAvailConfigs}
+                  className="w-full py-2 text-xs font-bold text-[#5D4037] bg-[#8D6E63]/10 hover:bg-[#8D6E63]/20 border border-[#8D6E63]/30 rounded-xl transition-all cursor-pointer"
+                >
+                  📋 一鍵同步所有日期時間與地點（套用第一筆設定）
+                </button>
+              </div>
+            )}
+
+            {/* Scrollable date cards */}
+            <div className="overflow-y-auto p-5 space-y-4 flex-1">
+              {availConfigs.map((config, index) => {
+                const dateObj = new Date(config.date);
+                const dayNames = ['日', '一', '二', '三', '四', '五', '六'];
+                const dayName = dayNames[dateObj.getDay()];
+                const startTime = TIME_SLOTS[config.startIdx];
+                const endTime = TIME_SLOTS[config.endIdx];
+                const duration = calculateDuration(startTime, endTime);
+                const overEight = isOverEightHours(startTime, endTime);
+
+                // Timeline tick marks (every 2 hours: 06:00, 08:00, ..., 20:00)
+                const tickLabels = ['06', '08', '10', '12', '14', '16', '18', '20'];
+
+                return (
+                  <div key={config.date} className="bg-white/60 border border-[#DAC0A3]/50 rounded-2xl p-4 space-y-4 shadow-sm">
+                    {/* Date header */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-[#795548]"></span>
+                        <span className="text-sm font-bold text-[#3E2723]">{config.date}</span>
+                        <span className="text-xs text-[#6D4C41] bg-[#8D6E63]/10 px-2 py-0.5 rounded font-medium">週{dayName}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {overEight && (
+                          <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded font-bold">⚠️ 超過8小時</span>
+                        )}
+                        <span className="text-[11px] font-mono font-bold text-[#795548]">{startTime} – {endTime}</span>
+                        <span className="text-[10px] text-[#8D6E63]">({Math.round((duration - 1) * 10) / 10} 有效工時)</span>
+                        <button
+                          type="button"
+                          onClick={() => removeAvailConfig(index)}
+                          className="p-1 text-[#8D6E63] hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                          title="移除此日期"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Dual range slider */}
+                    <div className="space-y-2">
+                      <div className="dual-range-container">
+                        <div className="dual-range-track"></div>
+                        <div
+                          className="dual-range-highlight"
+                          style={{
+                            left: `${(config.startIdx / (TIME_SLOTS.length - 1)) * 100}%`,
+                            width: `${((config.endIdx - config.startIdx) / (TIME_SLOTS.length - 1)) * 100}%`
+                          }}
+                        ></div>
+                        {/* Start slider */}
+                        <input
+                          type="range"
+                          min={0}
+                          max={TIME_SLOTS.length - 1}
+                          value={config.startIdx}
+                          onChange={(e) => updateAvailConfig(index, { startIdx: parseInt(e.target.value) })}
+                          className="dual-range-slider"
+                          style={{ zIndex: config.startIdx === config.endIdx ? 4 : 3 }}
+                        />
+                        {/* End slider */}
+                        <input
+                          type="range"
+                          min={0}
+                          max={TIME_SLOTS.length - 1}
+                          value={config.endIdx}
+                          onChange={(e) => updateAvailConfig(index, { endIdx: parseInt(e.target.value) })}
+                          className="dual-range-slider"
+                        />
+                      </div>
+
+                      {/* Tick labels */}
+                      <div className="flex justify-between px-0">
+                        {tickLabels.map((tick) => (
+                          <span key={tick} className="text-[9px] text-[#8D6E63]/70 font-mono">{tick}</span>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Workplace selector */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[10px] font-semibold text-[#6D4C41] uppercase tracking-wider mb-1">地點</label>
+                        <select
+                          value={config.workplace}
+                          onChange={(e) => updateAvailConfig(index, { workplace: e.target.value })}
+                          className="w-full glass-input px-3 py-1.5 rounded-lg text-xs cursor-pointer"
+                        >
+                          {workplaces.map(loc => (
+                            <option key={loc.id} value={loc.name} className="bg-white text-[#3E2723]">
+                              {loc.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-[#6D4C41] uppercase tracking-wider mb-1">備註 (選填)</label>
+                        <input
+                          type="text"
+                          value={config.notes}
+                          onChange={(e) => updateAvailConfig(index, { notes: e.target.value })}
+                          placeholder="例如：只能上早班..."
+                          className="w-full glass-input px-3 py-1.5 rounded-lg text-xs"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {availConfigs.length === 0 && (
+                <div className="py-12 text-center text-xs text-[#8D6E63]">沒有已選日期，請先在日曆上選擇日期。</div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-5 border-t border-[#DAC0A3]/35 flex gap-3 shrink-0">
+              <button
+                type="button"
+                onClick={() => setIsWorkerAvailModalOpen(false)}
+                className="flex-1 py-2.5 text-sm font-semibold text-[#6D4C41] bg-white/70 hover:bg-[#FAF7F2] border border-[#DAC0A3]/60 rounded-xl transition-colors cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={handleWorkerAvailModalSubmit}
+                className="flex-1 py-2.5 text-sm font-bold text-white bg-[#795548] hover:bg-[#6D4C41] rounded-xl transition-colors cursor-pointer shadow-lg shadow-[#795548]/15"
+              >
+                送出可用時間 ✓
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Full-Time Direct Assignment Shift Picker Modal */}
+
       {isFTAssignModalOpen && pendingAssignAvail && (
         <div className="fixed inset-0 bg-[#3E2723]/30 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
           <div className="glass-panel rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl border border-[#DAC0A3]/50 flex flex-col p-6 space-y-4">

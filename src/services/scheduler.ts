@@ -425,11 +425,14 @@ export const deleteAvailability = async (id: string) => {
   } else {
     const itemToDelete = inMemoryDb.availabilities.find(item => item.id === id);
     // Sync before deleting so we don't lose other tabs' recent writes
-    if (itemToDelete) await syncActiveMonth(itemToDelete.date.substring(0, 7));
+    if (itemToDelete) {
+      await syncActiveMonth(itemToDelete.date.substring(0, 7));
+    }
     inMemoryDb.availabilities = inMemoryDb.availabilities.filter(item => item.id !== id);
     await saveDbForDate(itemToDelete?.date);
   }
 };
+
 
 export const subscribeToStaffingTargets = (callback: (targets: StaffingTarget[]) => void) => {
   if (isValidConfig && db) {
