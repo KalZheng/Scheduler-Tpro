@@ -355,6 +355,26 @@ function App() {
   const [managerViewMode, setManagerViewMode] = useState<'calendar' | 'grid' | 'employees' | 'calculation' | 'system'>('calendar');
   const [deadlineDay, setDeadlineDay] = useState<number>(30);
 
+  // Reference to the grid scroll container to enable horizontal scrolling via mouse wheel
+  const gridContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const container = gridContainerRef.current;
+    if (!container) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      if (e.deltaY !== 0) {
+        e.preventDefault();
+        container.scrollLeft += e.deltaY;
+      }
+    };
+
+    container.addEventListener('wheel', handleWheel, { passive: false });
+    return () => {
+      container.removeEventListener('wheel', handleWheel);
+    };
+  }, [managerViewMode, activeRole, isAuthenticated]);
+
   // Revenue-based staffing calculation states (persisted to localStorage)
   const [monthlyRevenues, setMonthlyRevenues] = useState<Record<number, number>>(() => {
     const data = localStorage.getItem('monthly_revenue_data');
@@ -3294,7 +3314,7 @@ function App() {
                   ) : (
                     /* Excel Grid Layout */
                     <main className="glass-panel rounded-2xl overflow-hidden border border-[#DAC0A3]/50 shadow-sm animate-scale-in">
-                      <div className="overflow-x-auto max-w-full">
+                      <div ref={gridContainerRef} className="overflow-x-auto max-w-full">
                         <table className="w-full border-collapse text-left select-none table-fixed">
                           <thead>
                             <tr className="border-b border-[#DAC0A3]/50 bg-[#F5EBE6]/60">
