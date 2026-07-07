@@ -869,18 +869,18 @@ function App() {
         const endIdx = TIME_SLOTS.indexOf(dbRecord.endTime);
         return {
           date,
-          startIdx: startIdx >= 0 ? startIdx : 6,
-          endIdx: endIdx >= 0 ? endIdx : 22,
+          startIdx: startIdx >= 0 ? startIdx : 1,
+          endIdx: endIdx >= 0 ? endIdx : 14,
           workplace: dbRecord.workplace || workplaces[0]?.name || '',
           notes: dbRecord.notes || ''
         };
       }
 
-      // Brand-new date — default 09:00 (idx 6) to 17:00 (idx 22)
+      // Brand-new date — default 06:30 (idx 1) to 13:00 (idx 14)
       return {
         date,
-        startIdx: 6,
-        endIdx: 22,
+        startIdx: 1,
+        endIdx: 14,
         workplace: workplaces[0]?.name || '',
         notes: ''
       };
@@ -4076,7 +4076,76 @@ function App() {
                 const endTime = TIME_SLOTS[config.endIdx];
                 const duration = calculateDuration(startTime, endTime);
                 const overEight = isOverEightHours(startTime, endTime);
-                const tickLabels = ['06', '08', '10', '12', '14', '16', '18', '20'];
+                const minStartIdx = 1; // 06:30
+                const maxEndIdx = 28;  // 20:00
+
+                // Determine mode and divider position
+                let currentMode: 'until' | 'from' = 'until';
+                let dividerIdx = config.endIdx;
+
+                if (config.startIdx > minStartIdx && config.endIdx === maxEndIdx) {
+                  currentMode = 'from';
+                  dividerIdx = config.startIdx;
+                } else if (config.startIdx === minStartIdx && config.endIdx < maxEndIdx) {
+                  currentMode = 'until';
+                  dividerIdx = config.endIdx;
+                } else if (config.startIdx === minStartIdx && config.endIdx === maxEndIdx) {
+                  currentMode = 'until';
+                  dividerIdx = maxEndIdx;
+                } else {
+                  // Legacy fallback
+                  const distToStart = config.startIdx - minStartIdx;
+                  const distToEnd = maxEndIdx - config.endIdx;
+                  if (distToStart > distToEnd) {
+                    currentMode = 'from';
+                    dividerIdx = config.startIdx;
+                  } else {
+                    currentMode = 'until';
+                    dividerIdx = config.endIdx;
+                  }
+                }
+
+                // Calculate percentage relative to minStartIdx and maxEndIdx
+                const pct = ((dividerIdx - minStartIdx) / (maxEndIdx - minStartIdx)) * 100;
+
+                const handleCommit = (nextDividerIdx: number, nextMode: 'until' | 'from') => {
+                  let start = nextMode === 'until' ? minStartIdx : nextDividerIdx;
+                  let end = nextMode === 'until' ? nextDividerIdx : maxEndIdx;
+
+                  if (nextMode === 'until') {
+                    if (end < 2) end = 2; // enforce minimum 30 min duration (06:30 - 07:00)
+                  } else {
+                    if (start > 27) start = 27; // enforce minimum 30 min duration (19:30 - 20:00)
+                  }
+
+                  updateAvailConfig(index, { startIdx: start, endIdx: end });
+                };
+
+                const posToIdx = (clientX: number, rect: DOMRect) => {
+                  const pct = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+                  const rawIdx = minStartIdx + pct * (maxEndIdx - minStartIdx);
+                  return Math.round(rawIdx);
+                };
+
+                const onHandleDown = (e: React.PointerEvent<HTMLDivElement>) => {
+                  e.preventDefault();
+                  const track = e.currentTarget.parentElement;
+                  if (!track) return;
+                  const rect = track.getBoundingClientRect();
+
+                  const onMove = (ev: PointerEvent) => {
+                    const nextIdx = posToIdx(ev.clientX, rect);
+                    handleCommit(nextIdx, currentMode);
+                  };
+
+                  const onUp = () => {
+                    window.removeEventListener('pointermove', onMove);
+                    window.removeEventListener('pointerup', onUp);
+                  };
+
+                  window.addEventListener('pointermove', onMove);
+                  window.addEventListener('pointerup', onUp);
+                };
 
                 return (
                   <div key={config.date} className="bg-white/60 border border-[#DAC0A3]/50 rounded-2xl p-4 space-y-4 shadow-sm">
@@ -4111,41 +4180,107 @@ function App() {
                       </button>
                     </div>
 
-                    {/* Dual range slider — taller container for easier touch */}
-                    <div className="space-y-2 pt-1">
-                      <div className="dual-range-container" style={{ height: '36px' }}>
-                        <div className="dual-range-track"></div>
+                    {/* Single divider range slider */}
+                    <div className="space-y-4 pt-1">
+                      <div className="relative h-8 mx-2 select-none">
+                        {/* Track background */}
+                        <div className="absolute top-2.5 left-0 right-0 h-3 bg-[#EADBC8] rounded-full" />
+                        
+                        {/* Selected Active segment */}
                         <div
-                          className="dual-range-highlight"
+                          onClick={() => handleCommit(dividerIdx, currentMode === 'until' ? 'from' : 'until')}
+                          className="absolute top-2.5 h-3 rounded-full cursor-pointer transition-all"
                           style={{
-                            left: `${(config.startIdx / (TIME_SLOTS.length - 1)) * 100}%`,
-                            width: `${((config.endIdx - config.startIdx) / (TIME_SLOTS.length - 1)) * 100}%`
+                            left: currentMode === 'until' ? '0%' : `${pct}%`,
+                            width: currentMode === 'until' ? `${pct}%` : `${100 - pct}%`,
+                            backgroundColor: '#8D6E63',
                           }}
-                        ></div>
-                        <input
-                          type="range"
-                          min={0}
-                          max={TIME_SLOTS.length - 1}
-                          value={config.startIdx}
-                          onChange={(e) => updateAvailConfig(index, { startIdx: parseInt(e.target.value) })}
-                          className="dual-range-slider"
-                          style={{ zIndex: config.startIdx === config.endIdx ? 4 : 3 }}
                         />
-                        <input
-                          type="range"
-                          min={0}
-                          max={TIME_SLOTS.length - 1}
-                          value={config.endIdx}
-                          onChange={(e) => updateAvailConfig(index, { endIdx: parseInt(e.target.value) })}
-                          className="dual-range-slider"
+
+                        {/* Left segment (click to set until) */}
+                        <div
+                          onClick={() => handleCommit(dividerIdx, 'until')}
+                          className="absolute top-2.5 left-0 h-3 cursor-pointer"
+                          style={{ width: `${pct}%` }}
                         />
+
+                        {/* Right segment (click to set from) */}
+                        <div
+                          onClick={() => handleCommit(dividerIdx, 'from')}
+                          className="absolute top-2.5 right-0 h-3 cursor-pointer"
+                          style={{ width: `${100 - pct}%` }}
+                        />
+
+                        {/* Movable Divider Handle */}
+                        <div
+                          onPointerDown={onHandleDown}
+                          className="absolute top-1.5 w-5 h-5 rounded-full bg-white border-2 shadow-md cursor-grab active:cursor-grabbing flex items-center justify-center"
+                          style={{
+                            left: `${pct}%`,
+                            borderColor: '#795548',
+                            transform: 'translateX(-50%)',
+                            touchAction: 'none'
+                          }}
+                        >
+                          <div className="w-1.5 h-1.5 rounded-full bg-[#795548]" />
+                        </div>
                       </div>
 
-                      {/* Tick labels */}
-                      <div className="flex justify-between">
-                        {tickLabels.map((tick) => (
-                          <span key={tick} className="text-[10px] text-[#8D6E63]/70 font-mono">{tick}</span>
-                        ))}
+                      {/* Ruler tick labels */}
+                      <div className="relative h-5 mx-2 text-[9px] text-[#8D6E63]/60 font-mono select-none">
+                        {[
+                          { label: '06:30', idx: 1 },
+                          { label: '08:00', idx: 4 },
+                          { label: '10:00', idx: 8 },
+                          { label: '12:00', idx: 12 },
+                          { label: '14:00', idx: 16 },
+                          { label: '16:00', idx: 20 },
+                          { label: '18:00', idx: 24 },
+                          { label: '20:00', idx: 28 },
+                        ].map((tick) => {
+                          const tickPct = ((tick.idx - minStartIdx) / (maxEndIdx - minStartIdx)) * 100;
+                          const isCurrent = tick.idx === dividerIdx;
+                          return (
+                            <span
+                              key={tick.label}
+                              className={`absolute transition-all duration-150 ${
+                                isCurrent ? 'text-[#3E2723] font-black text-[10px]' : ''
+                              }`}
+                              style={{
+                                left: `${tickPct}%`,
+                                transform: 'translateX(-50%)',
+                              }}
+                            >
+                              {tick.label}
+                            </span>
+                          );
+                        })}
+                      </div>
+
+                      {/* Mode selection buttons */}
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleCommit(dividerIdx, 'until')}
+                          className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                            currentMode === 'until'
+                              ? 'bg-[#795548] text-white border-[#795548] shadow-sm'
+                              : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:bg-[#FAF7F2]'
+                          }`}
+                        >
+                          工作至此時間
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleCommit(dividerIdx, 'from')}
+                          className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                            currentMode === 'from'
+                              ? 'bg-[#795548] text-white border-[#795548] shadow-sm'
+                              : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:bg-[#FAF7F2]'
+                          }`}
+                        >
+                          自此時間開始
+                        </button>
                       </div>
                     </div>
 
