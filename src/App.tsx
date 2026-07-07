@@ -1720,8 +1720,10 @@ function App() {
     );
 
     if (!isFullTime) {
-      return workerAvails;
+      const nextMonthStr = formatDateString(workerNextMonthStart).substring(0, 7);
+      return workerAvails.filter(a => a.date.startsWith(nextMonthStr));
     }
+
 
     const registeredMonths = Array.from(
       new Set(
