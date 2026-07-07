@@ -3873,11 +3873,19 @@ function App() {
 
       {/* Part-Time Worker Availability Config Modal */}
       {isWorkerAvailModalOpen && (
-        <div className="fixed inset-0 bg-[#3E2723]/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
-          <div className="glass-panel rounded-2xl w-full max-w-2xl shadow-2xl border border-[#DAC0A3]/50 flex flex-col max-h-[90vh]">
+        <div className="fixed inset-0 bg-[#3E2723]/40 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center sm:p-4 animate-fade-in">
+          {/* Sheet on mobile, centred card on desktop */}
+          <div className="glass-panel w-full sm:max-w-2xl shadow-2xl border border-[#DAC0A3]/50 flex flex-col
+                          rounded-t-3xl sm:rounded-2xl
+                          max-h-[92vh] sm:max-h-[90vh]">
+
+            {/* Drag handle (mobile only) */}
+            <div className="flex justify-center pt-3 pb-1 sm:hidden shrink-0">
+              <div className="w-10 h-1 rounded-full bg-[#DAC0A3]/70"></div>
+            </div>
 
             {/* Modal Header */}
-            <div className="p-5 border-b border-[#DAC0A3]/35 flex items-center justify-between shrink-0">
+            <div className="px-5 py-4 border-b border-[#DAC0A3]/35 flex items-center justify-between shrink-0">
               <div>
                 <h3 className="text-base font-bold text-[#3E2723] flex items-center gap-2">
                   <span className="w-2.5 h-2.5 rounded-full bg-[#795548]"></span>
@@ -3887,7 +3895,7 @@ function App() {
               </div>
               <button
                 onClick={() => setIsWorkerAvailModalOpen(false)}
-                className="text-[#6D4C41] hover:text-[#3E2723] p-1.5 rounded-lg hover:bg-[#FAF7F2] transition-colors cursor-pointer"
+                className="text-[#6D4C41] hover:text-[#3E2723] p-2 rounded-xl hover:bg-[#FAF7F2] transition-colors cursor-pointer"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -3897,11 +3905,11 @@ function App() {
 
             {/* Sync All Button */}
             {availConfigs.length > 1 && (
-              <div className="px-5 pt-4 shrink-0">
+              <div className="px-4 pt-3 shrink-0">
                 <button
                   type="button"
                   onClick={handleSyncAllAvailConfigs}
-                  className="w-full py-2 text-xs font-bold text-[#5D4037] bg-[#8D6E63]/10 hover:bg-[#8D6E63]/20 border border-[#8D6E63]/30 rounded-xl transition-all cursor-pointer"
+                  className="w-full py-2.5 text-xs font-bold text-[#5D4037] bg-[#8D6E63]/10 active:bg-[#8D6E63]/25 hover:bg-[#8D6E63]/20 border border-[#8D6E63]/30 rounded-xl transition-all cursor-pointer"
                 >
                   📋 一鍵同步所有日期時間與地點（套用第一筆設定）
                 </button>
@@ -3909,7 +3917,7 @@ function App() {
             )}
 
             {/* Scrollable date cards */}
-            <div className="overflow-y-auto p-5 space-y-4 flex-1">
+            <div className="overflow-y-auto px-4 py-3 space-y-4 flex-1">
               {availConfigs.map((config, index) => {
                 const dateObj = new Date(config.date);
                 const dayNames = ['日', '一', '二', '三', '四', '五', '六'];
@@ -3918,41 +3926,44 @@ function App() {
                 const endTime = TIME_SLOTS[config.endIdx];
                 const duration = calculateDuration(startTime, endTime);
                 const overEight = isOverEightHours(startTime, endTime);
-
-                // Timeline tick marks (every 2 hours: 06:00, 08:00, ..., 20:00)
                 const tickLabels = ['06', '08', '10', '12', '14', '16', '18', '20'];
 
                 return (
                   <div key={config.date} className="bg-white/60 border border-[#DAC0A3]/50 rounded-2xl p-4 space-y-4 shadow-sm">
-                    {/* Date header */}
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-[#795548]"></span>
-                        <span className="text-sm font-bold text-[#3E2723]">{config.date}</span>
-                        <span className="text-xs text-[#6D4C41] bg-[#8D6E63]/10 px-2 py-0.5 rounded font-medium">週{dayName}</span>
+
+                    {/* Date header — stacked on mobile */}
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full bg-[#795548] shrink-0"></span>
+                          <span className="text-sm font-bold text-[#3E2723]">{config.date}</span>
+                          <span className="text-xs text-[#6D4C41] bg-[#8D6E63]/10 px-2 py-0.5 rounded font-medium">週{dayName}</span>
+                        </div>
+                        {/* Time + duration below the date on mobile */}
+                        <div className="flex flex-wrap items-center gap-1.5 pl-4">
+                          <span className="text-sm font-mono font-bold text-[#795548]">{startTime} – {endTime}</span>
+                          <span className="text-[11px] text-[#8D6E63]">({Math.round((duration - 1) * 10) / 10} 有效工時)</span>
+                          {overEight && (
+                            <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded font-bold">⚠️ 超過8小時</span>
+                          )}
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        {overEight && (
-                          <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded font-bold">⚠️ 超過8小時</span>
-                        )}
-                        <span className="text-[11px] font-mono font-bold text-[#795548]">{startTime} – {endTime}</span>
-                        <span className="text-[10px] text-[#8D6E63]">({Math.round((duration - 1) * 10) / 10} 有效工時)</span>
-                        <button
-                          type="button"
-                          onClick={() => removeAvailConfig(index)}
-                          className="p-1 text-[#8D6E63] hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
-                          title="移除此日期"
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
-                        </button>
-                      </div>
+                      {/* Delete button — larger touch target */}
+                      <button
+                        type="button"
+                        onClick={() => removeAvailConfig(index)}
+                        className="p-2 text-[#8D6E63] hover:text-red-500 active:text-red-600 hover:bg-red-50 active:bg-red-100 rounded-xl transition-colors cursor-pointer shrink-0"
+                        title="移除此日期"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      </button>
                     </div>
 
-                    {/* Dual range slider */}
-                    <div className="space-y-2">
-                      <div className="dual-range-container">
+                    {/* Dual range slider — taller container for easier touch */}
+                    <div className="space-y-2 pt-1">
+                      <div className="dual-range-container" style={{ height: '36px' }}>
                         <div className="dual-range-track"></div>
                         <div
                           className="dual-range-highlight"
@@ -3961,7 +3972,6 @@ function App() {
                             width: `${((config.endIdx - config.startIdx) / (TIME_SLOTS.length - 1)) * 100}%`
                           }}
                         ></div>
-                        {/* Start slider */}
                         <input
                           type="range"
                           min={0}
@@ -3971,7 +3981,6 @@ function App() {
                           className="dual-range-slider"
                           style={{ zIndex: config.startIdx === config.endIdx ? 4 : 3 }}
                         />
-                        {/* End slider */}
                         <input
                           type="range"
                           min={0}
@@ -3983,21 +3992,21 @@ function App() {
                       </div>
 
                       {/* Tick labels */}
-                      <div className="flex justify-between px-0">
+                      <div className="flex justify-between">
                         {tickLabels.map((tick) => (
-                          <span key={tick} className="text-[9px] text-[#8D6E63]/70 font-mono">{tick}</span>
+                          <span key={tick} className="text-[10px] text-[#8D6E63]/70 font-mono">{tick}</span>
                         ))}
                       </div>
                     </div>
 
-                    {/* Workplace selector */}
-                    <div className="grid grid-cols-2 gap-3">
+                    {/* Workplace + Notes — stacked on mobile, side-by-side on sm+ */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-[10px] font-semibold text-[#6D4C41] uppercase tracking-wider mb-1">地點</label>
+                        <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-1.5">地點</label>
                         <select
                           value={config.workplace}
                           onChange={(e) => updateAvailConfig(index, { workplace: e.target.value })}
-                          className="w-full glass-input px-3 py-1.5 rounded-lg text-xs cursor-pointer"
+                          className="w-full glass-input px-3 py-2.5 rounded-xl text-sm cursor-pointer"
                         >
                           {workplaces.map(loc => (
                             <option key={loc.id} value={loc.name} className="bg-white text-[#3E2723]">
@@ -4007,13 +4016,13 @@ function App() {
                         </select>
                       </div>
                       <div>
-                        <label className="block text-[10px] font-semibold text-[#6D4C41] uppercase tracking-wider mb-1">備註 (選填)</label>
+                        <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-1.5">備註 (選填)</label>
                         <input
                           type="text"
                           value={config.notes}
                           onChange={(e) => updateAvailConfig(index, { notes: e.target.value })}
                           placeholder="例如：只能上早班..."
-                          className="w-full glass-input px-3 py-1.5 rounded-lg text-xs"
+                          className="w-full glass-input px-3 py-2.5 rounded-xl text-sm"
                         />
                       </div>
                     </div>
@@ -4022,23 +4031,23 @@ function App() {
               })}
 
               {availConfigs.length === 0 && (
-                <div className="py-12 text-center text-xs text-[#8D6E63]">沒有已選日期，請先在日曆上選擇日期。</div>
+                <div className="py-16 text-center text-sm text-[#8D6E63]">沒有已選日期，請先在日曆上選擇日期。</div>
               )}
             </div>
 
-            {/* Modal Footer */}
-            <div className="p-5 border-t border-[#DAC0A3]/35 flex gap-3 shrink-0">
+            {/* Modal Footer — full-width tall buttons for easy tapping */}
+            <div className="px-4 py-4 border-t border-[#DAC0A3]/35 flex gap-3 shrink-0 pb-safe">
               <button
                 type="button"
                 onClick={() => setIsWorkerAvailModalOpen(false)}
-                className="flex-1 py-2.5 text-sm font-semibold text-[#6D4C41] bg-white/70 hover:bg-[#FAF7F2] border border-[#DAC0A3]/60 rounded-xl transition-colors cursor-pointer"
+                className="flex-1 py-3.5 text-sm font-semibold text-[#6D4C41] bg-white/70 active:bg-[#FAF7F2] hover:bg-[#FAF7F2] border border-[#DAC0A3]/60 rounded-xl transition-colors cursor-pointer"
               >
                 取消
               </button>
               <button
                 type="button"
                 onClick={handleWorkerAvailModalSubmit}
-                className="flex-1 py-2.5 text-sm font-bold text-white bg-[#795548] hover:bg-[#6D4C41] rounded-xl transition-colors cursor-pointer shadow-lg shadow-[#795548]/15"
+                className="flex-[2] py-3.5 text-sm font-bold text-white bg-[#795548] active:bg-[#5D4037] hover:bg-[#6D4C41] rounded-xl transition-colors cursor-pointer shadow-lg shadow-[#795548]/15"
               >
                 送出可用時間 ✓
               </button>
