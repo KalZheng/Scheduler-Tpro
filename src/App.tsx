@@ -833,14 +833,30 @@ function App() {
 
     // Sort selected dates chronologically
     const sortedDates = [...availSelectedDates].sort((a, b) => a.localeCompare(b));
-    
-    // Initialize configurations
-    const initialConfigs: WorkerAvailConfig[] = sortedDates.map(date => {
-      // Find existing config or fallback to default
-      const existing = availConfigs.find(c => c.date === date);
-      if (existing) return existing;
 
-      // Default start 09:00 (index 6), end 17:00 (index 22), first workplace
+    // Pre-populate configs: use existing DB record if available, then in-memory config, then defaults
+    const initialConfigs: WorkerAvailConfig[] = sortedDates.map(date => {
+      // Already edited in this modal session
+      const inSession = availConfigs.find(c => c.date === date);
+      if (inSession) return inSession;
+
+      // Existing DB record for this worker+date
+      const dbRecord = availabilities.find(
+        a => a.date === date && a.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase()
+      );
+      if (dbRecord) {
+        const startIdx = TIME_SLOTS.indexOf(dbRecord.startTime);
+        const endIdx = TIME_SLOTS.indexOf(dbRecord.endTime);
+        return {
+          date,
+          startIdx: startIdx >= 0 ? startIdx : 6,
+          endIdx: endIdx >= 0 ? endIdx : 22,
+          workplace: dbRecord.workplace || workplaces[0]?.name || '',
+          notes: dbRecord.notes || ''
+        };
+      }
+
+      // Brand-new date — default 09:00 (idx 6) to 17:00 (idx 22)
       return {
         date,
         startIdx: 6,
@@ -926,27 +942,19 @@ function App() {
       return;
     }
 
-    // Check for shifts exceeding 8 effective working hours (warn but allow)
-    let hasOverEight = false;
-    for (const config of availConfigs) {
-      const tStart = TIME_SLOTS[config.startIdx];
-      const tEnd = TIME_SLOTS[config.endIdx];
-      if (isOverEightHours(tStart, tEnd)) {
-        hasOverEight = true;
-        break;
-      }
-    }
-
-    if (hasOverEight) {
-      const proceed = window.confirm(
-        `⚠️ 注意：您登記的某些時段扣除 1 小時休息後，有效工時超過 8 小時。\n\n建議每次排班工作時間不超過 8 小時（加上休息共 9 小時）。\n\n確定仍要以這些時段送出嗎？`
-      );
-      if (!proceed) return;
-    }
 
     try {
-      // Add each configured availability sequentially
+      // Upsert each configured availability: delete existing record first if present, then add new
       for (const config of availConfigs) {
+        // Find and delete any existing record for this worker+date
+        const existing = availabilities.filter(
+          a => a.date === config.date &&
+               a.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase()
+        );
+        for (const old of existing) {
+          await deleteAvailability(old.id);
+        }
+
         await addAvailability({
           employeeName: workerName.trim(),
           date: config.date,
