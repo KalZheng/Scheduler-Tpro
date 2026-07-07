@@ -2305,7 +2305,7 @@ function App() {
                                 return (
                                   <div
                                     key={avail.id}
-                                    className={`text-[9px] leading-tight px-1 py-0.5 rounded font-bold truncate ${
+                                    className={`text-[11px] leading-tight px-1.5 py-0.5 rounded font-bold truncate ${
                                       isMe
                                         ? 'bg-[#795548] text-white'
                                         : 'bg-[#8D6E63]/15 text-[#5D4037]'
@@ -2314,7 +2314,9 @@ function App() {
                                   >
                                     {avail.employeeName.split('').slice(0, 3).join('')}
                                     {' '}
-                                    <span className="opacity-70 font-mono">{avail.startTime.substring(0, 5)}</span>
+                                    <span className="opacity-80 font-mono text-[10px]">
+                                      {avail.startTime.substring(0, 5)}-{avail.endTime.substring(0, 5)}
+                                    </span>
                                   </div>
                                 );
                               })}
@@ -2340,7 +2342,7 @@ function App() {
                         <span className="text-[10px] text-[#6D4C41] font-medium">其他同仁的登記</span>
                       </div>
                       <div className="flex items-center gap-1.5 ml-auto">
-                        <span className="text-[10px] text-[#8D6E63] font-medium">顯示格式：姓名 + 開始時間</span>
+                        <span className="text-[10px] text-[#8D6E63] font-medium">顯示格式：姓名 + 時間區間 (例: 09:00-17:00)</span>
                       </div>
                     </div>
                   </div>
