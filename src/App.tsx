@@ -2236,7 +2236,119 @@ function App() {
                 </div>
               </div>
 
+              {/* Team Availability Calendar — all workers' registered times for next month */}
+              {(() => {
+                const nextMonthStr = formatDateString(workerNextMonthStart).substring(0, 7);
+                const teamAvails = availabilities.filter(a =>
+                  a.date.startsWith(nextMonthStr) &&
+                  !(a.startTime === '00:00' && a.endTime === '00:00')
+                );
+                const teamCalendarDates = workerCalendarGridDates;
+
+                return (
+                  <div className="glass-panel p-6 rounded-2xl border border-[#DAC0A3]/50 shadow-sm space-y-4 bg-white/40 hidden sm:block">
+                    <div className="border-b border-[#DAC0A3]/35 pb-3">
+                      <h3 className="text-base font-bold text-[#3E2723] flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-[#8D6E63]"></span>
+                        團隊可用時段總覽 ({workerNextMonthStart.getFullYear()}年 {workerNextMonthStart.getMonth() + 1}月)
+                      </h3>
+                      <p className="text-xs text-[#6D4C41] mt-0.5 font-medium">
+                        以下為所有同仁在下個月已登記的可用時段，供參考排班協調。
+                      </p>
+                    </div>
+
+                    {/* Calendar grid */}
+                    <div className="border border-[#DAC0A3]/50 rounded-2xl overflow-hidden bg-white/70">
+                      {/* Day headers */}
+                      <div className="grid grid-cols-7 border-b border-[#DAC0A3]/50 bg-[#F5EBE6]/60">
+                        {DAYS_OF_WEEK.map(day => (
+                          <div key={day.value} className="py-2 text-center text-xs font-bold text-[#6D4C41]">
+                            {day.name}
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="grid grid-cols-7 gap-px bg-[#EADBC8]/60">
+                        {teamCalendarDates.map(dateObj => {
+                          const dateStr = formatDateString(dateObj);
+                          const isToday = dateStr === todayStr;
+                          const isInMonth = dateObj.getMonth() === workerNextMonthStart.getMonth() &&
+                                            dateObj.getFullYear() === workerNextMonthStart.getFullYear();
+
+                          // All workers available on this date
+                          const dayAvails = teamAvails
+                            .filter(a => a.date === dateStr)
+                            .sort((a, b) => a.employeeName.localeCompare(b.employeeName));
+
+                          const isFirstOfMonth = dateObj.getDate() === 1;
+                          const dateLabel = isFirstOfMonth ? `${dateObj.getMonth() + 1}/1` : dateObj.getDate().toString();
+
+                          return (
+                            <div
+                              key={dateStr}
+                              className={`min-h-[90px] p-1.5 flex flex-col gap-0.5 relative ${
+                                isToday ? 'bg-[#FAF7F2]'
+                                : isInMonth ? 'bg-white/95'
+                                : 'bg-[#FAF7F2]/40 opacity-40'
+                              }`}
+                            >
+                              {/* Date label */}
+                              <span className={`text-[11px] font-bold font-mono px-1 py-0.5 rounded-full w-fit mb-0.5 ${
+                                isToday ? 'bg-[#795548] text-white' : 'text-[#3E2723]'
+                              }`}>
+                                {dateLabel}
+                              </span>
+
+                              {/* Worker chips */}
+                              {isInMonth && dayAvails.map(avail => {
+                                const isMe = avail.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase();
+                                return (
+                                  <div
+                                    key={avail.id}
+                                    className={`text-[9px] leading-tight px-1 py-0.5 rounded font-bold truncate ${
+                                      isMe
+                                        ? 'bg-[#795548] text-white'
+                                        : 'bg-[#8D6E63]/15 text-[#5D4037]'
+                                    }`}
+                                    title={`${avail.employeeName}: ${avail.startTime}–${avail.endTime} @ ${avail.workplace}`}
+                                  >
+                                    {avail.employeeName.split('').slice(0, 3).join('')}
+                                    {' '}
+                                    <span className="opacity-70 font-mono">{avail.startTime.substring(0, 5)}</span>
+                                  </div>
+                                );
+                              })}
+
+                              {/* "empty" indicator */}
+                              {isInMonth && dayAvails.length === 0 && (
+                                <span className="text-[9px] text-[#8D6E63]/40 mt-auto">-</span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Legend */}
+                    <div className="flex flex-wrap gap-3 pt-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-3 h-3 rounded bg-[#795548]"></span>
+                        <span className="text-[10px] text-[#6D4C41] font-medium">您自己的登記</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-3 h-3 rounded bg-[#8D6E63]/15 border border-[#8D6E63]/30"></span>
+                        <span className="text-[10px] text-[#6D4C41] font-medium">其他同仁的登記</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 ml-auto">
+                        <span className="text-[10px] text-[#8D6E63] font-medium">顯示格式：姓名 + 開始時間</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* Confirmed Schedule Calendar Card */}
+
               <div className="glass-panel p-6 rounded-2xl border border-[#DAC0A3]/50 shadow-sm space-y-4 bg-white/40">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-[#DAC0A3]/35 pb-3">
                   <div>
@@ -4014,6 +4126,35 @@ function App() {
                         ))}
                       </div>
                     </div>
+
+                    {/* Other registered colleagues for this date */}
+                    {(() => {
+                      const dayAvails = availabilities.filter(
+                        a => a.date === config.date &&
+                             a.employeeName.trim().toLowerCase() !== workerName.trim().toLowerCase() &&
+                             !(a.startTime === '00:00' && a.endTime === '00:00')
+                      );
+                      if (dayAvails.length === 0) return null;
+                      return (
+                        <div className="bg-[#FAF7F2]/60 border border-[#DAC0A3]/45 rounded-xl p-2.5 space-y-1.5">
+                          <div className="text-[10px] font-bold text-[#6D4C41] flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#8D6E63]"></span>
+                            同日已登記之同仁：
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {dayAvails.map(a => (
+                              <span
+                                key={a.id}
+                                className="text-[10px] bg-white border border-[#DAC0A3]/40 text-[#5D4037] px-2 py-0.5 rounded-md font-bold"
+                                title={`備註: ${a.notes || '無'}`}
+                              >
+                                {a.employeeName} ({a.startTime}-{a.endTime} @ {a.workplace})
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     {/* Workplace + Notes — stacked on mobile, side-by-side on sm+ */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
