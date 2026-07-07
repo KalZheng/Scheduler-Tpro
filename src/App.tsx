@@ -1445,6 +1445,29 @@ function App() {
     }
   };
 
+  // Edit availability handler for worker page
+  const handleEditAvailability = (avail: WorkerAvailability) => {
+    if (!isWorkerEditable) {
+      alert(`已逾本月登記/修改截止時間（${deadlineDay}日），且已有已確認之排班，無法修改登記。`);
+      return;
+    }
+
+    const startIdx = TIME_SLOTS.indexOf(avail.startTime);
+    const endIdx = TIME_SLOTS.indexOf(avail.endTime);
+
+    setAvailConfigs([
+      {
+        date: avail.date,
+        startIdx: startIdx >= 0 ? startIdx : 1,
+        endIdx: endIdx >= 0 ? endIdx : 14,
+        workplace: avail.workplace || workplaces[0]?.name || '',
+        notes: avail.notes || ''
+      }
+    ]);
+    setAvailSelectedDates([avail.date]);
+    setIsWorkerAvailModalOpen(true);
+  };
+
   const getDayNote = (dateStr: string): string => {
     const match = staffingTargets.find(t => t.hour === 99 && t.date === dateStr);
     return match ? match.note || '' : '';
@@ -2182,18 +2205,73 @@ function App() {
                             return (
                               <div
                                 key={avail.id}
-                                className="glass-card p-4 rounded-xl border border-red-200/60 bg-red-50/20 space-y-1"
+                                className="glass-card p-4 rounded-xl border border-red-200/60 bg-red-50/20 space-y-2"
                               >
-                                <div className="flex items-center justify-between gap-2">
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-sm font-extrabold text-red-800">
-                                      ❌ {avail.date} ({dayInfo.name})
-                                    </span>
-                                    <span className="text-[10px] px-2 py-0.5 rounded bg-red-100 text-red-700 border border-red-200 font-bold">
-                                      不克排班 (休假)
-                                    </span>
-                                  </div>
+                                <div className="flex items-center justify-between gap-2 border-b border-red-200/40 pb-1.5">
+                                  <span className="text-sm font-extrabold text-red-800">
+                                    ❌ {avail.date} ({dayInfo.name})
+                                  </span>
                                   {isWorkerEditable && (
+                                    <div className="flex gap-1.5">
+                                      {!isFullTime && (
+                                        <button
+                                          onClick={() => handleEditAvailability(avail)}
+                                          className="p-1 rounded-lg bg-white hover:bg-[#FAF7F2] border border-[#DAC0A3]/50 text-[#6D4C41] hover:text-[#3E2723] transition-colors cursor-pointer"
+                                          title="編輯此登記"
+                                        >
+                                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                          </svg>
+                                        </button>
+                                      )}
+                                      <button
+                                        onClick={(e) => handleDeleteAvailability(avail.id, e)}
+                                        className="p-1 rounded-lg bg-white hover:bg-red-50 border border-[#DAC0A3]/50 text-[#6D4C41] hover:text-red-650 transition-colors cursor-pointer"
+                                        title="刪除此登記"
+                                      >
+                                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                        </svg>
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="flex flex-col gap-1.5">
+                                  <span className="text-[10px] px-2 py-0.5 rounded bg-red-100 text-red-700 border border-red-200 font-bold w-fit">
+                                    不克排班 (休假)
+                                  </span>
+                                  {avail.notes && (
+                                    <p className="text-xs text-red-800/80 font-medium">
+                                      📝 備註：{getCleanNote(avail.notes) || avail.notes}
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div
+                              key={avail.id}
+                              className="glass-card p-4 rounded-xl border border-[#DAC0A3]/45 space-y-2.5"
+                            >
+                              <div className="flex items-center justify-between gap-2 border-b border-[#DAC0A3]/30 pb-1.5">
+                                <span className="text-sm font-extrabold text-[#3E2723]">
+                                  {avail.date} ({dayInfo.name})
+                                </span>
+                                {isWorkerEditable && (
+                                  <div className="flex gap-1.5">
+                                    {!isFullTime && (
+                                      <button
+                                        onClick={() => handleEditAvailability(avail)}
+                                        className="p-1 rounded-lg bg-white hover:bg-[#FAF7F2] border border-[#DAC0A3]/50 text-[#6D4C41] hover:text-[#3E2723] transition-colors cursor-pointer"
+                                        title="編輯此登記"
+                                      >
+                                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                        </svg>
+                                      </button>
+                                    )}
                                     <button
                                       onClick={(e) => handleDeleteAvailability(avail.id, e)}
                                       className="p-1 rounded-lg bg-white hover:bg-red-50 border border-[#DAC0A3]/50 text-[#6D4C41] hover:text-red-650 transition-colors cursor-pointer"
@@ -2203,51 +2281,24 @@ function App() {
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                                       </svg>
                                     </button>
-                                  )}
+                                  </div>
+                                )}
+                              </div>
+                              <div className="flex flex-col gap-2">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="text-[10px] px-2 py-0.5 rounded bg-[#F5EBE6] text-[#5D4037] border border-[#DAC0A3]/40 font-bold w-fit">
+                                    📍 {avail.workplace}
+                                  </span>
+                                  <span className="text-xs text-[#6D4C41]/90 font-medium flex items-center gap-1 font-mono">
+                                    🕒 可配合時間：{avail.startTime} - {avail.endTime}
+                                  </span>
                                 </div>
                                 {avail.notes && (
-                                  <p className="text-xs text-red-800/80 font-medium pl-6">
-                                    📝 備註：{getCleanNote(avail.notes) || avail.notes}
+                                  <p className="text-xs text-[#5D4037] bg-white/50 px-2.5 py-1.5 rounded border border-[#DAC0A3]/40 border-dashed w-fit text-left">
+                                    📝 備註：{avail.notes}
                                   </p>
                                 )}
                               </div>
-                            );
-                          }
-
-                          return (
-                            <div
-                              key={avail.id}
-                              className="glass-card p-4 rounded-xl border border-[#DAC0A3]/45 space-y-1"
-                            >
-                              <div className="flex items-center justify-between gap-2">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-sm font-extrabold text-[#3E2723]">
-                                    {avail.date} ({dayInfo.name})
-                                  </span>
-                                  <span className="text-[10px] px-2 py-0.5 rounded bg-[#F5EBE6] text-[#5D4037] border border-[#DAC0A3]/40 font-bold">
-                                    📍 {avail.workplace}
-                                  </span>
-                                </div>
-                                {isWorkerEditable && (
-                                  <button
-                                    onClick={(e) => handleDeleteAvailability(avail.id, e)}
-                                    className="p-1 rounded-lg bg-white hover:bg-red-50 border border-[#DAC0A3]/50 text-[#6D4C41] hover:text-red-650 transition-colors cursor-pointer"
-                                    title="刪除此登記"
-                                  >
-                                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                    </svg>
-                                  </button>
-                                )}
-                              </div>
-                              <div className="text-xs text-[#6D4C41]/90 font-medium flex items-center gap-1 font-mono">
-                                🕒 可配合時間：{avail.startTime} - {avail.endTime}
-                              </div>
-                              {avail.notes && (
-                                <p className="text-xs text-[#5D4037] bg-white/50 px-2.5 py-1 rounded border border-[#DAC0A3]/40 border-dashed mt-1 inline-block">
-                                  📝 備註：{avail.notes}
-                                </p>
-                              )}
                             </div>
                           );
                         })
