@@ -1622,12 +1622,14 @@ function App() {
       return headerVal;
     });
 
-    const headers = ['人員姓名', ...dateHeaders];
+    const headers = ['人員姓名', ...dateHeaders, '總工時(hrs)'];
     const rows: string[][] = [];
     const changedCells = new Set<string>();
 
     // Add employee rows
     allEmployees.forEach((empName, empIdx) => {
+      let totalHours = 0;
+
       const dateCells = exportDates.map((dateObj, dateIdx) => {
         const dateStr = formatDateString(dateObj);
         const empSchedules = schedules.filter(
@@ -1639,9 +1641,15 @@ function App() {
         );
 
         if (hasChangedShift) {
+          // +1 because col 0 = name, col 1+ = dates
           const cellRef = XLSX.utils.encode_cell({ r: empIdx + 1, c: dateIdx + 1 });
           changedCells.add(cellRef);
         }
+
+        // Accumulate hours
+        empSchedules.forEach(sched => {
+          totalHours += calculateDuration(sched.startTime, sched.endTime);
+        });
 
         if (empSchedules.length === 0) return '';
 
@@ -1653,10 +1661,8 @@ function App() {
         }).join('\n');
       });
 
-      const row = [
-        empName,
-        ...dateCells
-      ];
+      const totalHoursStr = totalHours > 0 ? `${Math.round(totalHours * 10) / 10}` : '';
+      const row = [empName, ...dateCells, totalHoursStr];
       rows.push(row);
     });
 
@@ -1685,8 +1691,8 @@ function App() {
     // Auto-fit column widths
     const maxCols = headers.length;
     const colWidths = Array(maxCols).fill({ wch: 10 });
-    // First column 'Personnel Name' should be wider
-    colWidths[0] = { wch: 15 };
+    colWidths[0] = { wch: 15 }; // Employee name
+    colWidths[maxCols - 1] = { wch: 12 }; // Total hours (last column)
 
     // Set column widths in the sheet
     ws['!cols'] = colWidths;
