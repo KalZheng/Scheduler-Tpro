@@ -353,7 +353,7 @@ function App() {
 
   // Manager view sub-mode: calendar or grid or employees or calculation or system
   const [managerViewMode, setManagerViewMode] = useState<'calendar' | 'grid' | 'employees' | 'calculation' | 'system'>('calendar');
-  const [deadlineDay, setDeadlineDay] = useState<number>(30);
+  const [deadlineDay, setDeadlineDay] = useState<number>(20);
 
   // Reference to the grid scroll container to enable horizontal scrolling via mouse wheel
   const gridContainerRef = useRef<HTMLDivElement>(null);
@@ -956,7 +956,7 @@ function App() {
       .map(a => a.date);
     const activeDates = availConfigs.map(c => c.date);
     const allDates = Array.from(new Set([...existingDates, ...activeDates]));
-    
+
     if (hasSevenConsecutiveDays(allDates)) {
       alert('⚠️ 無法送出：登記後將出現連續 7 天或以上的工作天。\n\n根據勞工法規，員工每 7 天中至少需有 1 天例假日，不可連續工作超過 6 天。\n\n請重新調整您的可用日期。');
       return;
@@ -969,7 +969,7 @@ function App() {
         // Find and delete any existing record for this worker+date
         const existing = availabilities.filter(
           a => a.date === config.date &&
-               a.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase()
+            a.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase()
         );
         for (const old of existing) {
           await deleteAvailability(old.id);
@@ -2344,7 +2344,7 @@ function App() {
                           const dateStr = formatDateString(dateObj);
                           const isToday = dateStr === todayStr;
                           const isInMonth = dateObj.getMonth() === workerNextMonthStart.getMonth() &&
-                                            dateObj.getFullYear() === workerNextMonthStart.getFullYear();
+                            dateObj.getFullYear() === workerNextMonthStart.getFullYear();
 
                           // All workers available on this date
                           const dayAvails = teamAvails
@@ -2357,16 +2357,14 @@ function App() {
                           return (
                             <div
                               key={dateStr}
-                              className={`min-h-[90px] p-1.5 flex flex-col gap-0.5 relative ${
-                                isToday ? 'bg-[#FAF7F2]'
-                                : isInMonth ? 'bg-white/95'
-                                : 'bg-[#FAF7F2]/40 opacity-40'
-                              }`}
+                              className={`min-h-[90px] p-1.5 flex flex-col gap-0.5 relative ${isToday ? 'bg-[#FAF7F2]'
+                                  : isInMonth ? 'bg-white/95'
+                                    : 'bg-[#FAF7F2]/40 opacity-40'
+                                }`}
                             >
                               {/* Date label */}
-                              <span className={`text-[11px] font-bold font-mono px-1 py-0.5 rounded-full w-fit mb-0.5 ${
-                                isToday ? 'bg-[#795548] text-white' : 'text-[#3E2723]'
-                              }`}>
+                              <span className={`text-[11px] font-bold font-mono px-1 py-0.5 rounded-full w-fit mb-0.5 ${isToday ? 'bg-[#795548] text-white' : 'text-[#3E2723]'
+                                }`}>
                                 {dateLabel}
                               </span>
 
@@ -2376,11 +2374,10 @@ function App() {
                                 return (
                                   <div
                                     key={avail.id}
-                                    className={`text-[11px] leading-tight px-1.5 py-0.5 rounded font-bold truncate ${
-                                      isMe
+                                    className={`text-[11px] leading-tight px-1.5 py-0.5 rounded font-bold truncate ${isMe
                                         ? 'bg-[#795548] text-white'
                                         : 'bg-[#8D6E63]/15 text-[#5D4037]'
-                                    }`}
+                                      }`}
                                     title={`${avail.employeeName}: ${avail.startTime}–${avail.endTime} @ ${avail.workplace}`}
                                   >
                                     {avail.employeeName.split('').slice(0, 3).join('')}
@@ -4236,7 +4233,7 @@ function App() {
                       <div className="relative h-8 mx-2 select-none">
                         {/* Track background */}
                         <div className="absolute top-2.5 left-0 right-0 h-3 bg-[#EADBC8] rounded-full" />
-                        
+
                         {/* Selected Active segment */}
                         <div
                           onClick={() => handleCommit(dividerIdx, currentMode === 'until' ? 'from' : 'until')}
@@ -4294,9 +4291,8 @@ function App() {
                           return (
                             <span
                               key={tick.label}
-                              className={`absolute transition-all duration-150 ${
-                                isCurrent ? 'text-[#3E2723] font-black text-[10px]' : ''
-                              }`}
+                              className={`absolute transition-all duration-150 ${isCurrent ? 'text-[#3E2723] font-black text-[10px]' : ''
+                                }`}
                               style={{
                                 left: `${tickPct}%`,
                                 transform: 'translateX(-50%)',
@@ -4313,22 +4309,20 @@ function App() {
                         <button
                           type="button"
                           onClick={() => handleCommit(dividerIdx, 'until')}
-                          className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
-                            currentMode === 'until'
+                          className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer ${currentMode === 'until'
                               ? 'bg-[#795548] text-white border-[#795548] shadow-sm'
                               : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:bg-[#FAF7F2]'
-                          }`}
+                            }`}
                         >
                           工作至此時間
                         </button>
                         <button
                           type="button"
                           onClick={() => handleCommit(dividerIdx, 'from')}
-                          className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
-                            currentMode === 'from'
+                          className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer ${currentMode === 'from'
                               ? 'bg-[#795548] text-white border-[#795548] shadow-sm'
                               : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:bg-[#FAF7F2]'
-                          }`}
+                            }`}
                         >
                           自此時間開始
                         </button>
@@ -4339,8 +4333,8 @@ function App() {
                     {(() => {
                       const dayAvails = availabilities.filter(
                         a => a.date === config.date &&
-                             a.employeeName.trim().toLowerCase() !== workerName.trim().toLowerCase() &&
-                             !(a.startTime === '00:00' && a.endTime === '00:00')
+                          a.employeeName.trim().toLowerCase() !== workerName.trim().toLowerCase() &&
+                          !(a.startTime === '00:00' && a.endTime === '00:00')
                       );
                       if (dayAvails.length === 0) return null;
                       return (
