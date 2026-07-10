@@ -17,10 +17,10 @@ const LOCAL_DIST_DIR = path.join(__dirname, "dist");
 const REMOTE_ROOT = process.env.FTP_REMOTE_ROOT || "/htdocs";
 const REMOTE_APP_DIR = process.env.FTP_REMOTE_APP_DIR || "Scheduler-Tpro";
 
-async function pathExists(client, remotePath) {
+async function pathExists(client, parentDir, name) {
     try {
-        await client.cd(remotePath);
-        return true;
+        const list = await client.list(parentDir);
+        return list.some((item) => item.name === name);
     } catch {
         return false;
     }
@@ -31,7 +31,6 @@ async function deploy() {
     client.ftp.verbose = false; // set to true for detailed logs while debugging
 
     const remoteAppDir = `${REMOTE_ROOT}/${REMOTE_APP_DIR}`;
-    const liveAssetsDir = `${remoteAppDir}/assets`;
     const tempAssetsDir = `${remoteAppDir}/assets_new`;
     const backupAssetsDir = `${remoteAppDir}/assets_old`;
     const tempIndexName = "index.html.new";
@@ -56,7 +55,7 @@ async function deploy() {
 
         console.log(`📁 Uploading assets/ -> ${tempAssetsDir} (temp)...`);
         // Clean up any leftover temp dir from a previous failed run
-        if (await pathExists(client, tempAssetsDir)) {
+        if (await pathExists(client, remoteAppDir, "assets_new")) {
             await client.removeDir(tempAssetsDir);
         }
         await client.ensureDir(tempAssetsDir);
@@ -66,19 +65,16 @@ async function deploy() {
         // --- SWAP PHASE (fast — this is the only part that touches the live site) ---
 
         console.log("🔁 Swapping in new files...");
-        await client.cd(REMOTE_ROOT);
 
         // Swap index.html
-        if (await pathExists(client, REMOTE_ROOT)) {
-            await client.cd(REMOTE_ROOT);
-        }
+        await client.cd(REMOTE_ROOT);
         await client.rename(`index.html`, `index.html.old`).catch(() => { });
         await client.rename(tempIndexName, "index.html");
         await client.remove("index.html.old").catch(() => { });
 
         // Swap assets folder
         await client.cd(remoteAppDir);
-        const hadOldAssets = await pathExists(client, liveAssetsDir);
+        const hadOldAssets = await pathExists(client, remoteAppDir, "assets");
         if (hadOldAssets) {
             await client.rename("assets", "assets_old");
         }
