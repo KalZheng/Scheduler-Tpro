@@ -3,8 +3,8 @@ BRANCH=$(git rev-parse --abbrev-ref HEAD)
 ENV_FILE=".env.$BRANCH"
 
 if [ -f "$ENV_FILE" ]; then
-  cp "$ENV_FILE" .env
-  echo "✅ Loaded $ENV_FILE -> .env"
+  cp "$ENV_FILE" .env.local
+  echo "✅ Loaded $ENV_FILE -> .env.local"
 else
-  echo "⚠️  No $ENV_FILE found for branch '$BRANCH' — .env left unchanged"
+  echo "⚠️  No $ENV_FILE found for branch '$BRANCH' — .env.local left unchanged"
 fi
