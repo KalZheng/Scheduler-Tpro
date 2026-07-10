@@ -31,3 +31,5 @@ data/db-employees.json
 src/config/workplace.json
 .env.puli-production
 .env.jinan-production
+.env.master
+.env.deploy
