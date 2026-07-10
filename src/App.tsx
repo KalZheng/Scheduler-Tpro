@@ -2358,8 +2358,8 @@ function App() {
                             <div
                               key={dateStr}
                               className={`min-h-[90px] p-1.5 flex flex-col gap-0.5 relative ${isToday ? 'bg-[#FAF7F2]'
-                                  : isInMonth ? 'bg-white/95'
-                                    : 'bg-[#FAF7F2]/40 opacity-40'
+                                : isInMonth ? 'bg-white/95'
+                                  : 'bg-[#FAF7F2]/40 opacity-40'
                                 }`}
                             >
                               {/* Date label */}
@@ -2375,8 +2375,8 @@ function App() {
                                   <div
                                     key={avail.id}
                                     className={`text-[11px] leading-tight px-1.5 py-0.5 rounded font-bold truncate ${isMe
-                                        ? 'bg-[#795548] text-white'
-                                        : 'bg-[#8D6E63]/15 text-[#5D4037]'
+                                      ? 'bg-[#795548] text-white'
+                                      : 'bg-[#8D6E63]/15 text-[#5D4037]'
                                       }`}
                                     title={`${avail.employeeName}: ${avail.startTime}–${avail.endTime} @ ${avail.workplace}`}
                                   >
@@ -4310,8 +4310,8 @@ function App() {
                           type="button"
                           onClick={() => handleCommit(dividerIdx, 'until')}
                           className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer ${currentMode === 'until'
-                              ? 'bg-[#795548] text-white border-[#795548] shadow-sm'
-                              : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:bg-[#FAF7F2]'
+                            ? 'bg-[#795548] text-white border-[#795548] shadow-sm'
+                            : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:bg-[#FAF7F2]'
                             }`}
                         >
                           工作至此時間
@@ -4320,8 +4320,8 @@ function App() {
                           type="button"
                           onClick={() => handleCommit(dividerIdx, 'from')}
                           className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer ${currentMode === 'from'
-                              ? 'bg-[#795548] text-white border-[#795548] shadow-sm'
-                              : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:bg-[#FAF7F2]'
+                            ? 'bg-[#795548] text-white border-[#795548] shadow-sm'
+                            : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:bg-[#FAF7F2]'
                             }`}
                         >
                           自此時間開始
