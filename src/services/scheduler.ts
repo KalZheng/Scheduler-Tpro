@@ -88,6 +88,17 @@ let localDeadlineDayListeners: ((day: number) => void)[] = [];
 let localStartDayListeners: ((day: number) => void)[] = [];
 let localOperatingStartTimeListeners: ((time: string) => void)[] = [];
 let localOperatingEndTimeListeners: ((time: string) => void)[] = [];
+let localShiftMorningStartListeners: ((time: string) => void)[] = [];
+let localShiftMorningEndListeners: ((time: string) => void)[] = [];
+let localShiftEveningStartListeners: ((time: string) => void)[] = [];
+let localShiftEveningEndListeners: ((time: string) => void)[] = [];
+let localShiftPresetsListeners: ((presets: ShiftPreset[]) => void)[] = [];
+
+export interface ShiftPreset {
+  name: string;
+  startTime: string;
+  endTime: string;
+}
 
 interface DbSchema {
   schedules: WorkSchedule[];
@@ -98,6 +109,11 @@ interface DbSchema {
   startDay?: number;
   operatingStartTime?: string;
   operatingEndTime?: string;
+  shiftMorningStart?: string;
+  shiftMorningEnd?: string;
+  shiftEveningStart?: string;
+  shiftEveningEnd?: string;
+  shiftPresets?: ShiftPreset[];
 }
 
 const inMemoryDb: DbSchema = {
@@ -108,7 +124,15 @@ const inMemoryDb: DbSchema = {
   deadlineDay: 20,
   startDay: 15,
   operatingStartTime: '06:30',
-  operatingEndTime: '20:00'
+  operatingEndTime: '20:00',
+  shiftMorningStart: '06:30',
+  shiftMorningEnd: '15:30',
+  shiftEveningStart: '08:30',
+  shiftEveningEnd: '17:30',
+  shiftPresets: [
+    { name: '早班', startTime: '06:30', endTime: '15:30' },
+    { name: '晚班', startTime: '08:30', endTime: '17:30' }
+  ]
 };
 
 const loadedMonths = new Set<string>();
@@ -178,6 +202,36 @@ const getLocalOperatingEndTime = (): string => {
   return localStorage.getItem('scheduler_operating_end_time') || '20:00';
 };
 
+const getLocalShiftMorningStart = (): string => {
+  return localStorage.getItem('scheduler_shift_morning_start') || '06:30';
+};
+
+const getLocalShiftMorningEnd = (): string => {
+  return localStorage.getItem('scheduler_shift_morning_end') || '15:30';
+};
+
+const getLocalShiftEveningEnd = (): string => {
+  return localStorage.getItem('scheduler_shift_evening_end') || '17:30';
+};
+
+const getLocalShiftPresets = (): ShiftPreset[] => {
+  const data = localStorage.getItem('scheduler_shift_presets');
+  if (!data) {
+    return [
+      { name: '早班', startTime: '06:30', endTime: '15:30' },
+      { name: '晚班', startTime: '08:30', endTime: '17:30' }
+    ];
+  }
+  try {
+    return JSON.parse(data);
+  } catch {
+    return [
+      { name: '早班', startTime: '06:30', endTime: '15:30' },
+      { name: '晚班', startTime: '08:30', endTime: '17:30' }
+    ];
+  }
+};
+
 // Sync and merge data of a specific month into memory
 export const syncActiveMonth = async (monthStr: string) => {
   if (isValidConfig && db) return; // Skip if Cloud DB is enabled
@@ -223,6 +277,21 @@ export const syncActiveMonth = async (monthStr: string) => {
       if (data.operatingEndTime !== undefined) {
         inMemoryDb.operatingEndTime = data.operatingEndTime;
       }
+      if (data.shiftMorningStart !== undefined) {
+        inMemoryDb.shiftMorningStart = data.shiftMorningStart;
+      }
+      if (data.shiftMorningEnd !== undefined) {
+        inMemoryDb.shiftMorningEnd = data.shiftMorningEnd;
+      }
+      if (data.shiftEveningStart !== undefined) {
+        inMemoryDb.shiftEveningStart = data.shiftEveningStart;
+      }
+      if (data.shiftEveningEnd !== undefined) {
+        inMemoryDb.shiftEveningEnd = data.shiftEveningEnd;
+      }
+      if (data.shiftPresets !== undefined) {
+        inMemoryDb.shiftPresets = data.shiftPresets;
+      }
 
       // Update LocalStorage backup
       localStorage.setItem('weekly_work_schedules', JSON.stringify(inMemoryDb.schedules));
@@ -233,6 +302,11 @@ export const syncActiveMonth = async (monthStr: string) => {
       localStorage.setItem('scheduler_start_day', (inMemoryDb.startDay || 15).toString());
       localStorage.setItem('scheduler_operating_start_time', inMemoryDb.operatingStartTime || '06:30');
       localStorage.setItem('scheduler_operating_end_time', inMemoryDb.operatingEndTime || '20:00');
+      localStorage.setItem('scheduler_shift_morning_start', inMemoryDb.shiftMorningStart || '06:30');
+      localStorage.setItem('scheduler_shift_morning_end', inMemoryDb.shiftMorningEnd || '15:30');
+      localStorage.setItem('scheduler_shift_evening_start', inMemoryDb.shiftEveningStart || '08:30');
+      localStorage.setItem('scheduler_shift_evening_end', inMemoryDb.shiftEveningEnd || '17:30');
+      localStorage.setItem('scheduler_shift_presets', JSON.stringify(inMemoryDb.shiftPresets || []));
 
       // Trigger all active UI listeners
       localListeners.forEach(listener => listener([...inMemoryDb.schedules]));
@@ -243,6 +317,11 @@ export const syncActiveMonth = async (monthStr: string) => {
       localStartDayListeners.forEach(listener => listener(inMemoryDb.startDay || 15));
       localOperatingStartTimeListeners.forEach(listener => listener(inMemoryDb.operatingStartTime || '06:30'));
       localOperatingEndTimeListeners.forEach(listener => listener(inMemoryDb.operatingEndTime || '20:00'));
+      localShiftMorningStartListeners.forEach(listener => listener(inMemoryDb.shiftMorningStart || '06:30'));
+      localShiftMorningEndListeners.forEach(listener => listener(inMemoryDb.shiftMorningEnd || '15:30'));
+      localShiftEveningStartListeners.forEach(listener => listener(inMemoryDb.shiftEveningStart || '08:30'));
+      localShiftEveningEndListeners.forEach(listener => listener(inMemoryDb.shiftEveningEnd || '17:30'));
+      localShiftPresetsListeners.forEach(listener => listener(inMemoryDb.shiftPresets || []));
     }
   } catch (e) {
     console.error(`Failed to sync month data for ${monthStr}:`, e);
@@ -273,6 +352,21 @@ const loadFileDb = async () => {
       if (data.operatingEndTime !== undefined) {
         inMemoryDb.operatingEndTime = data.operatingEndTime;
       }
+      if (data.shiftMorningStart !== undefined) {
+        inMemoryDb.shiftMorningStart = data.shiftMorningStart;
+      }
+      if (data.shiftMorningEnd !== undefined) {
+        inMemoryDb.shiftMorningEnd = data.shiftMorningEnd;
+      }
+      if (data.shiftEveningStart !== undefined) {
+        inMemoryDb.shiftEveningStart = data.shiftEveningStart;
+      }
+      if (data.shiftEveningEnd !== undefined) {
+        inMemoryDb.shiftEveningEnd = data.shiftEveningEnd;
+      }
+      if (data.shiftPresets !== undefined) {
+        inMemoryDb.shiftPresets = data.shiftPresets;
+      }
       
       // Update local storage backup
       localStorage.setItem('weekly_work_schedules', JSON.stringify(inMemoryDb.schedules));
@@ -283,6 +377,11 @@ const loadFileDb = async () => {
       localStorage.setItem('scheduler_start_day', (inMemoryDb.startDay || 15).toString());
       localStorage.setItem('scheduler_operating_start_time', inMemoryDb.operatingStartTime || '06:30');
       localStorage.setItem('scheduler_operating_end_time', inMemoryDb.operatingEndTime || '20:00');
+      localStorage.setItem('scheduler_shift_morning_start', inMemoryDb.shiftMorningStart || '06:30');
+      localStorage.setItem('scheduler_shift_morning_end', inMemoryDb.shiftMorningEnd || '15:30');
+      localStorage.setItem('scheduler_shift_evening_start', inMemoryDb.shiftEveningStart || '08:30');
+      localStorage.setItem('scheduler_shift_evening_end', inMemoryDb.shiftEveningEnd || '17:30');
+      localStorage.setItem('scheduler_shift_presets', JSON.stringify(inMemoryDb.shiftPresets || []));
     } else {
       throw new Error("Local DB API response not OK");
     }
@@ -296,6 +395,11 @@ const loadFileDb = async () => {
     inMemoryDb.startDay = getLocalStartDay();
     inMemoryDb.operatingStartTime = getLocalOperatingStartTime();
     inMemoryDb.operatingEndTime = getLocalOperatingEndTime();
+    inMemoryDb.shiftMorningStart = getLocalShiftMorningStart();
+    inMemoryDb.shiftMorningEnd = getLocalShiftMorningEnd();
+    inMemoryDb.shiftEveningStart = localStorage.getItem('scheduler_shift_evening_start') || '08:30';
+    inMemoryDb.shiftEveningEnd = getLocalShiftEveningEnd();
+    inMemoryDb.shiftPresets = getLocalShiftPresets();
   } finally {
     // Notify all active listeners of loaded values
     localListeners.forEach(listener => listener([...inMemoryDb.schedules]));
@@ -306,6 +410,11 @@ const loadFileDb = async () => {
     localStartDayListeners.forEach(listener => listener(inMemoryDb.startDay || 15));
     localOperatingStartTimeListeners.forEach(listener => listener(inMemoryDb.operatingStartTime || '06:30'));
     localOperatingEndTimeListeners.forEach(listener => listener(inMemoryDb.operatingEndTime || '20:00'));
+    localShiftMorningStartListeners.forEach(listener => listener(inMemoryDb.shiftMorningStart || '06:30'));
+    localShiftMorningEndListeners.forEach(listener => listener(inMemoryDb.shiftMorningEnd || '15:30'));
+    localShiftEveningStartListeners.forEach(listener => listener(inMemoryDb.shiftEveningStart || '08:30'));
+    localShiftEveningEndListeners.forEach(listener => listener(inMemoryDb.shiftEveningEnd || '17:30'));
+    localShiftPresetsListeners.forEach(listener => listener(inMemoryDb.shiftPresets || []));
   }
 };
 
@@ -326,6 +435,11 @@ const saveDbForDate = async (dateStr?: string) => {
   localStorage.setItem('scheduler_start_day', (inMemoryDb.startDay || 15).toString());
   localStorage.setItem('scheduler_operating_start_time', inMemoryDb.operatingStartTime || '06:30');
   localStorage.setItem('scheduler_operating_end_time', inMemoryDb.operatingEndTime || '20:00');
+  localStorage.setItem('scheduler_shift_morning_start', inMemoryDb.shiftMorningStart || '06:30');
+  localStorage.setItem('scheduler_shift_morning_end', inMemoryDb.shiftMorningEnd || '15:30');
+  localStorage.setItem('scheduler_shift_evening_start', inMemoryDb.shiftEveningStart || '08:30');
+  localStorage.setItem('scheduler_shift_evening_end', inMemoryDb.shiftEveningEnd || '17:30');
+  localStorage.setItem('scheduler_shift_presets', JSON.stringify(inMemoryDb.shiftPresets || []));
 
   // Trigger active listeners immediately for immediate UI response
   localListeners.forEach(listener => listener([...inMemoryDb.schedules]));
@@ -336,6 +450,11 @@ const saveDbForDate = async (dateStr?: string) => {
   localStartDayListeners.forEach(listener => listener(inMemoryDb.startDay || 15));
   localOperatingStartTimeListeners.forEach(listener => listener(inMemoryDb.operatingStartTime || '06:30'));
   localOperatingEndTimeListeners.forEach(listener => listener(inMemoryDb.operatingEndTime || '20:00'));
+  localShiftMorningStartListeners.forEach(listener => listener(inMemoryDb.shiftMorningStart || '06:30'));
+  localShiftMorningEndListeners.forEach(listener => listener(inMemoryDb.shiftMorningEnd || '15:30'));
+  localShiftEveningStartListeners.forEach(listener => listener(inMemoryDb.shiftEveningStart || '08:30'));
+  localShiftEveningEndListeners.forEach(listener => listener(inMemoryDb.shiftEveningEnd || '17:30'));
+  localShiftPresetsListeners.forEach(listener => listener(inMemoryDb.shiftPresets || []));
 
   // POST current in-memory state to local JSON file
   try {
@@ -351,7 +470,12 @@ const saveDbForDate = async (dateStr?: string) => {
       deadlineDay: inMemoryDb.deadlineDay || 20,
       startDay: inMemoryDb.startDay || 15,
       operatingStartTime: inMemoryDb.operatingStartTime || '06:30',
-      operatingEndTime: inMemoryDb.operatingEndTime || '20:00'
+      operatingEndTime: inMemoryDb.operatingEndTime || '20:00',
+      shiftMorningStart: inMemoryDb.shiftMorningStart || '06:30',
+      shiftMorningEnd: inMemoryDb.shiftMorningEnd || '15:30',
+      shiftEveningStart: inMemoryDb.shiftEveningStart || '08:30',
+      shiftEveningEnd: inMemoryDb.shiftEveningEnd || '17:30',
+      shiftPresets: inMemoryDb.shiftPresets || []
     };
 
     await fetch(`/api/db?month=${monthStr}`, {
@@ -744,6 +868,165 @@ export const updateOperatingEndTime = async (time: string) => {
     return await setDoc(docRef, { operatingEndTime: time }, { merge: true });
   } else {
     inMemoryDb.operatingEndTime = time;
+    await saveDbForDate();
+  }
+};
+
+export const subscribeToShiftMorningStart = (callback: (time: string) => void) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    return onSnapshot(docRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        callback(data.shiftMorningStart !== undefined ? data.shiftMorningStart : '06:30');
+      } else {
+        callback('06:30');
+      }
+    });
+  } else {
+    localShiftMorningStartListeners.push(callback);
+    callback(inMemoryDb.shiftMorningStart || '06:30');
+    return () => {
+      localShiftMorningStartListeners = localShiftMorningStartListeners.filter(l => l !== callback);
+    };
+  }
+};
+
+export const updateShiftMorningStart = async (time: string) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    return await setDoc(docRef, { shiftMorningStart: time }, { merge: true });
+  } else {
+    inMemoryDb.shiftMorningStart = time;
+    await saveDbForDate();
+  }
+};
+
+export const subscribeToShiftMorningEnd = (callback: (time: string) => void) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    return onSnapshot(docRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        callback(data.shiftMorningEnd !== undefined ? data.shiftMorningEnd : '15:30');
+      } else {
+        callback('15:30');
+      }
+    });
+  } else {
+    localShiftMorningEndListeners.push(callback);
+    callback(inMemoryDb.shiftMorningEnd || '15:30');
+    return () => {
+      localShiftMorningEndListeners = localShiftMorningEndListeners.filter(l => l !== callback);
+    };
+  }
+};
+
+export const updateShiftMorningEnd = async (time: string) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    return await setDoc(docRef, { shiftMorningEnd: time }, { merge: true });
+  } else {
+    inMemoryDb.shiftMorningEnd = time;
+    await saveDbForDate();
+  }
+};
+
+export const subscribeToShiftEveningStart = (callback: (time: string) => void) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    return onSnapshot(docRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        callback(data.shiftEveningStart !== undefined ? data.shiftEveningStart : '08:30');
+      } else {
+        callback('08:30');
+      }
+    });
+  } else {
+    localShiftEveningStartListeners.push(callback);
+    callback(inMemoryDb.shiftEveningStart || '08:30');
+    return () => {
+      localShiftEveningStartListeners = localShiftEveningStartListeners.filter(l => l !== callback);
+    };
+  }
+};
+
+export const updateShiftEveningStart = async (time: string) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    return await setDoc(docRef, { shiftEveningStart: time }, { merge: true });
+  } else {
+    inMemoryDb.shiftEveningStart = time;
+    await saveDbForDate();
+  }
+};
+
+export const subscribeToShiftEveningEnd = (callback: (time: string) => void) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    return onSnapshot(docRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        callback(data.shiftEveningEnd !== undefined ? data.shiftEveningEnd : '17:30');
+      } else {
+        callback('17:30');
+      }
+    });
+  } else {
+    localShiftEveningEndListeners.push(callback);
+    callback(inMemoryDb.shiftEveningEnd || '17:30');
+    return () => {
+      localShiftEveningEndListeners = localShiftEveningEndListeners.filter(l => l !== callback);
+    };
+  }
+};
+
+export const updateShiftEveningEnd = async (time: string) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    return await setDoc(docRef, { shiftEveningEnd: time }, { merge: true });
+  } else {
+    inMemoryDb.shiftEveningEnd = time;
+    await saveDbForDate();
+  }
+};
+
+export const subscribeToShiftPresets = (callback: (presets: ShiftPreset[]) => void) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    return onSnapshot(docRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        callback(data.shiftPresets !== undefined ? data.shiftPresets : [
+          { name: '早班', startTime: '06:30', endTime: '15:30' },
+          { name: '晚班', startTime: '08:30', endTime: '17:30' }
+        ]);
+      } else {
+        callback([
+          { name: '早班', startTime: '06:30', endTime: '15:30' },
+          { name: '晚班', startTime: '08:30', endTime: '17:30' }
+        ]);
+      }
+    });
+  } else {
+    localShiftPresetsListeners.push(callback);
+    callback(inMemoryDb.shiftPresets || [
+      { name: '早班', startTime: '06:30', endTime: '15:30' },
+      { name: '晚班', startTime: '08:30', endTime: '17:30' }
+    ]);
+    return () => {
+      localShiftPresetsListeners = localShiftPresetsListeners.filter(l => l !== callback);
+    };
+  }
+};
+
+export const updateShiftPresets = async (presets: ShiftPreset[]) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    return await setDoc(docRef, { shiftPresets: presets }, { merge: true });
+  } else {
+    inMemoryDb.shiftPresets = presets;
     await saveDbForDate();
   }
 };

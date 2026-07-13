@@ -22,9 +22,19 @@ import {
   subscribeToOperatingStartTime,
   updateOperatingStartTime,
   subscribeToOperatingEndTime,
-  updateOperatingEndTime
+  updateOperatingEndTime,
+  subscribeToShiftMorningStart,
+  updateShiftMorningStart,
+  subscribeToShiftMorningEnd,
+  updateShiftMorningEnd,
+  subscribeToShiftEveningStart,
+  updateShiftEveningStart,
+  subscribeToShiftEveningEnd,
+  updateShiftEveningEnd,
+  subscribeToShiftPresets,
+  updateShiftPresets
 } from './services/scheduler';
-import type { WorkSchedule, WorkerAvailability, StaffingTarget, Employee } from './services/scheduler';
+import type { WorkSchedule, WorkerAvailability, StaffingTarget, Employee, ShiftPreset } from './services/scheduler';
 import { isValidConfig } from './firebase';
 import workplaces from './config/workplaces.json';
 import * as XLSX from 'xlsx-js-style';
@@ -362,6 +372,11 @@ function App() {
   const [startDay, setStartDay] = useState<number>(15);
   const [operatingStartTime, setOperatingStartTime] = useState<string>('06:30');
   const [operatingEndTime, setOperatingEndTime] = useState<string>('20:00');
+  const [shiftMorningStart, setShiftMorningStart] = useState<string>('06:30');
+  const [shiftMorningEnd, setShiftMorningEnd] = useState<string>('15:30');
+  const [shiftEveningStart, setShiftEveningStart] = useState<string>('08:30');
+  const [shiftEveningEnd, setShiftEveningEnd] = useState<string>('17:30');
+  const [shiftPresets, setShiftPresets] = useState<ShiftPreset[]>([]);
 
   const timeSlots = useMemo(() => {
     if (!operatingStartTime || !operatingEndTime) return [];
@@ -678,6 +693,21 @@ function App() {
     const unsubOperatingEndTime = subscribeToOperatingEndTime((time) => {
       setOperatingEndTime(time);
     });
+    const unsubShiftMorningStart = subscribeToShiftMorningStart((time) => {
+      setShiftMorningStart(time);
+    });
+    const unsubShiftMorningEnd = subscribeToShiftMorningEnd((time) => {
+      setShiftMorningEnd(time);
+    });
+    const unsubShiftEveningStart = subscribeToShiftEveningStart((time) => {
+      setShiftEveningStart(time);
+    });
+    const unsubShiftEveningEnd = subscribeToShiftEveningEnd((time) => {
+      setShiftEveningEnd(time);
+    });
+    const unsubShiftPresets = subscribeToShiftPresets((data) => {
+      setShiftPresets(data);
+    });
 
     return () => {
       unsubSchedules();
@@ -688,6 +718,11 @@ function App() {
       unsubStartDay();
       unsubOperatingStartTime();
       unsubOperatingEndTime();
+      unsubShiftMorningStart();
+      unsubShiftMorningEnd();
+      unsubShiftEveningStart();
+      unsubShiftEveningEnd();
+      unsubShiftPresets();
     };
   }, []);
 
@@ -872,8 +907,8 @@ function App() {
             employeeName: workerName.trim(),
             date: dateStr,
             workplace: workplaces[0]?.name || '',
-            startTime: '06:30', // default select 早班
-            endTime: '15:30',   // default select 早班
+            startTime: shiftMorningStart,
+            endTime: shiftMorningEnd,
             notes: availNotes.trim()
           });
         }
@@ -926,9 +961,9 @@ function App() {
         };
       }
 
-      // Brand-new date — default 06:30 to 13:00 if exists, otherwise first slot to last slot
-      const defStart = Math.max(0, timeSlots.indexOf('06:30'));
-      const defEnd = Math.max(0, timeSlots.indexOf('13:00'));
+      // Brand-new date — default to shiftMorningStart & shiftMorningEnd if exists
+      const defStart = Math.max(0, timeSlots.indexOf(shiftMorningStart));
+      const defEnd = Math.max(0, timeSlots.indexOf(shiftMorningEnd));
       return {
         date,
         startIdx: defStart,
@@ -1128,12 +1163,9 @@ function App() {
     }
   };
 
-  const executeFTAssign = async (avail: WorkerAvailability, shiftType: '早班' | '晚班') => {
+  const executeFTAssign = async (avail: WorkerAvailability, shiftName: string, sTime: string, eTime: string) => {
     setIsFTAssignModalOpen(false);
     setPendingAssignAvail(null);
-
-    const sTime = shiftType === '早班' ? '06:30' : '08:30';
-    const eTime = shiftType === '早班' ? '15:30' : '17:30';
 
     try {
       // Check staffing limit warning
@@ -1172,7 +1204,7 @@ function App() {
         workplace: avail.workplace,
         startTime: sTime,
         endTime: eTime,
-        notes: avail.notes ? `由登記可用時間自動排入: ${avail.notes.trim()}` : '由登記可用時間自動排入',
+        notes: avail.notes ? `由登記可用時間自動排入 (${shiftName}): ${avail.notes.trim()}` : `由登記可用時間自動排入 (${shiftName})`,
         workerNotes: avail.notes ? avail.notes.trim() : '',
         managerNotes: '',
         color: derivedColor,
@@ -1463,7 +1495,7 @@ function App() {
         return;
       }
 
-      if (safeConfirm(`確定要將 ${dateStr} 的休假改為配合排班（早班）嗎？`)) {
+      if (safeConfirm(`確定要將 ${dateStr} 的休假改為配合排班（早班，${shiftMorningStart}-${shiftMorningEnd}）嗎？`)) {
         try {
           if (avail) {
             await deleteAvailability(avail.id);
@@ -1472,8 +1504,8 @@ function App() {
             employeeName: workerName.trim(),
             date: dateStr,
             workplace: workplaces[0]?.name || '',
-            startTime: '06:30',
-            endTime: '15:30',
+            startTime: shiftMorningStart,
+            endTime: shiftMorningEnd,
             notes: ''
           });
         } catch (error) {
@@ -1605,8 +1637,8 @@ function App() {
     const isFT = emp?.status === '正式夥伴';
 
     if (isFT) {
-      setStartTime('06:30');
-      setEndTime('15:30');
+      setStartTime(shiftMorningStart);
+      setEndTime(shiftMorningEnd);
 
       const monthStr = formatDateString(currentMonthStart).substring(0, 7);
       const empMonthAvails = availabilities.filter(
@@ -3249,7 +3281,94 @@ function App() {
                         </div>
                       </div>
 
-                      {/* Section 2: Registration Limits */}
+                      {/* Section 2: Shift Presets Settings */}
+                      <div className="border-t border-[#E5DCD5]/60 pt-4 space-y-4">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-xs font-bold text-[#3E2723] flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#795548]"></span>
+                            常用班次設定
+                          </h4>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const newName = prompt('請輸入新班次名稱（例如：中班）：');
+                              if (!newName) return;
+                              if (shiftPresets.some(p => p.name === newName)) {
+                                alert('班次名稱已存在！');
+                                return;
+                              }
+                              const updated = [
+                                ...shiftPresets,
+                                { name: newName, startTime: '08:00', endTime: '17:00' }
+                              ];
+                              setShiftPresets(updated);
+                            }}
+                            className="text-[10px] bg-[#FAF7F2] border border-[#DAC0A3] hover:border-[#8D6E63] text-[#8D6E63] font-bold px-2 py-1 rounded-lg transition-all cursor-pointer flex items-center gap-1"
+                          >
+                            <span>➕</span> 新增班次
+                          </button>
+                        </div>
+
+                        <div className="space-y-3">
+                          {shiftPresets.map((preset, pIdx) => (
+                            <div key={preset.name} className="flex items-center gap-3 bg-[#FAF7F2]/50 p-3 rounded-xl border border-[#EADBC8]/40">
+                              <span className="text-xs font-bold text-[#3E2723] w-16 truncate">{preset.name}</span>
+                              <div className="flex items-center gap-1.5 flex-1">
+                                <select
+                                  value={preset.startTime}
+                                  onChange={(e) => {
+                                    const updated = [...shiftPresets];
+                                    updated[pIdx].startTime = e.target.value;
+                                    setShiftPresets(updated);
+                                  }}
+                                  className="w-full glass-input px-2.5 py-1.5 rounded-xl text-xs cursor-pointer"
+                                >
+                                  {ALL_TIME_CHOICES.map(choice => (
+                                    <option key={choice} value={choice} className="bg-white text-[#3E2723]">
+                                      {choice}
+                                    </option>
+                                  ))}
+                                </select>
+                                <span className="text-[#8D6E63] text-xs font-bold">~</span>
+                                <select
+                                  value={preset.endTime}
+                                  onChange={(e) => {
+                                    const updated = [...shiftPresets];
+                                    updated[pIdx].endTime = e.target.value;
+                                    setShiftPresets(updated);
+                                  }}
+                                  className="w-full glass-input px-2.5 py-1.5 rounded-xl text-xs cursor-pointer"
+                                >
+                                  {ALL_TIME_CHOICES.map(choice => (
+                                    <option key={choice} value={choice} className="bg-white text-[#3E2723]">
+                                      {choice}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (shiftPresets.length <= 1) {
+                                    alert('必須保留至少一個常用班次！');
+                                    return;
+                                  }
+                                  if (safeConfirm(`確定要刪除「${preset.name}」班次嗎？`)) {
+                                    const updated = shiftPresets.filter((_, idx) => idx !== pIdx);
+                                    setShiftPresets(updated);
+                                  }
+                                }}
+                                className="p-1.5 text-red-500 hover:bg-red-50 active:bg-red-100 rounded-lg transition-colors cursor-pointer"
+                                title="刪除此班次"
+                              >
+                                ❌
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Section 3: Registration Limits */}
                       <div className="border-t border-[#E5DCD5]/60 pt-4 space-y-3">
                         <h4 className="text-xs font-bold text-[#3E2723] flex items-center gap-1.5">
                           <span className="w-1.5 h-1.5 rounded-full bg-[#795548]"></span>
@@ -3309,6 +3428,11 @@ function App() {
                               }
                               await updateOperatingStartTime(operatingStartTime);
                               await updateOperatingEndTime(operatingEndTime);
+                              await updateShiftMorningStart(shiftMorningStart);
+                              await updateShiftMorningEnd(shiftMorningEnd);
+                              await updateShiftEveningStart(shiftEveningStart);
+                              await updateShiftEveningEnd(shiftEveningEnd);
+                              await updateShiftPresets(shiftPresets);
                               await updateStartDay(startDay);
                               await updateDeadlineDay(deadlineDay);
                               alert("已成功更新門市營業時間與排班限制設定！");
@@ -4595,24 +4719,20 @@ function App() {
             </div>
 
             <div className="flex flex-col gap-2.5 pt-2">
-              {timeSlots.includes('06:30') && timeSlots.includes('15:30') && (
-                <button
-                  type="button"
-                  onClick={() => executeFTAssign(pendingAssignAvail, '早班')}
-                  className="w-full py-3 bg-[#795548] hover:bg-[#5D4037] text-white font-bold rounded-xl text-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-md hover:shadow-[#795548]/10"
-                >
-                  ☀️ 早班 (06:30 - 15:30)
-                </button>
-              )}
-              {timeSlots.includes('08:30') && timeSlots.includes('17:30') && (
-                <button
-                  type="button"
-                  onClick={() => executeFTAssign(pendingAssignAvail, '晚班')}
-                  className="w-full py-3 bg-white hover:bg-[#FAF7F2] border border-[#DAC0A3]/70 hover:border-[#8D6E63] text-[#5D4037] font-bold rounded-xl text-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  🌙 晚班 (08:30 - 17:30)
-                </button>
-              )}
+              {shiftPresets.map((preset) => {
+                const isAvailable = timeSlots.includes(preset.startTime) && timeSlots.includes(preset.endTime);
+                if (!isAvailable) return null;
+                return (
+                  <button
+                    key={preset.name}
+                    type="button"
+                    onClick={() => executeFTAssign(pendingAssignAvail, preset.name, preset.startTime, preset.endTime)}
+                    className="w-full py-3 bg-[#795548] hover:bg-[#5D4037] text-white font-bold rounded-xl text-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-md hover:shadow-[#795548]/10"
+                  >
+                    ☀️ {preset.name} ({preset.startTime} - {preset.endTime})
+                  </button>
+                );
+              })}
             </div>
 
             <div className="border-t border-[#E5DCD5]/60 pt-3 mt-1.5 flex justify-end">
@@ -4868,40 +4988,30 @@ function App() {
               </div>
 
               {/* Quick Shift Presets inside scheduling modal */}
-              {((timeSlots.includes('06:30') && timeSlots.includes('15:30')) || (timeSlots.includes('08:30') && timeSlots.includes('17:30'))) && (
+              {shiftPresets.some(preset => timeSlots.includes(preset.startTime) && timeSlots.includes(preset.endTime)) && (
                 <div className="space-y-2">
                   <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider">常用班次快捷鍵</label>
-                  <div className="flex gap-2">
-                    {timeSlots.includes('06:30') && timeSlots.includes('15:30') && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setStartTime('06:30');
-                          setEndTime('15:30');
-                        }}
-                        className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${startTime === '06:30' && endTime === '15:30'
-                          ? 'bg-[#795548] text-white border-[#795548]'
-                          : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:border-[#8D6E63] hover:bg-[#FAF7F2]'
-                          }`}
-                      >
-                        ☀️ 早班 (06:30 - 15:30)
-                      </button>
-                    )}
-                    {timeSlots.includes('08:30') && timeSlots.includes('17:30') && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setStartTime('08:30');
-                          setEndTime('17:30');
-                        }}
-                        className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${startTime === '08:30' && endTime === '17:30'
-                          ? 'bg-[#795548] text-white border-[#795548]'
-                          : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:border-[#8D6E63] hover:bg-[#FAF7F2]'
-                          }`}
-                      >
-                        🌙 晚班 (08:30 - 17:30)
-                      </button>
-                    )}
+                  <div className="flex flex-wrap gap-2">
+                    {shiftPresets.map((preset) => {
+                      const isAvailable = timeSlots.includes(preset.startTime) && timeSlots.includes(preset.endTime);
+                      if (!isAvailable) return null;
+                      return (
+                        <button
+                          key={preset.name}
+                          type="button"
+                          onClick={() => {
+                            setStartTime(preset.startTime);
+                            setEndTime(preset.endTime);
+                          }}
+                          className={`flex-1 min-w-[120px] py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${startTime === preset.startTime && endTime === preset.endTime
+                            ? 'bg-[#795548] text-white border-[#795548]'
+                            : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:border-[#8D6E63] hover:bg-[#FAF7F2]'
+                            }`}
+                        >
+                          {preset.name} ({preset.startTime} - {preset.endTime})
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               )}
