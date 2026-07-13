@@ -18,9 +18,23 @@ import {
   subscribeToDeadlineDay,
   updateDeadlineDay,
   subscribeToStartDay,
-  updateStartDay
+  updateStartDay,
+  subscribeToOperatingStartTime,
+  updateOperatingStartTime,
+  subscribeToOperatingEndTime,
+  updateOperatingEndTime,
+  subscribeToShiftMorningStart,
+  updateShiftMorningStart,
+  subscribeToShiftMorningEnd,
+  updateShiftMorningEnd,
+  subscribeToShiftEveningStart,
+  updateShiftEveningStart,
+  subscribeToShiftEveningEnd,
+  updateShiftEveningEnd,
+  subscribeToShiftPresets,
+  updateShiftPresets
 } from './services/scheduler';
-import type { WorkSchedule, WorkerAvailability, StaffingTarget, Employee } from './services/scheduler';
+import type { WorkSchedule, WorkerAvailability, StaffingTarget, Employee, ShiftPreset } from './services/scheduler';
 import { isValidConfig } from './firebase';
 import workplaces from './config/workplaces.json';
 import * as XLSX from 'xlsx-js-style';
@@ -68,11 +82,10 @@ const getDatesInRange = (startStr: string, endStr: string): Date[] => {
   }
   return dates;
 };
-const TIME_SLOTS = Array.from({ length: 29 }, (_, i) => {
-  const totalMinutes = 6 * 60 + i * 30; // Starts at 6:00 AM (360 minutes)
-  const hour = Math.floor(totalMinutes / 60).toString().padStart(2, '0');
-  const minute = (totalMinutes % 60).toString().padStart(2, '0');
-  return `${hour}:${minute}`;
+const ALL_TIME_CHOICES = Array.from({ length: 48 }, (_, i) => {
+  const h = Math.floor(i / 2).toString().padStart(2, '0');
+  const m = i % 2 === 0 ? '00' : '30';
+  return `${h}:${m}`;
 });
 
 const compareTimeStrings = (timeA: string, timeB: string): number => {
@@ -357,6 +370,37 @@ function App() {
   const [managerViewMode, setManagerViewMode] = useState<'calendar' | 'grid' | 'employees' | 'calculation' | 'system'>('calendar');
   const [deadlineDay, setDeadlineDay] = useState<number>(20);
   const [startDay, setStartDay] = useState<number>(15);
+  const [operatingStartTime, setOperatingStartTime] = useState<string>('06:30');
+  const [operatingEndTime, setOperatingEndTime] = useState<string>('20:00');
+  const [shiftMorningStart, setShiftMorningStart] = useState<string>('06:30');
+  const [shiftMorningEnd, setShiftMorningEnd] = useState<string>('15:30');
+  const [shiftEveningStart, setShiftEveningStart] = useState<string>('08:30');
+  const [shiftEveningEnd, setShiftEveningEnd] = useState<string>('17:30');
+  const [shiftPresets, setShiftPresets] = useState<ShiftPreset[]>([]);
+
+  const timeSlots = useMemo(() => {
+    if (!operatingStartTime || !operatingEndTime) return [];
+    const [startH, startM] = operatingStartTime.split(':').map(Number);
+    const [endH, endM] = operatingEndTime.split(':').map(Number);
+    if (isNaN(startH) || isNaN(startM) || isNaN(endH) || isNaN(endM)) return [];
+
+    const startMinutes = startH * 60 + startM;
+    let endMinutes = endH * 60 + endM;
+
+    if (endMinutes < startMinutes) {
+      // Overnight shift
+      endMinutes += 24 * 60;
+    }
+
+    const slots: string[] = [];
+    for (let min = startMinutes; min <= endMinutes; min += 30) {
+      const adjustedMin = min % (24 * 60);
+      const h = Math.floor(adjustedMin / 60).toString().padStart(2, '0');
+      const m = (adjustedMin % 60).toString().padStart(2, '0');
+      slots.push(`${h}:${m}`);
+    }
+    return slots;
+  }, [operatingStartTime, operatingEndTime]);
 
   // Reference to the grid scroll container to enable horizontal scrolling via mouse wheel
   const gridContainerRef = useRef<HTMLDivElement>(null);
@@ -643,6 +687,27 @@ function App() {
     const unsubStartDay = subscribeToStartDay((day) => {
       setStartDay(day);
     });
+    const unsubOperatingStartTime = subscribeToOperatingStartTime((time) => {
+      setOperatingStartTime(time);
+    });
+    const unsubOperatingEndTime = subscribeToOperatingEndTime((time) => {
+      setOperatingEndTime(time);
+    });
+    const unsubShiftMorningStart = subscribeToShiftMorningStart((time) => {
+      setShiftMorningStart(time);
+    });
+    const unsubShiftMorningEnd = subscribeToShiftMorningEnd((time) => {
+      setShiftMorningEnd(time);
+    });
+    const unsubShiftEveningStart = subscribeToShiftEveningStart((time) => {
+      setShiftEveningStart(time);
+    });
+    const unsubShiftEveningEnd = subscribeToShiftEveningEnd((time) => {
+      setShiftEveningEnd(time);
+    });
+    const unsubShiftPresets = subscribeToShiftPresets((data) => {
+      setShiftPresets(data);
+    });
 
     return () => {
       unsubSchedules();
@@ -651,6 +716,13 @@ function App() {
       unsubEmployees();
       unsubDeadlineDay();
       unsubStartDay();
+      unsubOperatingStartTime();
+      unsubOperatingEndTime();
+      unsubShiftMorningStart();
+      unsubShiftMorningEnd();
+      unsubShiftEveningStart();
+      unsubShiftEveningEnd();
+      unsubShiftPresets();
     };
   }, []);
 
@@ -835,8 +907,8 @@ function App() {
             employeeName: workerName.trim(),
             date: dateStr,
             workplace: workplaces[0]?.name || '',
-            startTime: '06:30', // default select 早班
-            endTime: '15:30',   // default select 早班
+            startTime: shiftMorningStart,
+            endTime: shiftMorningEnd,
             notes: availNotes.trim()
           });
         }
@@ -878,22 +950,24 @@ function App() {
         a => a.date === date && a.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase()
       );
       if (dbRecord) {
-        const startIdx = TIME_SLOTS.indexOf(dbRecord.startTime);
-        const endIdx = TIME_SLOTS.indexOf(dbRecord.endTime);
+        const startIdx = timeSlots.indexOf(dbRecord.startTime);
+        const endIdx = timeSlots.indexOf(dbRecord.endTime);
         return {
           date,
-          startIdx: startIdx >= 0 ? startIdx : 1,
-          endIdx: endIdx >= 0 ? endIdx : 14,
+          startIdx: startIdx >= 0 ? startIdx : 0,
+          endIdx: endIdx >= 0 ? endIdx : timeSlots.length - 1,
           workplace: dbRecord.workplace || workplaces[0]?.name || '',
           notes: dbRecord.notes || ''
         };
       }
 
-      // Brand-new date — default 06:30 (idx 1) to 13:00 (idx 14)
+      // Brand-new date — default to shiftMorningStart & shiftMorningEnd if exists
+      const defStart = Math.max(0, timeSlots.indexOf(shiftMorningStart));
+      const defEnd = Math.max(0, timeSlots.indexOf(shiftMorningEnd));
       return {
         date,
-        startIdx: 1,
-        endIdx: 14,
+        startIdx: defStart,
+        endIdx: defEnd >= 0 ? defEnd : timeSlots.length - 1,
         workplace: workplaces[0]?.name || '',
         notes: ''
       };
@@ -996,8 +1070,8 @@ function App() {
           employeeName: workerName.trim(),
           date: config.date,
           workplace: config.workplace,
-          startTime: TIME_SLOTS[config.startIdx],
-          endTime: TIME_SLOTS[config.endIdx],
+          startTime: timeSlots[config.startIdx],
+          endTime: timeSlots[config.endIdx],
           notes: config.notes.trim()
         });
       }
@@ -1089,12 +1163,9 @@ function App() {
     }
   };
 
-  const executeFTAssign = async (avail: WorkerAvailability, shiftType: '早班' | '晚班') => {
+  const executeFTAssign = async (avail: WorkerAvailability, shiftName: string, sTime: string, eTime: string) => {
     setIsFTAssignModalOpen(false);
     setPendingAssignAvail(null);
-
-    const sTime = shiftType === '早班' ? '06:30' : '08:30';
-    const eTime = shiftType === '早班' ? '15:30' : '17:30';
 
     try {
       // Check staffing limit warning
@@ -1133,7 +1204,7 @@ function App() {
         workplace: avail.workplace,
         startTime: sTime,
         endTime: eTime,
-        notes: avail.notes ? `由登記可用時間自動排入: ${avail.notes.trim()}` : '由登記可用時間自動排入',
+        notes: avail.notes ? `由登記可用時間自動排入 (${shiftName}): ${avail.notes.trim()}` : `由登記可用時間自動排入 (${shiftName})`,
         workerNotes: avail.notes ? avail.notes.trim() : '',
         managerNotes: '',
         color: derivedColor,
@@ -1424,7 +1495,7 @@ function App() {
         return;
       }
 
-      if (safeConfirm(`確定要將 ${dateStr} 的休假改為配合排班（早班）嗎？`)) {
+      if (safeConfirm(`確定要將 ${dateStr} 的休假改為配合排班（早班，${shiftMorningStart}-${shiftMorningEnd}）嗎？`)) {
         try {
           if (avail) {
             await deleteAvailability(avail.id);
@@ -1433,8 +1504,8 @@ function App() {
             employeeName: workerName.trim(),
             date: dateStr,
             workplace: workplaces[0]?.name || '',
-            startTime: '06:30',
-            endTime: '15:30',
+            startTime: shiftMorningStart,
+            endTime: shiftMorningEnd,
             notes: ''
           });
         } catch (error) {
@@ -1477,14 +1548,14 @@ function App() {
       return;
     }
 
-    const startIdx = TIME_SLOTS.indexOf(avail.startTime);
-    const endIdx = TIME_SLOTS.indexOf(avail.endTime);
+    const startIdx = timeSlots.indexOf(avail.startTime);
+    const endIdx = timeSlots.indexOf(avail.endTime);
 
     setAvailConfigs([
       {
         date: avail.date,
-        startIdx: startIdx >= 0 ? startIdx : 1,
-        endIdx: endIdx >= 0 ? endIdx : 14,
+        startIdx: startIdx >= 0 ? startIdx : 0,
+        endIdx: endIdx >= 0 ? endIdx : timeSlots.length - 1,
         workplace: avail.workplace || workplaces[0]?.name || '',
         notes: avail.notes || ''
       }
@@ -1566,8 +1637,8 @@ function App() {
     const isFT = emp?.status === '正式夥伴';
 
     if (isFT) {
-      setStartTime('06:30');
-      setEndTime('15:30');
+      setStartTime(shiftMorningStart);
+      setEndTime(shiftMorningEnd);
 
       const monthStr = formatDateString(currentMonthStart).substring(0, 7);
       const empMonthAvails = availabilities.filter(
@@ -3162,50 +3233,191 @@ function App() {
                   </div>
 
                   <div className="glass-panel p-6 rounded-2xl border border-[#DAC0A3]/50 shadow-sm bg-white/70 space-y-6 max-w-xl">
-                    <h3 className="text-sm font-bold text-[#3E2723]">📅 夥伴排班登記時間限制設定</h3>
-                    <p className="text-xs text-[#6D4C41] leading-relaxed">
-                      設定每個月員工可登記/修改排班的區間。例如：開放日設為 15，截止日設為 20，則員工僅能在每月 15 ~ 20 日之間進行登記。一旦超過截止日且已有確認之排班，員工將被鎖定無法自行登記或修改可用時間/休假。
-                    </p>
+                    <div>
+                      <h3 className="text-sm font-bold text-[#3E2723] flex items-center gap-2">
+                        <span>⚙️</span> 門市營業時間與排班限制設定
+                      </h3>
+                      <p className="text-xs text-[#6D4C41] mt-1.5 leading-relaxed">
+                        在此管理門市營運時間區間，以及每個月夥伴線上填寫排班登記的起訖日期限制。
+                      </p>
+                    </div>
 
                     <div className="space-y-4">
-                      <div className="flex items-center gap-3">
-                        <span className="text-xs font-semibold text-[#6D4C41] w-24">開放登記日期：</span>
-                        <span className="text-xs font-semibold text-[#6D4C41]">每月的第</span>
-                        <input
-                          type="number"
-                          min="1"
-                          max="31"
-                          value={startDay}
-                          onChange={(e) => {
-                            const val = parseInt(e.target.value, 10);
-                            if (!isNaN(val) && val >= 1 && val <= 31) {
-                              setStartDay(val);
-                            }
-                          }}
-                          className="w-20 glass-input px-3 py-1.5 rounded-lg text-center font-mono text-sm"
-                        />
-                        <span className="text-xs font-semibold text-[#6D4C41]">天 (1 - 31日)</span>
+                      {/* Section 1: Operating Hours */}
+                      <div className="border-t border-[#E5DCD5]/60 pt-4 space-y-3">
+                        <h4 className="text-xs font-bold text-[#3E2723] flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-[#795548]"></span>
+                          門市營業/排班時間區間
+                        </h4>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-[11px] font-semibold text-[#6D4C41] mb-1.5">營業開始時間</label>
+                            <select
+                              value={operatingStartTime}
+                              onChange={(e) => setOperatingStartTime(e.target.value)}
+                              className="w-full glass-input px-3 py-2 rounded-xl text-xs cursor-pointer"
+                            >
+                              {ALL_TIME_CHOICES.map(choice => (
+                                <option key={choice} value={choice} className="bg-white text-[#3E2723]">
+                                  {choice}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-semibold text-[#6D4C41] mb-1.5">營業結束時間</label>
+                            <select
+                              value={operatingEndTime}
+                              onChange={(e) => setOperatingEndTime(e.target.value)}
+                              className="w-full glass-input px-3 py-2 rounded-xl text-xs cursor-pointer"
+                            >
+                              {ALL_TIME_CHOICES.map(choice => (
+                                <option key={choice} value={choice} className="bg-white text-[#3E2723]">
+                                  {choice}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
                       </div>
 
-                      <div className="flex items-center gap-3">
-                        <span className="text-xs font-semibold text-[#6D4C41] w-24">截止登記日期：</span>
-                        <span className="text-xs font-semibold text-[#6D4C41]">每月的第</span>
-                        <input
-                          type="number"
-                          min="1"
-                          max="31"
-                          value={deadlineDay}
-                          onChange={(e) => {
-                            const val = parseInt(e.target.value, 10);
-                            if (!isNaN(val) && val >= 1 && val <= 31) {
-                              setDeadlineDay(val);
-                            }
-                          }}
-                          className="w-20 glass-input px-3 py-1.5 rounded-lg text-center font-mono text-sm"
-                        />
-                        <span className="text-xs font-semibold text-[#6D4C41]">天 (1 - 31日)</span>
+                      {/* Section 2: Shift Presets Settings */}
+                      <div className="border-t border-[#E5DCD5]/60 pt-4 space-y-4">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-xs font-bold text-[#3E2723] flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#795548]"></span>
+                            常用班次設定
+                          </h4>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const newName = prompt('請輸入新班次名稱（例如：中班）：');
+                              if (!newName) return;
+                              if (shiftPresets.some(p => p.name === newName)) {
+                                alert('班次名稱已存在！');
+                                return;
+                              }
+                              const updated = [
+                                ...shiftPresets,
+                                { name: newName, startTime: '08:00', endTime: '17:00' }
+                              ];
+                              setShiftPresets(updated);
+                            }}
+                            className="text-[10px] bg-[#FAF7F2] border border-[#DAC0A3] hover:border-[#8D6E63] text-[#8D6E63] font-bold px-2 py-1 rounded-lg transition-all cursor-pointer flex items-center gap-1"
+                          >
+                            <span>➕</span> 新增班次
+                          </button>
+                        </div>
+
+                        <div className="space-y-3">
+                          {shiftPresets.map((preset, pIdx) => (
+                            <div key={preset.name} className="flex items-center gap-3 bg-[#FAF7F2]/50 p-3 rounded-xl border border-[#EADBC8]/40">
+                              <span className="text-xs font-bold text-[#3E2723] w-16 truncate">{preset.name}</span>
+                              <div className="flex items-center gap-1.5 flex-1">
+                                <select
+                                  value={preset.startTime}
+                                  onChange={(e) => {
+                                    const updated = [...shiftPresets];
+                                    updated[pIdx].startTime = e.target.value;
+                                    setShiftPresets(updated);
+                                  }}
+                                  className="w-full glass-input px-2.5 py-1.5 rounded-xl text-xs cursor-pointer"
+                                >
+                                  {ALL_TIME_CHOICES.map(choice => (
+                                    <option key={choice} value={choice} className="bg-white text-[#3E2723]">
+                                      {choice}
+                                    </option>
+                                  ))}
+                                </select>
+                                <span className="text-[#8D6E63] text-xs font-bold">~</span>
+                                <select
+                                  value={preset.endTime}
+                                  onChange={(e) => {
+                                    const updated = [...shiftPresets];
+                                    updated[pIdx].endTime = e.target.value;
+                                    setShiftPresets(updated);
+                                  }}
+                                  className="w-full glass-input px-2.5 py-1.5 rounded-xl text-xs cursor-pointer"
+                                >
+                                  {ALL_TIME_CHOICES.map(choice => (
+                                    <option key={choice} value={choice} className="bg-white text-[#3E2723]">
+                                      {choice}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (shiftPresets.length <= 1) {
+                                    alert('必須保留至少一個常用班次！');
+                                    return;
+                                  }
+                                  if (safeConfirm(`確定要刪除「${preset.name}」班次嗎？`)) {
+                                    const updated = shiftPresets.filter((_, idx) => idx !== pIdx);
+                                    setShiftPresets(updated);
+                                  }
+                                }}
+                                className="p-1.5 text-red-500 hover:bg-red-50 active:bg-red-100 rounded-lg transition-colors cursor-pointer"
+                                title="刪除此班次"
+                              >
+                                ❌
+                              </button>
+                            </div>
+                          ))}
+                        </div>
                       </div>
 
+                      {/* Section 3: Registration Limits */}
+                      <div className="border-t border-[#E5DCD5]/60 pt-4 space-y-3">
+                        <h4 className="text-xs font-bold text-[#3E2723] flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-[#795548]"></span>
+                          夥伴登記時間限制
+                        </h4>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-[11px] font-semibold text-[#6D4C41] mb-1.5">開放登記日期：每月的第</label>
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="number"
+                                min="1"
+                                max="31"
+                                value={startDay}
+                                onChange={(e) => {
+                                  const val = parseInt(e.target.value, 10);
+                                  if (!isNaN(val) && val >= 1 && val <= 31) {
+                                    setStartDay(val);
+                                  }
+                                }}
+                                className="w-full glass-input px-3 py-2 rounded-xl text-center font-mono text-xs"
+                              />
+                              <span className="text-[10px] font-semibold text-[#6D4C41] shrink-0">號</span>
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-semibold text-[#6D4C41] mb-1.5">截止登記日期：每月的第</label>
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="number"
+                                min="1"
+                                max="31"
+                                value={deadlineDay}
+                                onChange={(e) => {
+                                  const val = parseInt(e.target.value, 10);
+                                  if (!isNaN(val) && val >= 1 && val <= 31) {
+                                    setDeadlineDay(val);
+                                  }
+                                }}
+                                className="w-full glass-input px-3 py-2 rounded-xl text-center font-mono text-xs"
+                              />
+                              <span className="text-[10px] font-semibold text-[#6D4C41] shrink-0">號</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Action buttons */}
                       <div className="flex border-t border-[#E5DCD5] pt-4">
                         <button
                           onClick={async () => {
@@ -3214,9 +3426,16 @@ function App() {
                                 alert("警告：開放日期不可晚於截止日期！");
                                 return;
                               }
+                              await updateOperatingStartTime(operatingStartTime);
+                              await updateOperatingEndTime(operatingEndTime);
+                              await updateShiftMorningStart(shiftMorningStart);
+                              await updateShiftMorningEnd(shiftMorningEnd);
+                              await updateShiftEveningStart(shiftEveningStart);
+                              await updateShiftEveningEnd(shiftEveningEnd);
+                              await updateShiftPresets(shiftPresets);
                               await updateStartDay(startDay);
                               await updateDeadlineDay(deadlineDay);
-                              alert(`已成功更新排班登記區間為每月 ${startDay} 日至 ${deadlineDay} 日！`);
+                              alert("已成功更新門市營業時間與排班限制設定！");
                             } catch (err) {
                               console.error("Failed to update settings:", err);
                               alert("更新失敗，請稍後再試。");
@@ -4178,12 +4397,12 @@ function App() {
                 const dateObj = new Date(config.date);
                 const dayNames = ['日', '一', '二', '三', '四', '五', '六'];
                 const dayName = dayNames[dateObj.getDay()];
-                const startTime = TIME_SLOTS[config.startIdx];
-                const endTime = TIME_SLOTS[config.endIdx];
+                const startTime = timeSlots[config.startIdx];
+                const endTime = timeSlots[config.endIdx];
                 const duration = calculateDuration(startTime, endTime);
                 const overEight = isOverEightHours(startTime, endTime);
-                const minStartIdx = 1; // 06:30
-                const maxEndIdx = 28;  // 20:00
+                const minStartIdx = 0;
+                const maxEndIdx = timeSlots.length - 1;
 
                 // Determine mode and divider position
                 let currentMode: 'until' | 'from' = 'until';
@@ -4212,16 +4431,16 @@ function App() {
                 }
 
                 // Calculate percentage relative to minStartIdx and maxEndIdx
-                const pct = ((dividerIdx - minStartIdx) / (maxEndIdx - minStartIdx)) * 100;
+                const pct = maxEndIdx > minStartIdx ? ((dividerIdx - minStartIdx) / (maxEndIdx - minStartIdx)) * 100 : 0;
 
                 const handleCommit = (nextDividerIdx: number, nextMode: 'until' | 'from') => {
                   let start = nextMode === 'until' ? minStartIdx : nextDividerIdx;
                   let end = nextMode === 'until' ? nextDividerIdx : maxEndIdx;
 
                   if (nextMode === 'until') {
-                    if (end < 2) end = 2; // enforce minimum 30 min duration (06:30 - 07:00)
+                    if (end < minStartIdx + 1) end = minStartIdx + 1; // enforce minimum 30 min duration (1 slot)
                   } else {
-                    if (start > 27) start = 27; // enforce minimum 30 min duration (19:30 - 20:00)
+                    if (start > maxEndIdx - 1) start = maxEndIdx - 1; // enforce minimum 30 min duration (1 slot)
                   }
 
                   updateAvailConfig(index, { startIdx: start, endIdx: end });
@@ -4334,32 +4553,39 @@ function App() {
 
                       {/* Ruler tick labels */}
                       <div className="relative h-5 mx-2 text-[9px] text-[#8D6E63]/60 font-mono select-none">
-                        {[
-                          { label: '06:30', idx: 1 },
-                          { label: '08:00', idx: 4 },
-                          { label: '10:00', idx: 8 },
-                          { label: '12:00', idx: 12 },
-                          { label: '14:00', idx: 16 },
-                          { label: '16:00', idx: 20 },
-                          { label: '18:00', idx: 24 },
-                          { label: '20:00', idx: 28 },
-                        ].map((tick) => {
-                          const tickPct = ((tick.idx - minStartIdx) / (maxEndIdx - minStartIdx)) * 100;
-                          const isCurrent = tick.idx === dividerIdx;
-                          return (
-                            <span
-                              key={tick.label}
-                              className={`absolute transition-all duration-150 ${isCurrent ? 'text-[#3E2723] font-black text-[10px]' : ''
-                                }`}
-                              style={{
-                                left: `${tickPct}%`,
-                                transform: 'translateX(-50%)',
-                              }}
-                            >
-                              {tick.label}
-                            </span>
-                          );
-                        })}
+                        {(() => {
+                          const ticks = [];
+                          const len = timeSlots.length;
+                          if (len > 0) {
+                            ticks.push({ label: timeSlots[0], idx: 0 });
+                            const step = len <= 10 ? 1 : len <= 20 ? 2 : len <= 40 ? 4 : 6;
+                            for (let i = step; i < len - 1; i += step) {
+                              if (len - 1 - i >= step / 2) {
+                                ticks.push({ label: timeSlots[i], idx: i });
+                              }
+                            }
+                            if (len > 1) {
+                              ticks.push({ label: timeSlots[len - 1], idx: len - 1 });
+                            }
+                          }
+                          return ticks.map((tick) => {
+                            const tickPct = maxEndIdx > minStartIdx ? ((tick.idx - minStartIdx) / (maxEndIdx - minStartIdx)) * 100 : 0;
+                            const isCurrent = tick.idx === dividerIdx;
+                            return (
+                              <span
+                                key={`${tick.label}-${tick.idx}`}
+                                className={`absolute transition-all duration-150 ${isCurrent ? 'text-[#3E2723] font-black text-[10px]' : ''
+                                  }`}
+                                style={{
+                                  left: `${tickPct}%`,
+                                  transform: 'translateX(-50%)',
+                                }}
+                              >
+                                {tick.label}
+                              </span>
+                            );
+                          });
+                        })()}
                       </div>
 
                       {/* Mode selection buttons */}
@@ -4493,20 +4719,20 @@ function App() {
             </div>
 
             <div className="flex flex-col gap-2.5 pt-2">
-              <button
-                type="button"
-                onClick={() => executeFTAssign(pendingAssignAvail, '早班')}
-                className="w-full py-3 bg-[#795548] hover:bg-[#5D4037] text-white font-bold rounded-xl text-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-md hover:shadow-[#795548]/10"
-              >
-                ☀️ 早班 (06:30 - 15:30)
-              </button>
-              <button
-                type="button"
-                onClick={() => executeFTAssign(pendingAssignAvail, '晚班')}
-                className="w-full py-3 bg-white hover:bg-[#FAF7F2] border border-[#DAC0A3]/70 hover:border-[#8D6E63] text-[#5D4037] font-bold rounded-xl text-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                🌙 晚班 (08:30 - 17:30)
-              </button>
+              {shiftPresets.map((preset) => {
+                const isAvailable = timeSlots.includes(preset.startTime) && timeSlots.includes(preset.endTime);
+                if (!isAvailable) return null;
+                return (
+                  <button
+                    key={preset.name}
+                    type="button"
+                    onClick={() => executeFTAssign(pendingAssignAvail, preset.name, preset.startTime, preset.endTime)}
+                    className="w-full py-3 bg-[#795548] hover:bg-[#5D4037] text-white font-bold rounded-xl text-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-md hover:shadow-[#795548]/10"
+                  >
+                    ☀️ {preset.name} ({preset.startTime} - {preset.endTime})
+                  </button>
+                );
+              })}
             </div>
 
             <div className="border-t border-[#E5DCD5]/60 pt-3 mt-1.5 flex justify-end">
@@ -4738,7 +4964,7 @@ function App() {
                     onChange={(e) => setStartTime(e.target.value)}
                     className="w-full glass-input px-4 py-2.5 rounded-xl text-sm cursor-pointer"
                   >
-                    {TIME_SLOTS.map(slot => (
+                    {timeSlots.map(slot => (
                       <option key={slot} value={slot} className="bg-white text-[#3E2723] font-mono">
                         {slot}
                       </option>
@@ -4752,7 +4978,7 @@ function App() {
                     onChange={(e) => setEndTime(e.target.value)}
                     className="w-full glass-input px-4 py-2.5 rounded-xl text-sm cursor-pointer"
                   >
-                    {TIME_SLOTS.map(slot => (
+                    {timeSlots.map(slot => (
                       <option key={slot} value={slot} className="bg-white text-[#3E2723] font-mono">
                         {slot}
                       </option>
@@ -4762,37 +4988,33 @@ function App() {
               </div>
 
               {/* Quick Shift Presets inside scheduling modal */}
-              <div className="space-y-2">
-                <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider">常用班次快捷鍵</label>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setStartTime('06:30');
-                      setEndTime('15:30');
-                    }}
-                    className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${startTime === '06:30' && endTime === '15:30'
-                      ? 'bg-[#795548] text-white border-[#795548]'
-                      : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:border-[#8D6E63] hover:bg-[#FAF7F2]'
-                      }`}
-                  >
-                    ☀️ 早班 (06:30 - 15:30)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setStartTime('08:30');
-                      setEndTime('17:30');
-                    }}
-                    className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${startTime === '08:30' && endTime === '17:30'
-                      ? 'bg-[#795548] text-white border-[#795548]'
-                      : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:border-[#8D6E63] hover:bg-[#FAF7F2]'
-                      }`}
-                  >
-                    🌙 晚班 (08:30 - 17:30)
-                  </button>
+              {shiftPresets.some(preset => timeSlots.includes(preset.startTime) && timeSlots.includes(preset.endTime)) && (
+                <div className="space-y-2">
+                  <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider">常用班次快捷鍵</label>
+                  <div className="flex flex-wrap gap-2">
+                    {shiftPresets.map((preset) => {
+                      const isAvailable = timeSlots.includes(preset.startTime) && timeSlots.includes(preset.endTime);
+                      if (!isAvailable) return null;
+                      return (
+                        <button
+                          key={preset.name}
+                          type="button"
+                          onClick={() => {
+                            setStartTime(preset.startTime);
+                            setEndTime(preset.endTime);
+                          }}
+                          className={`flex-1 min-w-[120px] py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${startTime === preset.startTime && endTime === preset.endTime
+                            ? 'bg-[#795548] text-white border-[#795548]'
+                            : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:border-[#8D6E63] hover:bg-[#FAF7F2]'
+                            }`}
+                        >
+                          {preset.name} ({preset.startTime} - {preset.endTime})
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Auto calculated hours warning/info */}
               {startTime && endTime && (

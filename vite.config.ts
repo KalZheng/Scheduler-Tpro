@@ -133,6 +133,16 @@ function localDbPlugin() {
               let globalTargets = [];
               let deadlineDay = 20;
               let startDay = 15;
+              let operatingStartTime = '06:30';
+              let operatingEndTime = '20:00';
+              let shiftMorningStart = '06:30';
+              let shiftMorningEnd = '15:30';
+              let shiftEveningStart = '08:30';
+              let shiftEveningEnd = '17:30';
+              let shiftPresets = [
+                { name: '早班', startTime: '06:30', endTime: '15:30' },
+                { name: '晚班', startTime: '08:30', endTime: '17:30' }
+              ];
               if (fs.existsSync(globalPath)) {
                 const globalData = JSON.parse(fs.readFileSync(globalPath, 'utf-8'));
                 globalTargets = globalData.staffingTargets || [];
@@ -142,6 +152,27 @@ function localDbPlugin() {
                 if (globalData.startDay !== undefined) {
                   startDay = globalData.startDay;
                 }
+                if (globalData.operatingStartTime !== undefined) {
+                  operatingStartTime = globalData.operatingStartTime;
+                }
+                if (globalData.operatingEndTime !== undefined) {
+                  operatingEndTime = globalData.operatingEndTime;
+                }
+                if (globalData.shiftMorningStart !== undefined) {
+                  shiftMorningStart = globalData.shiftMorningStart;
+                }
+                if (globalData.shiftMorningEnd !== undefined) {
+                  shiftMorningEnd = globalData.shiftMorningEnd;
+                }
+                if (globalData.shiftEveningStart !== undefined) {
+                  shiftEveningStart = globalData.shiftEveningStart;
+                }
+                if (globalData.shiftEveningEnd !== undefined) {
+                  shiftEveningEnd = globalData.shiftEveningEnd;
+                }
+                if (globalData.shiftPresets !== undefined) {
+                  shiftPresets = globalData.shiftPresets;
+                }
               } else {
                 // Initialize default staffing targets if global doesn't exist
                 globalTargets = Array.from({ length: 14 }, (_, i) => ({
@@ -149,7 +180,7 @@ function localDbPlugin() {
                   hour: i + 6,
                   targetCount: 2
                 }));
-                fs.writeFileSync(globalPath, JSON.stringify({ staffingTargets: globalTargets, deadlineDay, startDay }, null, 2), 'utf-8');
+                fs.writeFileSync(globalPath, JSON.stringify({ staffingTargets: globalTargets, deadlineDay, startDay, operatingStartTime, operatingEndTime, shiftMorningStart, shiftMorningEnd, shiftEveningStart, shiftEveningEnd, shiftPresets }, null, 2), 'utf-8');
               }
 
               const employeesPath = path.resolve(dataDir, 'db-employees.json');
@@ -175,7 +206,14 @@ function localDbPlugin() {
                 staffingTargets: mergedTargets,
                 employees: globalEmployees,
                 deadlineDay: deadlineDay,
-                startDay: startDay
+                startDay: startDay,
+                operatingStartTime: operatingStartTime,
+                operatingEndTime: operatingEndTime,
+                shiftMorningStart: shiftMorningStart,
+                shiftMorningEnd: shiftMorningEnd,
+                shiftEveningStart: shiftEveningStart,
+                shiftEveningEnd: shiftEveningEnd,
+                shiftPresets: shiftPresets
               }));
             } catch (error) {
               res.statusCode = 500;
@@ -225,7 +263,14 @@ function localDbPlugin() {
                 fs.writeFileSync(globalPath, JSON.stringify({ 
                   staffingTargets: globalTargets,
                   deadlineDay: parsed.deadlineDay !== undefined ? parsed.deadlineDay : 20,
-                  startDay: parsed.startDay !== undefined ? parsed.startDay : 15
+                  startDay: parsed.startDay !== undefined ? parsed.startDay : 15,
+                  operatingStartTime: parsed.operatingStartTime !== undefined ? parsed.operatingStartTime : '06:30',
+                  operatingEndTime: parsed.operatingEndTime !== undefined ? parsed.operatingEndTime : '20:00',
+                  shiftMorningStart: parsed.shiftMorningStart !== undefined ? parsed.shiftMorningStart : '06:30',
+                  shiftMorningEnd: parsed.shiftMorningEnd !== undefined ? parsed.shiftMorningEnd : '15:30',
+                  shiftEveningStart: parsed.shiftEveningStart !== undefined ? parsed.shiftEveningStart : '08:30',
+                  shiftEveningEnd: parsed.shiftEveningEnd !== undefined ? parsed.shiftEveningEnd : '17:30',
+                  shiftPresets: parsed.shiftPresets !== undefined ? parsed.shiftPresets : []
                 }, null, 2), 'utf-8');
 
                 // Write employees file
