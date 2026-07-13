@@ -85,6 +85,7 @@ let localAvailabilityListeners: ((availabilities: WorkerAvailability[]) => void)
 let localStaffingTargetListeners: ((targets: StaffingTarget[]) => void)[] = [];
 let localEmployeeListeners: ((employees: Employee[]) => void)[] = [];
 let localDeadlineDayListeners: ((day: number) => void)[] = [];
+let localStartDayListeners: ((day: number) => void)[] = [];
 
 interface DbSchema {
   schedules: WorkSchedule[];
@@ -92,6 +93,7 @@ interface DbSchema {
   staffingTargets: StaffingTarget[];
   employees: Employee[];
   deadlineDay?: number;
+  startDay?: number;
 }
 
 const inMemoryDb: DbSchema = {
@@ -99,7 +101,8 @@ const inMemoryDb: DbSchema = {
   availabilities: [],
   staffingTargets: [],
   employees: [],
-  deadlineDay: 20
+  deadlineDay: 20,
+  startDay: 15
 };
 
 const loadedMonths = new Set<string>();
@@ -154,6 +157,13 @@ const getLocalDeadlineDay = (): number => {
   return isNaN(num) ? 20 : num;
 };
 
+const getLocalStartDay = (): number => {
+  const data = localStorage.getItem('scheduler_start_day');
+  if (!data) return 15;
+  const num = parseInt(data, 10);
+  return isNaN(num) ? 15 : num;
+};
+
 // Sync and merge data of a specific month into memory
 export const syncActiveMonth = async (monthStr: string) => {
   if (isValidConfig && db) return; // Skip if Cloud DB is enabled
@@ -186,9 +196,12 @@ export const syncActiveMonth = async (monthStr: string) => {
       // Merge employees
       inMemoryDb.employees = (data.employees || []).map(migrateEmployee);
 
-      // Merge deadlineDay
+      // Merge deadlineDay & startDay
       if (data.deadlineDay !== undefined) {
         inMemoryDb.deadlineDay = data.deadlineDay;
+      }
+      if (data.startDay !== undefined) {
+        inMemoryDb.startDay = data.startDay;
       }
 
       // Update LocalStorage backup
@@ -197,6 +210,7 @@ export const syncActiveMonth = async (monthStr: string) => {
       localStorage.setItem('hourly_staffing_targets', JSON.stringify(inMemoryDb.staffingTargets));
       localStorage.setItem('employees_list', JSON.stringify(inMemoryDb.employees));
       localStorage.setItem('scheduler_deadline_day', (inMemoryDb.deadlineDay || 20).toString());
+      localStorage.setItem('scheduler_start_day', (inMemoryDb.startDay || 15).toString());
 
       // Trigger all active UI listeners
       localListeners.forEach(listener => listener([...inMemoryDb.schedules]));
@@ -204,6 +218,7 @@ export const syncActiveMonth = async (monthStr: string) => {
       localStaffingTargetListeners.forEach(listener => listener([...inMemoryDb.staffingTargets]));
       localEmployeeListeners.forEach(listener => listener([...inMemoryDb.employees]));
       localDeadlineDayListeners.forEach(listener => listener(inMemoryDb.deadlineDay || 20));
+      localStartDayListeners.forEach(listener => listener(inMemoryDb.startDay || 15));
     }
   } catch (e) {
     console.error(`Failed to sync month data for ${monthStr}:`, e);
@@ -225,6 +240,9 @@ const loadFileDb = async () => {
       if (data.deadlineDay !== undefined) {
         inMemoryDb.deadlineDay = data.deadlineDay;
       }
+      if (data.startDay !== undefined) {
+        inMemoryDb.startDay = data.startDay;
+      }
       
       // Update local storage backup
       localStorage.setItem('weekly_work_schedules', JSON.stringify(inMemoryDb.schedules));
@@ -232,6 +250,7 @@ const loadFileDb = async () => {
       localStorage.setItem('hourly_staffing_targets', JSON.stringify(inMemoryDb.staffingTargets));
       localStorage.setItem('employees_list', JSON.stringify(inMemoryDb.employees));
       localStorage.setItem('scheduler_deadline_day', (inMemoryDb.deadlineDay || 20).toString());
+      localStorage.setItem('scheduler_start_day', (inMemoryDb.startDay || 15).toString());
     } else {
       throw new Error("Local DB API response not OK");
     }
@@ -242,6 +261,7 @@ const loadFileDb = async () => {
     inMemoryDb.staffingTargets = getLocalStaffingTargets();
     inMemoryDb.employees = getLocalEmployees();
     inMemoryDb.deadlineDay = getLocalDeadlineDay();
+    inMemoryDb.startDay = getLocalStartDay();
   } finally {
     // Notify all active listeners of loaded values
     localListeners.forEach(listener => listener([...inMemoryDb.schedules]));
@@ -249,6 +269,7 @@ const loadFileDb = async () => {
     localStaffingTargetListeners.forEach(listener => listener([...inMemoryDb.staffingTargets]));
     localEmployeeListeners.forEach(listener => listener([...inMemoryDb.employees]));
     localDeadlineDayListeners.forEach(listener => listener(inMemoryDb.deadlineDay || 20));
+    localStartDayListeners.forEach(listener => listener(inMemoryDb.startDay || 15));
   }
 };
 
@@ -266,6 +287,7 @@ const saveDbForDate = async (dateStr?: string) => {
   localStorage.setItem('hourly_staffing_targets', JSON.stringify(inMemoryDb.staffingTargets));
   localStorage.setItem('employees_list', JSON.stringify(inMemoryDb.employees));
   localStorage.setItem('scheduler_deadline_day', (inMemoryDb.deadlineDay || 20).toString());
+  localStorage.setItem('scheduler_start_day', (inMemoryDb.startDay || 15).toString());
 
   // Trigger active listeners immediately for immediate UI response
   localListeners.forEach(listener => listener([...inMemoryDb.schedules]));
@@ -273,6 +295,7 @@ const saveDbForDate = async (dateStr?: string) => {
   localStaffingTargetListeners.forEach(listener => listener([...inMemoryDb.staffingTargets]));
   localEmployeeListeners.forEach(listener => listener([...inMemoryDb.employees]));
   localDeadlineDayListeners.forEach(listener => listener(inMemoryDb.deadlineDay || 20));
+  localStartDayListeners.forEach(listener => listener(inMemoryDb.startDay || 15));
 
   // POST current in-memory state to local JSON file
   try {
@@ -285,7 +308,8 @@ const saveDbForDate = async (dateStr?: string) => {
       availabilities: monthAvailabilities,
       staffingTargets: monthTargets,
       employees: inMemoryDb.employees,
-      deadlineDay: inMemoryDb.deadlineDay || 20
+      deadlineDay: inMemoryDb.deadlineDay || 20,
+      startDay: inMemoryDb.startDay || 15
     };
 
     await fetch(`/api/db?month=${monthStr}`, {
@@ -588,6 +612,36 @@ export const updateDeadlineDay = async (day: number) => {
     return await setDoc(docRef, { deadlineDay: day }, { merge: true });
   } else {
     inMemoryDb.deadlineDay = day;
+    await saveDbForDate();
+  }
+};
+
+export const subscribeToStartDay = (callback: (day: number) => void) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    return onSnapshot(docRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        callback(data.startDay !== undefined ? data.startDay : 15);
+      } else {
+        callback(15);
+      }
+    });
+  } else {
+    localStartDayListeners.push(callback);
+    callback(inMemoryDb.startDay || 15);
+    return () => {
+      localStartDayListeners = localStartDayListeners.filter(l => l !== callback);
+    };
+  }
+};
+
+export const updateStartDay = async (day: number) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    return await setDoc(docRef, { startDay: day }, { merge: true });
+  } else {
+    inMemoryDb.startDay = day;
     await saveDbForDate();
   }
 };

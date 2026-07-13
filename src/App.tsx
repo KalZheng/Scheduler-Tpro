@@ -16,7 +16,9 @@ import {
   deleteEmployee,
   updateDayNote,
   subscribeToDeadlineDay,
-  updateDeadlineDay
+  updateDeadlineDay,
+  subscribeToStartDay,
+  updateStartDay
 } from './services/scheduler';
 import type { WorkSchedule, WorkerAvailability, StaffingTarget, Employee } from './services/scheduler';
 import { isValidConfig } from './firebase';
@@ -354,6 +356,7 @@ function App() {
   // Manager view sub-mode: calendar or grid or employees or calculation or system
   const [managerViewMode, setManagerViewMode] = useState<'calendar' | 'grid' | 'employees' | 'calculation' | 'system'>('calendar');
   const [deadlineDay, setDeadlineDay] = useState<number>(20);
+  const [startDay, setStartDay] = useState<number>(15);
 
   // Reference to the grid scroll container to enable horizontal scrolling via mouse wheel
   const gridContainerRef = useRef<HTMLDivElement>(null);
@@ -488,7 +491,9 @@ function App() {
       s => s.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase() &&
         s.date.startsWith(targetMonthStr)
     );
-    return (new Date().getDate() <= deadlineDay) || !hasConfirmed;
+    const todayNum = new Date().getDate();
+    if (todayNum < startDay) return false;
+    return (todayNum <= deadlineDay) || !hasConfirmed;
   })();
 
   const handleStatusChange = (status: '正式夥伴' | '兼職夥伴') => {
@@ -635,6 +640,9 @@ function App() {
     const unsubDeadlineDay = subscribeToDeadlineDay((day) => {
       setDeadlineDay(day);
     });
+    const unsubStartDay = subscribeToStartDay((day) => {
+      setStartDay(day);
+    });
 
     return () => {
       unsubSchedules();
@@ -642,6 +650,7 @@ function App() {
       unsubStaffingTargets();
       unsubEmployees();
       unsubDeadlineDay();
+      unsubStartDay();
     };
   }, []);
 
@@ -783,7 +792,11 @@ function App() {
     }
 
     if (!isWorkerEditable) {
-      alert(`已逾本月登記/修改截止時間（${deadlineDay}日），且已有已確認之排班，無法再進行登記。`);
+      if (new Date().getDate() < startDay) {
+        alert(`尚未開放下月排班登記。開放時間為每月 ${startDay} 日至 ${deadlineDay} 日。`);
+      } else {
+        alert(`已逾本月登記/修改截止時間（${deadlineDay}日），且已有已確認之排班，無法再進行登記。`);
+      }
       return;
     }
 
@@ -941,7 +954,11 @@ function App() {
     }
 
     if (!isWorkerEditable) {
-      alert(`已逾本月登記/修改截止時間（${deadlineDay}日），且已有已確認之排班，無法再進行登記。`);
+      if (new Date().getDate() < startDay) {
+        alert(`尚未開放下月排班登記。開放時間為每月 ${startDay} 日至 ${deadlineDay} 日。`);
+      } else {
+        alert(`已逾本月登記/修改截止時間（${deadlineDay}日），且已有已確認之排班，無法再進行登記。`);
+      }
       return;
     }
 
@@ -1356,7 +1373,11 @@ function App() {
     e.stopPropagation();
 
     if (!isWorkerEditable) {
-      alert(`已逾本月登記/修改截止時間（${deadlineDay}日），且已有已確認之排班，無法刪除登記。`);
+      if (new Date().getDate() < startDay) {
+        alert(`尚未開放下月排班登記。開放時間為每月 ${startDay} 日至 ${deadlineDay} 日。`);
+      } else {
+        alert(`已逾本月登記/修改截止時間（${deadlineDay}日），且已有已確認之排班，無法刪除登記。`);
+      }
       return;
     }
 
@@ -1448,7 +1469,11 @@ function App() {
   // Edit availability handler for worker page
   const handleEditAvailability = (avail: WorkerAvailability) => {
     if (!isWorkerEditable) {
-      alert(`已逾本月登記/修改截止時間（${deadlineDay}日），且已有已確認之排班，無法修改登記。`);
+      if (new Date().getDate() < startDay) {
+        alert(`尚未開放下月排班登記。開放時間為每月 ${startDay} 日至 ${deadlineDay} 日。`);
+      } else {
+        alert(`已逾本月登記/修改截止時間（${deadlineDay}日），且已有已確認之排班，無法修改登記。`);
+      }
       return;
     }
 
@@ -2030,9 +2055,13 @@ function App() {
                     <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-amber-50 border border-amber-200">
                       <span className="text-lg leading-none mt-0.5">⚠️</span>
                       <div className="space-y-0.5">
-                        <p className="text-xs font-bold text-amber-800">登記已截止/鎖定</p>
+                        <p className="text-xs font-bold text-amber-800">
+                          {new Date().getDate() < startDay ? '尚未開放登記' : '登記已截止/鎖定'}
+                        </p>
                         <p className="text-[11px] text-amber-700 leading-snug">
-                          目前已逾下月排班登記截止時間（每月 {deadlineDay} 日），且店長已開始為您確認/安排排班，因此目前已鎖定登記。如有特殊需求，請直接聯繫店長。
+                          {new Date().getDate() < startDay
+                            ? `目前尚未開放下月排班登記。開放登記時間為每月 ${startDay} 日至 ${deadlineDay} 日。`
+                            : `目前已逾下月排班登記截止時間（每月 {deadlineDay} 日），且店長已開始為您確認/安排排班，因此目前已鎖定登記。如有特殊需求，請直接聯繫店長。`}
                         </p>
                       </div>
                     </div>
@@ -3132,43 +3161,72 @@ function App() {
                     </p>
                   </div>
 
-                  <div className="glass-panel p-6 rounded-2xl border border-[#DAC0A3]/50 shadow-sm bg-white/70 space-y-4 max-w-xl">
-                    <h3 className="text-sm font-bold text-[#3E2723]">📅 夥伴排班截止日期設定</h3>
+                  <div className="glass-panel p-6 rounded-2xl border border-[#DAC0A3]/50 shadow-sm bg-white/70 space-y-6 max-w-xl">
+                    <h3 className="text-sm font-bold text-[#3E2723]">📅 夥伴排班登記時間限制設定</h3>
                     <p className="text-xs text-[#6D4C41] leading-relaxed">
-                      設定每個月員工截止/鎖定排班登記的日期。一旦超過該日期且已有確認之排班，員工將被鎖定無法自行登記或修改可用時間/休假。
+                      設定每個月員工可登記/修改排班的區間。例如：開放日設為 15，截止日設為 20，則員工僅能在每月 15 ~ 20 日之間進行登記。一旦超過截止日且已有確認之排班，員工將被鎖定無法自行登記或修改可用時間/休假。
                     </p>
 
-                    <div className="flex items-center gap-3 pt-2">
-                      <span className="text-xs font-semibold text-[#6D4C41]">截止日期：每月的第</span>
-                      <input
-                        type="number"
-                        min="1"
-                        max="31"
-                        value={deadlineDay}
-                        onChange={(e) => {
-                          const val = parseInt(e.target.value, 10);
-                          if (!isNaN(val) && val >= 1 && val <= 31) {
-                            setDeadlineDay(val);
-                          }
-                        }}
-                        className="w-20 glass-input px-3 py-1.5 rounded-lg text-center font-mono text-sm"
-                      />
-                      <span className="text-xs font-semibold text-[#6D4C41]">天 (1 - 31日)</span>
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs font-semibold text-[#6D4C41] w-24">開放登記日期：</span>
+                        <span className="text-xs font-semibold text-[#6D4C41]">每月的第</span>
+                        <input
+                          type="number"
+                          min="1"
+                          max="31"
+                          value={startDay}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value, 10);
+                            if (!isNaN(val) && val >= 1 && val <= 31) {
+                              setStartDay(val);
+                            }
+                          }}
+                          className="w-20 glass-input px-3 py-1.5 rounded-lg text-center font-mono text-sm"
+                        />
+                        <span className="text-xs font-semibold text-[#6D4C41]">天 (1 - 31日)</span>
+                      </div>
 
-                      <button
-                        onClick={async () => {
-                          try {
-                            await updateDeadlineDay(deadlineDay);
-                            alert(`已成功更新截止日期為每月 ${deadlineDay} 日！`);
-                          } catch (err) {
-                            console.error("Failed to update deadline day:", err);
-                            alert("更新失敗，請稍後再試。");
-                          }
-                        }}
-                        className="ml-auto bg-[#795548] hover:bg-[#6D4C41] text-white font-bold px-4 py-2 rounded-xl transition-all shadow-md text-xs cursor-pointer"
-                      >
-                        儲存設定
-                      </button>
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs font-semibold text-[#6D4C41] w-24">截止登記日期：</span>
+                        <span className="text-xs font-semibold text-[#6D4C41]">每月的第</span>
+                        <input
+                          type="number"
+                          min="1"
+                          max="31"
+                          value={deadlineDay}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value, 10);
+                            if (!isNaN(val) && val >= 1 && val <= 31) {
+                              setDeadlineDay(val);
+                            }
+                          }}
+                          className="w-20 glass-input px-3 py-1.5 rounded-lg text-center font-mono text-sm"
+                        />
+                        <span className="text-xs font-semibold text-[#6D4C41]">天 (1 - 31日)</span>
+                      </div>
+
+                      <div className="flex border-t border-[#E5DCD5] pt-4">
+                        <button
+                          onClick={async () => {
+                            try {
+                              if (startDay > deadlineDay) {
+                                alert("警告：開放日期不可晚於截止日期！");
+                                return;
+                              }
+                              await updateStartDay(startDay);
+                              await updateDeadlineDay(deadlineDay);
+                              alert(`已成功更新排班登記區間為每月 ${startDay} 日至 ${deadlineDay} 日！`);
+                            } catch (err) {
+                              console.error("Failed to update settings:", err);
+                              alert("更新失敗，請稍後再試。");
+                            }
+                          }}
+                          className="ml-auto bg-[#795548] hover:bg-[#6D4C41] text-white font-bold px-5 py-2.5 rounded-xl transition-all shadow-md text-xs cursor-pointer"
+                        >
+                          儲存設定
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>

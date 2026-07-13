@@ -71,5 +71,6 @@
       "targetCount": 2
     }
   ],
-  "deadlineDay": 30
+  "deadlineDay": 20,
+  "startDay": 15
 }
