@@ -3391,7 +3391,7 @@ function App() {
                                 }}
                                 className="w-full glass-input px-3 py-2 rounded-xl text-center font-mono text-xs"
                               />
-                              <span className="text-[10px] font-semibold text-[#6D4C41] shrink-0">日</span>
+                              <span className="text-[10px] font-semibold text-[#6D4C41] shrink-0">號</span>
                             </div>
                           </div>
 
@@ -3411,7 +3411,7 @@ function App() {
                                 }}
                                 className="w-full glass-input px-3 py-2 rounded-xl text-center font-mono text-xs"
                               />
-                              <span className="text-[10px] font-semibold text-[#6D4C41] shrink-0">日</span>
+                              <span className="text-[10px] font-semibold text-[#6D4C41] shrink-0">號</span>
                             </div>
                           </div>
                         </div>
