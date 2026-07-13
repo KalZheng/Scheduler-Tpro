@@ -4429,32 +4429,39 @@ function App() {
 
                       {/* Ruler tick labels */}
                       <div className="relative h-5 mx-2 text-[9px] text-[#8D6E63]/60 font-mono select-none">
-                        {[
-                          { label: '06:30', idx: 1 },
-                          { label: '08:00', idx: 4 },
-                          { label: '10:00', idx: 8 },
-                          { label: '12:00', idx: 12 },
-                          { label: '14:00', idx: 16 },
-                          { label: '16:00', idx: 20 },
-                          { label: '18:00', idx: 24 },
-                          { label: '20:00', idx: 28 },
-                        ].map((tick) => {
-                          const tickPct = ((tick.idx - minStartIdx) / (maxEndIdx - minStartIdx)) * 100;
-                          const isCurrent = tick.idx === dividerIdx;
-                          return (
-                            <span
-                              key={tick.label}
-                              className={`absolute transition-all duration-150 ${isCurrent ? 'text-[#3E2723] font-black text-[10px]' : ''
-                                }`}
-                              style={{
-                                left: `${tickPct}%`,
-                                transform: 'translateX(-50%)',
-                              }}
-                            >
-                              {tick.label}
-                            </span>
-                          );
-                        })}
+                        {(() => {
+                          const ticks = [];
+                          const len = timeSlots.length;
+                          if (len > 0) {
+                            ticks.push({ label: timeSlots[0], idx: 0 });
+                            const step = len <= 10 ? 1 : len <= 20 ? 2 : len <= 40 ? 4 : 6;
+                            for (let i = step; i < len - 1; i += step) {
+                              if (len - 1 - i >= step / 2) {
+                                ticks.push({ label: timeSlots[i], idx: i });
+                              }
+                            }
+                            if (len > 1) {
+                              ticks.push({ label: timeSlots[len - 1], idx: len - 1 });
+                            }
+                          }
+                          return ticks.map((tick) => {
+                            const tickPct = maxEndIdx > minStartIdx ? ((tick.idx - minStartIdx) / (maxEndIdx - minStartIdx)) * 100 : 0;
+                            const isCurrent = tick.idx === dividerIdx;
+                            return (
+                              <span
+                                key={`${tick.label}-${tick.idx}`}
+                                className={`absolute transition-all duration-150 ${isCurrent ? 'text-[#3E2723] font-black text-[10px]' : ''
+                                  }`}
+                                style={{
+                                  left: `${tickPct}%`,
+                                  transform: 'translateX(-50%)',
+                                }}
+                              >
+                                {tick.label}
+                              </span>
+                            );
+                          });
+                        })()}
                       </div>
 
                       {/* Mode selection buttons */}
@@ -4588,20 +4595,24 @@ function App() {
             </div>
 
             <div className="flex flex-col gap-2.5 pt-2">
-              <button
-                type="button"
-                onClick={() => executeFTAssign(pendingAssignAvail, '早班')}
-                className="w-full py-3 bg-[#795548] hover:bg-[#5D4037] text-white font-bold rounded-xl text-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-md hover:shadow-[#795548]/10"
-              >
-                ☀️ 早班 (06:30 - 15:30)
-              </button>
-              <button
-                type="button"
-                onClick={() => executeFTAssign(pendingAssignAvail, '晚班')}
-                className="w-full py-3 bg-white hover:bg-[#FAF7F2] border border-[#DAC0A3]/70 hover:border-[#8D6E63] text-[#5D4037] font-bold rounded-xl text-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                🌙 晚班 (08:30 - 17:30)
-              </button>
+              {timeSlots.includes('06:30') && timeSlots.includes('15:30') && (
+                <button
+                  type="button"
+                  onClick={() => executeFTAssign(pendingAssignAvail, '早班')}
+                  className="w-full py-3 bg-[#795548] hover:bg-[#5D4037] text-white font-bold rounded-xl text-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-md hover:shadow-[#795548]/10"
+                >
+                  ☀️ 早班 (06:30 - 15:30)
+                </button>
+              )}
+              {timeSlots.includes('08:30') && timeSlots.includes('17:30') && (
+                <button
+                  type="button"
+                  onClick={() => executeFTAssign(pendingAssignAvail, '晚班')}
+                  className="w-full py-3 bg-white hover:bg-[#FAF7F2] border border-[#DAC0A3]/70 hover:border-[#8D6E63] text-[#5D4037] font-bold rounded-xl text-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  🌙 晚班 (08:30 - 17:30)
+                </button>
+              )}
             </div>
 
             <div className="border-t border-[#E5DCD5]/60 pt-3 mt-1.5 flex justify-end">
@@ -4857,37 +4868,43 @@ function App() {
               </div>
 
               {/* Quick Shift Presets inside scheduling modal */}
-              <div className="space-y-2">
-                <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider">常用班次快捷鍵</label>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setStartTime('06:30');
-                      setEndTime('15:30');
-                    }}
-                    className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${startTime === '06:30' && endTime === '15:30'
-                      ? 'bg-[#795548] text-white border-[#795548]'
-                      : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:border-[#8D6E63] hover:bg-[#FAF7F2]'
-                      }`}
-                  >
-                    ☀️ 早班 (06:30 - 15:30)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setStartTime('08:30');
-                      setEndTime('17:30');
-                    }}
-                    className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${startTime === '08:30' && endTime === '17:30'
-                      ? 'bg-[#795548] text-white border-[#795548]'
-                      : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:border-[#8D6E63] hover:bg-[#FAF7F2]'
-                      }`}
-                  >
-                    🌙 晚班 (08:30 - 17:30)
-                  </button>
+              {((timeSlots.includes('06:30') && timeSlots.includes('15:30')) || (timeSlots.includes('08:30') && timeSlots.includes('17:30'))) && (
+                <div className="space-y-2">
+                  <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider">常用班次快捷鍵</label>
+                  <div className="flex gap-2">
+                    {timeSlots.includes('06:30') && timeSlots.includes('15:30') && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStartTime('06:30');
+                          setEndTime('15:30');
+                        }}
+                        className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${startTime === '06:30' && endTime === '15:30'
+                          ? 'bg-[#795548] text-white border-[#795548]'
+                          : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:border-[#8D6E63] hover:bg-[#FAF7F2]'
+                          }`}
+                      >
+                        ☀️ 早班 (06:30 - 15:30)
+                      </button>
+                    )}
+                    {timeSlots.includes('08:30') && timeSlots.includes('17:30') && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStartTime('08:30');
+                          setEndTime('17:30');
+                        }}
+                        className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${startTime === '08:30' && endTime === '17:30'
+                          ? 'bg-[#795548] text-white border-[#795548]'
+                          : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:border-[#8D6E63] hover:bg-[#FAF7F2]'
+                          }`}
+                      >
+                        🌙 晚班 (08:30 - 17:30)
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Auto calculated hours warning/info */}
               {startTime && endTime && (
