@@ -72,5 +72,23 @@
     }
   ],
   "deadlineDay": 20,
-  "startDay": 15
+  "startDay": 13,
+  "operatingStartTime": "05:00",
+  "operatingEndTime": "20:00",
+  "shiftMorningStart": "06:30",
+  "shiftMorningEnd": "15:30",
+  "shiftEveningStart": "08:30",
+  "shiftEveningEnd": "17:30",
+  "shiftPresets": [
+    {
+      "name": "早班",
+      "startTime": "06:30",
+      "endTime": "15:30"
+    },
+    {
+      "name": "晚班",
+      "startTime": "08:30",
+      "endTime": "17:30"
+    }
+  ]
 }
