@@ -50,18 +50,26 @@ npm install
 本專案支援多分支環境變數自動切換（透過 Git `post-checkout` Hook 實現）：
 
 1. **分支環境設定**：請在專案根目錄下建立對應分支名稱的檔案，例如 `.env.master` 或 `.env.puli-production`。
-2. **自動載入機制**：切換 Git 分支時，系統會自動將該分支的 `.env.<branch_name>` 複製並覆蓋為 `.env`。
-3. ⚠️ **注意事項**：**請勿直接修改 `.env` 檔案**，因為切換分支時它將被自動覆寫。任何環境變數變更都應該在對應的 `.env.<branch_name>`（或本地開發專用的 `.env.local`）檔案中進行。
+2. **自動載入機制**：切換 Git 分支時，系統會自動將該分支的 `.env.<branch_name>` 複製並覆蓋為 **`.env.local`**。
+3. ⚠️ **注意事項**：**請勿直接修改 `.env.local` 檔案**，因為切換分支時它將被自動覆寫。任何環境變數變更都應該在對應的 `.env.<branch_name>` 檔案中進行。
 
 手動設定範例（若未使用 Git Hook 自動切換）：
-在專案根目錄下建立 `.env.local` 檔案並填入您的 Firebase 設定資訊：
+在專案根目錄下建立 `.env.local` 檔案並填入您的 Firebase 設定與 FTP 部署資訊：
 ```env
+# Firebase 設定
 VITE_FIREBASE_API_KEY=your_api_key
 VITE_FIREBASE_AUTH_DOMAIN=your_auth_domain
 VITE_FIREBASE_PROJECT_ID=your_project_id
 VITE_FIREBASE_STORAGE_BUCKET=your_storage_bucket
 VITE_FIREBASE_MESSAGING_SENDER_ID=your_messaging_sender_id
 VITE_FIREBASE_APP_ID=your_app_id
+
+# FTP 自動部署設定 (InfinityFree)
+FTP_HOST=ftpupload.net
+FTP_USER=your_ftp_username
+FTP_PASSWORD=your_ftp_password
+FTP_REMOTE_ROOT=/htdocs
+FTP_REMOTE_APP_DIR=Scheduler-Tpro
 ```
 
 ### 3. 啟動開發伺服器

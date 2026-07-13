@@ -132,11 +132,15 @@ function localDbPlugin() {
               const globalPath = path.resolve(dataDir, 'db-global.json');
               let globalTargets = [];
               let deadlineDay = 20;
+              let startDay = 15;
               if (fs.existsSync(globalPath)) {
                 const globalData = JSON.parse(fs.readFileSync(globalPath, 'utf-8'));
                 globalTargets = globalData.staffingTargets || [];
                 if (globalData.deadlineDay !== undefined) {
                   deadlineDay = globalData.deadlineDay;
+                }
+                if (globalData.startDay !== undefined) {
+                  startDay = globalData.startDay;
                 }
               } else {
                 // Initialize default staffing targets if global doesn't exist
@@ -145,7 +149,7 @@ function localDbPlugin() {
                   hour: i + 6,
                   targetCount: 2
                 }));
-                fs.writeFileSync(globalPath, JSON.stringify({ staffingTargets: globalTargets, deadlineDay }, null, 2), 'utf-8');
+                fs.writeFileSync(globalPath, JSON.stringify({ staffingTargets: globalTargets, deadlineDay, startDay }, null, 2), 'utf-8');
               }
 
               const employeesPath = path.resolve(dataDir, 'db-employees.json');
@@ -170,7 +174,8 @@ function localDbPlugin() {
                 availabilities: monthData.availabilities || [],
                 staffingTargets: mergedTargets,
                 employees: globalEmployees,
-                deadlineDay: deadlineDay
+                deadlineDay: deadlineDay,
+                startDay: startDay
               }));
             } catch (error) {
               res.statusCode = 500;
@@ -219,7 +224,8 @@ function localDbPlugin() {
                 const globalPath = path.resolve(dataDir, 'db-global.json');
                 fs.writeFileSync(globalPath, JSON.stringify({ 
                   staffingTargets: globalTargets,
-                  deadlineDay: parsed.deadlineDay !== undefined ? parsed.deadlineDay : 20
+                  deadlineDay: parsed.deadlineDay !== undefined ? parsed.deadlineDay : 20,
+                  startDay: parsed.startDay !== undefined ? parsed.startDay : 15
                 }, null, 2), 'utf-8');
 
                 // Write employees file
