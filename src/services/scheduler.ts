@@ -86,6 +86,8 @@ let localStaffingTargetListeners: ((targets: StaffingTarget[]) => void)[] = [];
 let localEmployeeListeners: ((employees: Employee[]) => void)[] = [];
 let localDeadlineDayListeners: ((day: number) => void)[] = [];
 let localStartDayListeners: ((day: number) => void)[] = [];
+let localOperatingStartTimeListeners: ((time: string) => void)[] = [];
+let localOperatingEndTimeListeners: ((time: string) => void)[] = [];
 
 interface DbSchema {
   schedules: WorkSchedule[];
@@ -94,6 +96,8 @@ interface DbSchema {
   employees: Employee[];
   deadlineDay?: number;
   startDay?: number;
+  operatingStartTime?: string;
+  operatingEndTime?: string;
 }
 
 const inMemoryDb: DbSchema = {
@@ -102,7 +106,9 @@ const inMemoryDb: DbSchema = {
   staffingTargets: [],
   employees: [],
   deadlineDay: 20,
-  startDay: 15
+  startDay: 15,
+  operatingStartTime: '06:30',
+  operatingEndTime: '20:00'
 };
 
 const loadedMonths = new Set<string>();
@@ -164,6 +170,14 @@ const getLocalStartDay = (): number => {
   return isNaN(num) ? 15 : num;
 };
 
+const getLocalOperatingStartTime = (): string => {
+  return localStorage.getItem('scheduler_operating_start_time') || '06:30';
+};
+
+const getLocalOperatingEndTime = (): string => {
+  return localStorage.getItem('scheduler_operating_end_time') || '20:00';
+};
+
 // Sync and merge data of a specific month into memory
 export const syncActiveMonth = async (monthStr: string) => {
   if (isValidConfig && db) return; // Skip if Cloud DB is enabled
@@ -203,6 +217,12 @@ export const syncActiveMonth = async (monthStr: string) => {
       if (data.startDay !== undefined) {
         inMemoryDb.startDay = data.startDay;
       }
+      if (data.operatingStartTime !== undefined) {
+        inMemoryDb.operatingStartTime = data.operatingStartTime;
+      }
+      if (data.operatingEndTime !== undefined) {
+        inMemoryDb.operatingEndTime = data.operatingEndTime;
+      }
 
       // Update LocalStorage backup
       localStorage.setItem('weekly_work_schedules', JSON.stringify(inMemoryDb.schedules));
@@ -211,6 +231,8 @@ export const syncActiveMonth = async (monthStr: string) => {
       localStorage.setItem('employees_list', JSON.stringify(inMemoryDb.employees));
       localStorage.setItem('scheduler_deadline_day', (inMemoryDb.deadlineDay || 20).toString());
       localStorage.setItem('scheduler_start_day', (inMemoryDb.startDay || 15).toString());
+      localStorage.setItem('scheduler_operating_start_time', inMemoryDb.operatingStartTime || '06:30');
+      localStorage.setItem('scheduler_operating_end_time', inMemoryDb.operatingEndTime || '20:00');
 
       // Trigger all active UI listeners
       localListeners.forEach(listener => listener([...inMemoryDb.schedules]));
@@ -219,6 +241,8 @@ export const syncActiveMonth = async (monthStr: string) => {
       localEmployeeListeners.forEach(listener => listener([...inMemoryDb.employees]));
       localDeadlineDayListeners.forEach(listener => listener(inMemoryDb.deadlineDay || 20));
       localStartDayListeners.forEach(listener => listener(inMemoryDb.startDay || 15));
+      localOperatingStartTimeListeners.forEach(listener => listener(inMemoryDb.operatingStartTime || '06:30'));
+      localOperatingEndTimeListeners.forEach(listener => listener(inMemoryDb.operatingEndTime || '20:00'));
     }
   } catch (e) {
     console.error(`Failed to sync month data for ${monthStr}:`, e);
@@ -243,6 +267,12 @@ const loadFileDb = async () => {
       if (data.startDay !== undefined) {
         inMemoryDb.startDay = data.startDay;
       }
+      if (data.operatingStartTime !== undefined) {
+        inMemoryDb.operatingStartTime = data.operatingStartTime;
+      }
+      if (data.operatingEndTime !== undefined) {
+        inMemoryDb.operatingEndTime = data.operatingEndTime;
+      }
       
       // Update local storage backup
       localStorage.setItem('weekly_work_schedules', JSON.stringify(inMemoryDb.schedules));
@@ -251,6 +281,8 @@ const loadFileDb = async () => {
       localStorage.setItem('employees_list', JSON.stringify(inMemoryDb.employees));
       localStorage.setItem('scheduler_deadline_day', (inMemoryDb.deadlineDay || 20).toString());
       localStorage.setItem('scheduler_start_day', (inMemoryDb.startDay || 15).toString());
+      localStorage.setItem('scheduler_operating_start_time', inMemoryDb.operatingStartTime || '06:30');
+      localStorage.setItem('scheduler_operating_end_time', inMemoryDb.operatingEndTime || '20:00');
     } else {
       throw new Error("Local DB API response not OK");
     }
@@ -262,6 +294,8 @@ const loadFileDb = async () => {
     inMemoryDb.employees = getLocalEmployees();
     inMemoryDb.deadlineDay = getLocalDeadlineDay();
     inMemoryDb.startDay = getLocalStartDay();
+    inMemoryDb.operatingStartTime = getLocalOperatingStartTime();
+    inMemoryDb.operatingEndTime = getLocalOperatingEndTime();
   } finally {
     // Notify all active listeners of loaded values
     localListeners.forEach(listener => listener([...inMemoryDb.schedules]));
@@ -270,6 +304,8 @@ const loadFileDb = async () => {
     localEmployeeListeners.forEach(listener => listener([...inMemoryDb.employees]));
     localDeadlineDayListeners.forEach(listener => listener(inMemoryDb.deadlineDay || 20));
     localStartDayListeners.forEach(listener => listener(inMemoryDb.startDay || 15));
+    localOperatingStartTimeListeners.forEach(listener => listener(inMemoryDb.operatingStartTime || '06:30'));
+    localOperatingEndTimeListeners.forEach(listener => listener(inMemoryDb.operatingEndTime || '20:00'));
   }
 };
 
@@ -288,6 +324,8 @@ const saveDbForDate = async (dateStr?: string) => {
   localStorage.setItem('employees_list', JSON.stringify(inMemoryDb.employees));
   localStorage.setItem('scheduler_deadline_day', (inMemoryDb.deadlineDay || 20).toString());
   localStorage.setItem('scheduler_start_day', (inMemoryDb.startDay || 15).toString());
+  localStorage.setItem('scheduler_operating_start_time', inMemoryDb.operatingStartTime || '06:30');
+  localStorage.setItem('scheduler_operating_end_time', inMemoryDb.operatingEndTime || '20:00');
 
   // Trigger active listeners immediately for immediate UI response
   localListeners.forEach(listener => listener([...inMemoryDb.schedules]));
@@ -296,6 +334,8 @@ const saveDbForDate = async (dateStr?: string) => {
   localEmployeeListeners.forEach(listener => listener([...inMemoryDb.employees]));
   localDeadlineDayListeners.forEach(listener => listener(inMemoryDb.deadlineDay || 20));
   localStartDayListeners.forEach(listener => listener(inMemoryDb.startDay || 15));
+  localOperatingStartTimeListeners.forEach(listener => listener(inMemoryDb.operatingStartTime || '06:30'));
+  localOperatingEndTimeListeners.forEach(listener => listener(inMemoryDb.operatingEndTime || '20:00'));
 
   // POST current in-memory state to local JSON file
   try {
@@ -309,7 +349,9 @@ const saveDbForDate = async (dateStr?: string) => {
       staffingTargets: monthTargets,
       employees: inMemoryDb.employees,
       deadlineDay: inMemoryDb.deadlineDay || 20,
-      startDay: inMemoryDb.startDay || 15
+      startDay: inMemoryDb.startDay || 15,
+      operatingStartTime: inMemoryDb.operatingStartTime || '06:30',
+      operatingEndTime: inMemoryDb.operatingEndTime || '20:00'
     };
 
     await fetch(`/api/db?month=${monthStr}`, {
@@ -642,6 +684,66 @@ export const updateStartDay = async (day: number) => {
     return await setDoc(docRef, { startDay: day }, { merge: true });
   } else {
     inMemoryDb.startDay = day;
+    await saveDbForDate();
+  }
+};
+
+export const subscribeToOperatingStartTime = (callback: (time: string) => void) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    return onSnapshot(docRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        callback(data.operatingStartTime !== undefined ? data.operatingStartTime : '06:30');
+      } else {
+        callback('06:30');
+      }
+    });
+  } else {
+    localOperatingStartTimeListeners.push(callback);
+    callback(inMemoryDb.operatingStartTime || '06:30');
+    return () => {
+      localOperatingStartTimeListeners = localOperatingStartTimeListeners.filter(l => l !== callback);
+    };
+  }
+};
+
+export const updateOperatingStartTime = async (time: string) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    return await setDoc(docRef, { operatingStartTime: time }, { merge: true });
+  } else {
+    inMemoryDb.operatingStartTime = time;
+    await saveDbForDate();
+  }
+};
+
+export const subscribeToOperatingEndTime = (callback: (time: string) => void) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    return onSnapshot(docRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        callback(data.operatingEndTime !== undefined ? data.operatingEndTime : '20:00');
+      } else {
+        callback('20:00');
+      }
+    });
+  } else {
+    localOperatingEndTimeListeners.push(callback);
+    callback(inMemoryDb.operatingEndTime || '20:00');
+    return () => {
+      localOperatingEndTimeListeners = localOperatingEndTimeListeners.filter(l => l !== callback);
+    };
+  }
+};
+
+export const updateOperatingEndTime = async (time: string) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    return await setDoc(docRef, { operatingEndTime: time }, { merge: true });
+  } else {
+    inMemoryDb.operatingEndTime = time;
     await saveDbForDate();
   }
 };

@@ -72,5 +72,7 @@
     }
   ],
   "deadlineDay": 20,
-  "startDay": 15
+  "startDay": 15,
+  "operatingStartTime": "06:30",
+  "operatingEndTime": "20:00"
 }

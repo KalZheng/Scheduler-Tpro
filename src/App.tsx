@@ -18,7 +18,11 @@ import {
   subscribeToDeadlineDay,
   updateDeadlineDay,
   subscribeToStartDay,
-  updateStartDay
+  updateStartDay,
+  subscribeToOperatingStartTime,
+  updateOperatingStartTime,
+  subscribeToOperatingEndTime,
+  updateOperatingEndTime
 } from './services/scheduler';
 import type { WorkSchedule, WorkerAvailability, StaffingTarget, Employee } from './services/scheduler';
 import { isValidConfig } from './firebase';
@@ -68,11 +72,10 @@ const getDatesInRange = (startStr: string, endStr: string): Date[] => {
   }
   return dates;
 };
-const TIME_SLOTS = Array.from({ length: 29 }, (_, i) => {
-  const totalMinutes = 6 * 60 + i * 30; // Starts at 6:00 AM (360 minutes)
-  const hour = Math.floor(totalMinutes / 60).toString().padStart(2, '0');
-  const minute = (totalMinutes % 60).toString().padStart(2, '0');
-  return `${hour}:${minute}`;
+const ALL_TIME_CHOICES = Array.from({ length: 48 }, (_, i) => {
+  const h = Math.floor(i / 2).toString().padStart(2, '0');
+  const m = i % 2 === 0 ? '00' : '30';
+  return `${h}:${m}`;
 });
 
 const compareTimeStrings = (timeA: string, timeB: string): number => {
@@ -357,6 +360,32 @@ function App() {
   const [managerViewMode, setManagerViewMode] = useState<'calendar' | 'grid' | 'employees' | 'calculation' | 'system'>('calendar');
   const [deadlineDay, setDeadlineDay] = useState<number>(20);
   const [startDay, setStartDay] = useState<number>(15);
+  const [operatingStartTime, setOperatingStartTime] = useState<string>('06:30');
+  const [operatingEndTime, setOperatingEndTime] = useState<string>('20:00');
+
+  const timeSlots = useMemo(() => {
+    if (!operatingStartTime || !operatingEndTime) return [];
+    const [startH, startM] = operatingStartTime.split(':').map(Number);
+    const [endH, endM] = operatingEndTime.split(':').map(Number);
+    if (isNaN(startH) || isNaN(startM) || isNaN(endH) || isNaN(endM)) return [];
+
+    const startMinutes = startH * 60 + startM;
+    let endMinutes = endH * 60 + endM;
+
+    if (endMinutes < startMinutes) {
+      // Overnight shift
+      endMinutes += 24 * 60;
+    }
+
+    const slots: string[] = [];
+    for (let min = startMinutes; min <= endMinutes; min += 30) {
+      const adjustedMin = min % (24 * 60);
+      const h = Math.floor(adjustedMin / 60).toString().padStart(2, '0');
+      const m = (adjustedMin % 60).toString().padStart(2, '0');
+      slots.push(`${h}:${m}`);
+    }
+    return slots;
+  }, [operatingStartTime, operatingEndTime]);
 
   // Reference to the grid scroll container to enable horizontal scrolling via mouse wheel
   const gridContainerRef = useRef<HTMLDivElement>(null);
@@ -643,6 +672,12 @@ function App() {
     const unsubStartDay = subscribeToStartDay((day) => {
       setStartDay(day);
     });
+    const unsubOperatingStartTime = subscribeToOperatingStartTime((time) => {
+      setOperatingStartTime(time);
+    });
+    const unsubOperatingEndTime = subscribeToOperatingEndTime((time) => {
+      setOperatingEndTime(time);
+    });
 
     return () => {
       unsubSchedules();
@@ -651,6 +686,8 @@ function App() {
       unsubEmployees();
       unsubDeadlineDay();
       unsubStartDay();
+      unsubOperatingStartTime();
+      unsubOperatingEndTime();
     };
   }, []);
 
@@ -878,22 +915,24 @@ function App() {
         a => a.date === date && a.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase()
       );
       if (dbRecord) {
-        const startIdx = TIME_SLOTS.indexOf(dbRecord.startTime);
-        const endIdx = TIME_SLOTS.indexOf(dbRecord.endTime);
+        const startIdx = timeSlots.indexOf(dbRecord.startTime);
+        const endIdx = timeSlots.indexOf(dbRecord.endTime);
         return {
           date,
-          startIdx: startIdx >= 0 ? startIdx : 1,
-          endIdx: endIdx >= 0 ? endIdx : 14,
+          startIdx: startIdx >= 0 ? startIdx : 0,
+          endIdx: endIdx >= 0 ? endIdx : timeSlots.length - 1,
           workplace: dbRecord.workplace || workplaces[0]?.name || '',
           notes: dbRecord.notes || ''
         };
       }
 
-      // Brand-new date — default 06:30 (idx 1) to 13:00 (idx 14)
+      // Brand-new date — default 06:30 to 13:00 if exists, otherwise first slot to last slot
+      const defStart = Math.max(0, timeSlots.indexOf('06:30'));
+      const defEnd = Math.max(0, timeSlots.indexOf('13:00'));
       return {
         date,
-        startIdx: 1,
-        endIdx: 14,
+        startIdx: defStart,
+        endIdx: defEnd >= 0 ? defEnd : timeSlots.length - 1,
         workplace: workplaces[0]?.name || '',
         notes: ''
       };
@@ -996,8 +1035,8 @@ function App() {
           employeeName: workerName.trim(),
           date: config.date,
           workplace: config.workplace,
-          startTime: TIME_SLOTS[config.startIdx],
-          endTime: TIME_SLOTS[config.endIdx],
+          startTime: timeSlots[config.startIdx],
+          endTime: timeSlots[config.endIdx],
           notes: config.notes.trim()
         });
       }
@@ -1477,14 +1516,14 @@ function App() {
       return;
     }
 
-    const startIdx = TIME_SLOTS.indexOf(avail.startTime);
-    const endIdx = TIME_SLOTS.indexOf(avail.endTime);
+    const startIdx = timeSlots.indexOf(avail.startTime);
+    const endIdx = timeSlots.indexOf(avail.endTime);
 
     setAvailConfigs([
       {
         date: avail.date,
-        startIdx: startIdx >= 0 ? startIdx : 1,
-        endIdx: endIdx >= 0 ? endIdx : 14,
+        startIdx: startIdx >= 0 ? startIdx : 0,
+        endIdx: endIdx >= 0 ? endIdx : timeSlots.length - 1,
         workplace: avail.workplace || workplaces[0]?.name || '',
         notes: avail.notes || ''
       }
@@ -3162,50 +3201,104 @@ function App() {
                   </div>
 
                   <div className="glass-panel p-6 rounded-2xl border border-[#DAC0A3]/50 shadow-sm bg-white/70 space-y-6 max-w-xl">
-                    <h3 className="text-sm font-bold text-[#3E2723]">📅 夥伴排班登記時間限制設定</h3>
-                    <p className="text-xs text-[#6D4C41] leading-relaxed">
-                      設定每個月員工可登記/修改排班的區間。例如：開放日設為 15，截止日設為 20，則員工僅能在每月 15 ~ 20 日之間進行登記。一旦超過截止日且已有確認之排班，員工將被鎖定無法自行登記或修改可用時間/休假。
-                    </p>
+                    <div>
+                      <h3 className="text-sm font-bold text-[#3E2723] flex items-center gap-2">
+                        <span>⚙️</span> 門市營業時間與排班限制設定
+                      </h3>
+                      <p className="text-xs text-[#6D4C41] mt-1.5 leading-relaxed">
+                        在此管理門市營運時間區間，以及每個月夥伴線上填寫排班登記的起訖日期限制。
+                      </p>
+                    </div>
 
                     <div className="space-y-4">
-                      <div className="flex items-center gap-3">
-                        <span className="text-xs font-semibold text-[#6D4C41] w-24">開放登記日期：</span>
-                        <span className="text-xs font-semibold text-[#6D4C41]">每月的第</span>
-                        <input
-                          type="number"
-                          min="1"
-                          max="31"
-                          value={startDay}
-                          onChange={(e) => {
-                            const val = parseInt(e.target.value, 10);
-                            if (!isNaN(val) && val >= 1 && val <= 31) {
-                              setStartDay(val);
-                            }
-                          }}
-                          className="w-20 glass-input px-3 py-1.5 rounded-lg text-center font-mono text-sm"
-                        />
-                        <span className="text-xs font-semibold text-[#6D4C41]">天 (1 - 31日)</span>
+                      {/* Section 1: Operating Hours */}
+                      <div className="border-t border-[#E5DCD5]/60 pt-4 space-y-3">
+                        <h4 className="text-xs font-bold text-[#3E2723] flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-[#795548]"></span>
+                          門市營業/排班時間區間
+                        </h4>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-[11px] font-semibold text-[#6D4C41] mb-1.5">營業開始時間</label>
+                            <select
+                              value={operatingStartTime}
+                              onChange={(e) => setOperatingStartTime(e.target.value)}
+                              className="w-full glass-input px-3 py-2 rounded-xl text-xs cursor-pointer"
+                            >
+                              {ALL_TIME_CHOICES.map(choice => (
+                                <option key={choice} value={choice} className="bg-white text-[#3E2723]">
+                                  {choice}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-semibold text-[#6D4C41] mb-1.5">營業結束時間</label>
+                            <select
+                              value={operatingEndTime}
+                              onChange={(e) => setOperatingEndTime(e.target.value)}
+                              className="w-full glass-input px-3 py-2 rounded-xl text-xs cursor-pointer"
+                            >
+                              {ALL_TIME_CHOICES.map(choice => (
+                                <option key={choice} value={choice} className="bg-white text-[#3E2723]">
+                                  {choice}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
                       </div>
 
-                      <div className="flex items-center gap-3">
-                        <span className="text-xs font-semibold text-[#6D4C41] w-24">截止登記日期：</span>
-                        <span className="text-xs font-semibold text-[#6D4C41]">每月的第</span>
-                        <input
-                          type="number"
-                          min="1"
-                          max="31"
-                          value={deadlineDay}
-                          onChange={(e) => {
-                            const val = parseInt(e.target.value, 10);
-                            if (!isNaN(val) && val >= 1 && val <= 31) {
-                              setDeadlineDay(val);
-                            }
-                          }}
-                          className="w-20 glass-input px-3 py-1.5 rounded-lg text-center font-mono text-sm"
-                        />
-                        <span className="text-xs font-semibold text-[#6D4C41]">天 (1 - 31日)</span>
+                      {/* Section 2: Registration Limits */}
+                      <div className="border-t border-[#E5DCD5]/60 pt-4 space-y-3">
+                        <h4 className="text-xs font-bold text-[#3E2723] flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-[#795548]"></span>
+                          夥伴登記時間限制
+                        </h4>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-[11px] font-semibold text-[#6D4C41] mb-1.5">開放登記日期：每月的第</label>
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="number"
+                                min="1"
+                                max="31"
+                                value={startDay}
+                                onChange={(e) => {
+                                  const val = parseInt(e.target.value, 10);
+                                  if (!isNaN(val) && val >= 1 && val <= 31) {
+                                    setStartDay(val);
+                                  }
+                                }}
+                                className="w-full glass-input px-3 py-2 rounded-xl text-center font-mono text-xs"
+                              />
+                              <span className="text-[10px] font-semibold text-[#6D4C41] shrink-0">日</span>
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-semibold text-[#6D4C41] mb-1.5">截止登記日期：每月的第</label>
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="number"
+                                min="1"
+                                max="31"
+                                value={deadlineDay}
+                                onChange={(e) => {
+                                  const val = parseInt(e.target.value, 10);
+                                  if (!isNaN(val) && val >= 1 && val <= 31) {
+                                    setDeadlineDay(val);
+                                  }
+                                }}
+                                className="w-full glass-input px-3 py-2 rounded-xl text-center font-mono text-xs"
+                              />
+                              <span className="text-[10px] font-semibold text-[#6D4C41] shrink-0">日</span>
+                            </div>
+                          </div>
+                        </div>
                       </div>
 
+                      {/* Action buttons */}
                       <div className="flex border-t border-[#E5DCD5] pt-4">
                         <button
                           onClick={async () => {
@@ -3214,9 +3307,11 @@ function App() {
                                 alert("警告：開放日期不可晚於截止日期！");
                                 return;
                               }
+                              await updateOperatingStartTime(operatingStartTime);
+                              await updateOperatingEndTime(operatingEndTime);
                               await updateStartDay(startDay);
                               await updateDeadlineDay(deadlineDay);
-                              alert(`已成功更新排班登記區間為每月 ${startDay} 日至 ${deadlineDay} 日！`);
+                              alert("已成功更新門市營業時間與排班限制設定！");
                             } catch (err) {
                               console.error("Failed to update settings:", err);
                               alert("更新失敗，請稍後再試。");
@@ -4178,12 +4273,12 @@ function App() {
                 const dateObj = new Date(config.date);
                 const dayNames = ['日', '一', '二', '三', '四', '五', '六'];
                 const dayName = dayNames[dateObj.getDay()];
-                const startTime = TIME_SLOTS[config.startIdx];
-                const endTime = TIME_SLOTS[config.endIdx];
+                const startTime = timeSlots[config.startIdx];
+                const endTime = timeSlots[config.endIdx];
                 const duration = calculateDuration(startTime, endTime);
                 const overEight = isOverEightHours(startTime, endTime);
-                const minStartIdx = 1; // 06:30
-                const maxEndIdx = 28;  // 20:00
+                const minStartIdx = 0;
+                const maxEndIdx = timeSlots.length - 1;
 
                 // Determine mode and divider position
                 let currentMode: 'until' | 'from' = 'until';
@@ -4212,16 +4307,16 @@ function App() {
                 }
 
                 // Calculate percentage relative to minStartIdx and maxEndIdx
-                const pct = ((dividerIdx - minStartIdx) / (maxEndIdx - minStartIdx)) * 100;
+                const pct = maxEndIdx > minStartIdx ? ((dividerIdx - minStartIdx) / (maxEndIdx - minStartIdx)) * 100 : 0;
 
                 const handleCommit = (nextDividerIdx: number, nextMode: 'until' | 'from') => {
                   let start = nextMode === 'until' ? minStartIdx : nextDividerIdx;
                   let end = nextMode === 'until' ? nextDividerIdx : maxEndIdx;
 
                   if (nextMode === 'until') {
-                    if (end < 2) end = 2; // enforce minimum 30 min duration (06:30 - 07:00)
+                    if (end < minStartIdx + 1) end = minStartIdx + 1; // enforce minimum 30 min duration (1 slot)
                   } else {
-                    if (start > 27) start = 27; // enforce minimum 30 min duration (19:30 - 20:00)
+                    if (start > maxEndIdx - 1) start = maxEndIdx - 1; // enforce minimum 30 min duration (1 slot)
                   }
 
                   updateAvailConfig(index, { startIdx: start, endIdx: end });
@@ -4738,7 +4833,7 @@ function App() {
                     onChange={(e) => setStartTime(e.target.value)}
                     className="w-full glass-input px-4 py-2.5 rounded-xl text-sm cursor-pointer"
                   >
-                    {TIME_SLOTS.map(slot => (
+                    {timeSlots.map(slot => (
                       <option key={slot} value={slot} className="bg-white text-[#3E2723] font-mono">
                         {slot}
                       </option>
@@ -4752,7 +4847,7 @@ function App() {
                     onChange={(e) => setEndTime(e.target.value)}
                     className="w-full glass-input px-4 py-2.5 rounded-xl text-sm cursor-pointer"
                   >
-                    {TIME_SLOTS.map(slot => (
+                    {timeSlots.map(slot => (
                       <option key={slot} value={slot} className="bg-white text-[#3E2723] font-mono">
                         {slot}
                       </option>

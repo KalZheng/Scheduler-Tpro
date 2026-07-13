@@ -133,6 +133,8 @@ function localDbPlugin() {
               let globalTargets = [];
               let deadlineDay = 20;
               let startDay = 15;
+              let operatingStartTime = '06:30';
+              let operatingEndTime = '20:00';
               if (fs.existsSync(globalPath)) {
                 const globalData = JSON.parse(fs.readFileSync(globalPath, 'utf-8'));
                 globalTargets = globalData.staffingTargets || [];
@@ -142,6 +144,12 @@ function localDbPlugin() {
                 if (globalData.startDay !== undefined) {
                   startDay = globalData.startDay;
                 }
+                if (globalData.operatingStartTime !== undefined) {
+                  operatingStartTime = globalData.operatingStartTime;
+                }
+                if (globalData.operatingEndTime !== undefined) {
+                  operatingEndTime = globalData.operatingEndTime;
+                }
               } else {
                 // Initialize default staffing targets if global doesn't exist
                 globalTargets = Array.from({ length: 14 }, (_, i) => ({
@@ -149,7 +157,7 @@ function localDbPlugin() {
                   hour: i + 6,
                   targetCount: 2
                 }));
-                fs.writeFileSync(globalPath, JSON.stringify({ staffingTargets: globalTargets, deadlineDay, startDay }, null, 2), 'utf-8');
+                fs.writeFileSync(globalPath, JSON.stringify({ staffingTargets: globalTargets, deadlineDay, startDay, operatingStartTime, operatingEndTime }, null, 2), 'utf-8');
               }
 
               const employeesPath = path.resolve(dataDir, 'db-employees.json');
@@ -175,7 +183,9 @@ function localDbPlugin() {
                 staffingTargets: mergedTargets,
                 employees: globalEmployees,
                 deadlineDay: deadlineDay,
-                startDay: startDay
+                startDay: startDay,
+                operatingStartTime: operatingStartTime,
+                operatingEndTime: operatingEndTime
               }));
             } catch (error) {
               res.statusCode = 500;
@@ -225,7 +235,9 @@ function localDbPlugin() {
                 fs.writeFileSync(globalPath, JSON.stringify({ 
                   staffingTargets: globalTargets,
                   deadlineDay: parsed.deadlineDay !== undefined ? parsed.deadlineDay : 20,
-                  startDay: parsed.startDay !== undefined ? parsed.startDay : 15
+                  startDay: parsed.startDay !== undefined ? parsed.startDay : 15,
+                  operatingStartTime: parsed.operatingStartTime !== undefined ? parsed.operatingStartTime : '06:30',
+                  operatingEndTime: parsed.operatingEndTime !== undefined ? parsed.operatingEndTime : '20:00'
                 }, null, 2), 'utf-8');
 
                 // Write employees file
