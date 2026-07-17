@@ -143,6 +143,7 @@ function localDbPlugin() {
                 { name: '早班', startTime: '06:30', endTime: '15:30' },
                 { name: '晚班', startTime: '08:30', endTime: '17:30' }
               ];
+              let employeeOrder = [];
               if (fs.existsSync(globalPath)) {
                 const globalData = JSON.parse(fs.readFileSync(globalPath, 'utf-8'));
                 globalTargets = globalData.staffingTargets || [];
@@ -172,6 +173,9 @@ function localDbPlugin() {
                 }
                 if (globalData.shiftPresets !== undefined) {
                   shiftPresets = globalData.shiftPresets;
+                }
+                if (globalData.employeeOrder !== undefined) {
+                  employeeOrder = globalData.employeeOrder;
                 }
               } else {
                 // Initialize default staffing targets if global doesn't exist
@@ -213,7 +217,8 @@ function localDbPlugin() {
                 shiftMorningEnd: shiftMorningEnd,
                 shiftEveningStart: shiftEveningStart,
                 shiftEveningEnd: shiftEveningEnd,
-                shiftPresets: shiftPresets
+                shiftPresets: shiftPresets,
+                employeeOrder: employeeOrder
               }));
             } catch (error) {
               res.statusCode = 500;
@@ -270,7 +275,8 @@ function localDbPlugin() {
                   shiftMorningEnd: parsed.shiftMorningEnd !== undefined ? parsed.shiftMorningEnd : '15:30',
                   shiftEveningStart: parsed.shiftEveningStart !== undefined ? parsed.shiftEveningStart : '08:30',
                   shiftEveningEnd: parsed.shiftEveningEnd !== undefined ? parsed.shiftEveningEnd : '17:30',
-                  shiftPresets: parsed.shiftPresets !== undefined ? parsed.shiftPresets : []
+                  shiftPresets: parsed.shiftPresets !== undefined ? parsed.shiftPresets : [],
+                  employeeOrder: parsed.employeeOrder !== undefined ? parsed.employeeOrder : []
                 }, null, 2), 'utf-8');
 
                 // Write employees file
