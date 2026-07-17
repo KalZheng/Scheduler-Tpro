@@ -5190,6 +5190,25 @@ function App() {
                 >
                   取消
                 </button>
+                {modalMode === 'edit' && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (editingId && safeConfirm('確定要刪除此排程紀錄嗎？')) {
+                        try {
+                          await deleteSchedule(editingId);
+                          setIsModalOpen(false);
+                        } catch (error) {
+                          console.error("Error deleting schedule from modal: ", error);
+                          alert('刪除排程失敗，請稍後再試。');
+                        }
+                      }
+                    }}
+                    className="flex-1 bg-red-50 hover:bg-red-100 border border-red-200 text-red-650 hover:text-red-700 font-semibold px-4 py-3 rounded-xl transition-all cursor-pointer text-center text-sm"
+                  >
+                    刪除
+                  </button>
+                )}
                 <button
                   type="submit"
                   className="flex-1 bg-[#795548] hover:bg-[#5D4037] text-white font-semibold px-4 py-3 rounded-xl transition-all shadow-lg shadow-[#795548]/10 cursor-pointer text-center text-sm"
