@@ -90,5 +90,12 @@
       "startTime": "08:30",
       "endTime": "17:30"
     }
+  ],
+  "employeeOrder": [
+    "Kal",
+    "Kal2",
+    "Zheng",
+    "Zheng Full",
+    "Kal3"
   ]
 }
