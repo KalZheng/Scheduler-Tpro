@@ -32,7 +32,9 @@ import {
   subscribeToShiftEveningEnd,
   updateShiftEveningEnd,
   subscribeToShiftPresets,
-  updateShiftPresets
+  updateShiftPresets,
+  subscribeToEmployeeOrder,
+  updateEmployeeOrder
 } from './services/scheduler';
 import type { WorkSchedule, WorkerAvailability, StaffingTarget, Employee, ShiftPreset } from './services/scheduler';
 import { isValidConfig } from './firebase';
@@ -377,6 +379,9 @@ function App() {
   const [shiftEveningStart, setShiftEveningStart] = useState<string>('08:30');
   const [shiftEveningEnd, setShiftEveningEnd] = useState<string>('17:30');
   const [shiftPresets, setShiftPresets] = useState<ShiftPreset[]>([]);
+  const [employeeOrder, setEmployeeOrder] = useState<string[]>([]);
+
+
 
   const timeSlots = useMemo(() => {
     if (!operatingStartTime || !operatingEndTime) return [];
@@ -708,6 +713,9 @@ function App() {
     const unsubShiftPresets = subscribeToShiftPresets((data) => {
       setShiftPresets(data);
     });
+    const unsubEmployeeOrder = subscribeToEmployeeOrder((data) => {
+      setEmployeeOrder(data);
+    });
 
     return () => {
       unsubSchedules();
@@ -723,6 +731,7 @@ function App() {
       unsubShiftEveningStart();
       unsubShiftEveningEnd();
       unsubShiftPresets();
+      unsubEmployeeOrder();
     };
   }, []);
 
@@ -1674,13 +1683,58 @@ function App() {
   const monthGridDates = getMonthGridDates(currentMonthStart);
   const gridDates = getDaysInMonth(currentMonthStart);
 
-  const allEmployees = Array.from(
-    new Set([
-      ...employees.map(e => e.name.trim()),
-      ...schedules.map(s => s.employeeName.trim()),
-      ...availabilities.map(a => a.employeeName.trim())
-    ])
-  ).filter(Boolean).sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+  const allEmployees = useMemo(() => {
+    const uniqueNames = Array.from(
+      new Set([
+        ...employees.map(e => e.name.trim()),
+        ...schedules.map(s => s.employeeName.trim()),
+        ...availabilities.map(a => a.employeeName.trim())
+      ])
+    ).filter(Boolean);
+
+    return uniqueNames.sort((a, b) => {
+      const idxA = employeeOrder.indexOf(a);
+      const idxB = employeeOrder.indexOf(b);
+      if (idxA !== -1 && idxB !== -1) {
+        return idxA - idxB;
+      }
+      if (idxA !== -1) return -1;
+      if (idxB !== -1) return 1;
+      return a.localeCompare(b, 'zh-Hant');
+    });
+  }, [employees, schedules, availabilities, employeeOrder]);
+
+  const handleMoveEmployeeUp = async (name: string) => {
+    const currentOrder = [...allEmployees];
+    const index = currentOrder.indexOf(name);
+    if (index > 0) {
+      // Swap with index - 1
+      currentOrder[index] = currentOrder[index - 1];
+      currentOrder[index - 1] = name;
+      setEmployeeOrder(currentOrder);
+      try {
+        await updateEmployeeOrder(currentOrder);
+      } catch (error) {
+        console.error("Failed to move employee up: ", error);
+      }
+    }
+  };
+
+  const handleMoveEmployeeDown = async (name: string) => {
+    const currentOrder = [...allEmployees];
+    const index = currentOrder.indexOf(name);
+    if (index !== -1 && index < currentOrder.length - 1) {
+      // Swap with index + 1
+      currentOrder[index] = currentOrder[index + 1];
+      currentOrder[index + 1] = name;
+      setEmployeeOrder(currentOrder);
+      try {
+        await updateEmployeeOrder(currentOrder);
+      } catch (error) {
+        console.error("Failed to move employee down: ", error);
+      }
+    }
+  };
 
 
   const getSchedulesForDate = (dateStr: string) => {
@@ -3699,7 +3753,7 @@ function App() {
                           <thead>
                             <tr className="border-b border-[#DAC0A3]/50 bg-[#F5EBE6]/60">
                               {/* Sticky Employee Row Header */}
-                              <th rowSpan={3} className="sticky left-0 z-20 bg-[#F5EBE6] px-4 py-4 text-xs font-black text-[#3E2723] border-r border-b border-[#DAC0A3]/50 w-[130px] shadow-[4px_0_8px_-4px_rgba(100,70,50,0.15)]">
+                              <th rowSpan={3} className="sticky left-0 z-20 bg-[#F5EBE6] px-4 py-4 text-xs font-black text-[#3E2723] border-r border-b border-[#DAC0A3]/50 w-[145px] shadow-[4px_0_8px_-4px_rgba(100,70,50,0.15)]">
                                 人員姓名
                               </th>
                               {/* Date headers */}
@@ -3835,22 +3889,50 @@ function App() {
                               allEmployees.map(empName => (
                                 <tr key={empName} className="border-b border-[#DAC0A3]/40 hover:bg-[#FAF7F2]/30 transition-colors group">
                                   {/* Sticky Left Column Employee Initials */}
-                                  <td className="sticky left-0 z-10 bg-[#FAF7F2]/95 group-hover:bg-[#F5EBE6] backdrop-blur-sm px-4 py-3.5 text-sm font-extrabold text-[#3E2723] border-r border-b border-[#DAC0A3]/40 shadow-[4px_0_8px_-4px_rgba(100,70,50,0.1)] w-[130px] h-[96px] align-middle">
-                                    <div className="flex flex-col gap-1 justify-center h-full">
-                                      <span className="truncate">👤 {empName}</span>
-                                      {(() => {
-                                        const matchingEmp = employees.find(
-                                          e => e.name.trim().toLowerCase() === empName.trim().toLowerCase()
-                                        );
-                                        if (matchingEmp && matchingEmp.trainingPosition) {
-                                          return (
-                                            <span className="text-[10px] text-amber-700 bg-amber-500/10 border border-amber-500/20 rounded px-1.5 py-0.5 w-fit font-bold select-none leading-none">
-                                              📖 {matchingEmp.trainingPosition}
-                                            </span>
+                                  <td className="sticky left-0 z-10 bg-[#FAF7F2]/95 group-hover:bg-[#F5EBE6] backdrop-blur-sm px-3.5 py-3.5 text-sm font-extrabold text-[#3E2723] border-r border-b border-[#DAC0A3]/40 shadow-[4px_0_8px_-4px_rgba(100,70,50,0.1)] w-[145px] h-[96px] align-middle">
+                                    <div className="flex items-center gap-2 h-full select-none">
+                                      {activeRole === 'manager' && (
+                                        <div className="flex flex-col gap-1 shrink-0">
+                                          {/* Up Button */}
+                                          <button
+                                            onClick={() => handleMoveEmployeeUp(empName)}
+                                            disabled={allEmployees.indexOf(empName) === 0}
+                                            className="p-1 rounded text-[#8D6E63] hover:bg-[#8D6E63]/10 active:bg-[#8D6E63]/20 disabled:opacity-20 disabled:pointer-events-none transition-colors"
+                                            title="上移"
+                                          >
+                                            <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                                              <path d="M12 4l-8 8h16l-8-8z" />
+                                            </svg>
+                                          </button>
+                                          {/* Down Button */}
+                                          <button
+                                            onClick={() => handleMoveEmployeeDown(empName)}
+                                            disabled={allEmployees.indexOf(empName) === allEmployees.length - 1}
+                                            className="p-1 rounded text-[#8D6E63] hover:bg-[#8D6E63]/10 active:bg-[#8D6E63]/20 disabled:opacity-20 disabled:pointer-events-none transition-colors"
+                                            title="下移"
+                                          >
+                                            <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                                              <path d="M12 20l8-8H4l8 8z" />
+                                            </svg>
+                                          </button>
+                                        </div>
+                                      )}
+                                      <div className="flex flex-col gap-1 justify-center truncate min-w-0">
+                                        <span className="truncate" title={empName}>👤 {empName}</span>
+                                        {(() => {
+                                          const matchingEmp = employees.find(
+                                            e => e.name.trim().toLowerCase() === empName.trim().toLowerCase()
                                           );
-                                        }
-                                        return null;
-                                      })()}
+                                          if (matchingEmp && matchingEmp.trainingPosition) {
+                                            return (
+                                              <span className="text-[10px] text-amber-700 bg-amber-500/10 border border-amber-500/20 rounded px-1.5 py-0.5 w-fit font-bold select-none leading-none truncate">
+                                                📖 {matchingEmp.trainingPosition}
+                                              </span>
+                                            );
+                                          }
+                                          return null;
+                                        })()}
+                                      </div>
                                     </div>
                                   </td>
 
