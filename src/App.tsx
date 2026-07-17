@@ -1667,7 +1667,7 @@ function App() {
         return COLOR_THEMES.lightBlue;
       }
     }
-    return COLOR_THEMES[schedule.color] || COLOR_THEMES.indigo;
+    return COLOR_THEMES.indigo;
   };
 
   // Calendar calculations (filtered by the currently active visible month grid)
@@ -3486,6 +3486,61 @@ function App() {
                         </svg>
                         匯出 Excel
                       </button>
+                    </div>
+                  </div>
+
+                  {/* Color Code Legend */}
+                  <div className="glass-panel p-4 rounded-xl border border-[#DAC0A3]/50 bg-white/40 mb-6 shadow-xs animate-fade-in">
+                    <div className="flex items-center gap-1.5 text-xs text-[#5D4037] font-extrabold mb-3">
+                      <svg className="w-4.5 h-4.5 text-[#795548]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
+                      <span>班表與登記狀態圖例 (Color Legend)</span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                      {/* Available */}
+                      <div className="flex items-center gap-3 bg-white/30 p-2.5 rounded-xl border border-[#DAC0A3]/20">
+                        <div className="w-20 py-1.5 text-[10px] text-center font-bold border border-dashed border-emerald-600/30 bg-[#E8F5E9]/50 text-[#2E7D32] rounded-md font-mono shrink-0">
+                          08:30-17:30
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-xs font-extrabold text-[#3E2723]">可用時間登記</span>
+                          <span className="text-[10px] text-[#6D4C41]">兼職夥伴登記時段，點擊可直接排班</span>
+                        </div>
+                      </div>
+
+                      {/* Confirmed */}
+                      <div className="flex items-center gap-3 bg-white/30 p-2.5 rounded-xl border border-[#DAC0A3]/20">
+                        <div className="w-20 py-1.5 text-[10px] text-center font-bold border border-[#4E342E]/25 bg-[#5D4037]/8 text-[#3E2723] rounded-md font-mono shrink-0">
+                          08:30-17:30
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-xs font-extrabold text-[#3E2723]">已確認排班</span>
+                          <span className="text-[10px] text-[#6D4C41]">已排定之標準班表</span>
+                        </div>
+                      </div>
+
+                      {/* Modified */}
+                      <div className="flex items-center gap-3 bg-white/30 p-2.5 rounded-xl border border-[#DAC0A3]/20">
+                        <div className="w-20 py-1.5 text-[10px] text-center font-bold border border-[#bae6fd] bg-[#E0F2FE] text-[#0369a1] rounded-md font-mono shrink-0">
+                          08:30-17:30
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-xs font-extrabold text-[#3E2723]">已修改班表</span>
+                          <span className="text-[10px] text-[#6D4C41]">排班時間已被修改，與原登記可用時間不符</span>
+                        </div>
+                      </div>
+
+                      {/* Leave */}
+                      <div className="flex items-center gap-3 bg-white/30 p-2.5 rounded-xl border border-[#DAC0A3]/20">
+                        <div className="w-20 py-1.5 text-[10px] text-center font-bold border border-red-200 bg-red-50 text-red-700 rounded-md shrink-0">
+                          ❌ 休假
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-xs font-extrabold text-[#3E2723]">不克排班 (休假)</span>
+                          <span className="text-[10px] text-[#6D4C41]">夥伴該日請假或休假，防錯機制將自動限制</span>
+                        </div>
+                      </div>
                     </div>
                   </div>
 
