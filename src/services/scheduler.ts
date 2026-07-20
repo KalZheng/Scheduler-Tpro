@@ -53,6 +53,7 @@ export interface Employee {
   phone: string;
   status: '正式夥伴' | '兼職夥伴';
   active: boolean;
+  isNewcomer?: boolean; // 新進夥伴
   trainingPosition?: '餐吧' | 'POS機' | '後吧' | '收班' | '開早' | null; // 訓練中崗位 (最多一個)
   trainedPositions: ('餐吧' | 'POS機' | '後吧' | '收班' | '開早')[]; // 已受訓合格崗位 (可多選)
   certificates?: ('FBI' | '黃金吧檯手')[]; // 持有證照 (可多選)
@@ -72,6 +73,7 @@ export const migrateEmployee = (emp: any): Employee => {
     phone: emp.phone || '',
     status: status as '正式夥伴' | '兼職夥伴',
     active: emp.active !== false,
+    isNewcomer: !!emp.isNewcomer,
     trainingPosition: emp.trainingPosition || null,
     trainedPositions: emp.trainedPositions || [],
     certificates: emp.certificates || [],
