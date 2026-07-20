@@ -38,6 +38,7 @@ import {
 } from './services/scheduler';
 import type { WorkSchedule, WorkerAvailability, StaffingTarget, Employee, ShiftPreset } from './services/scheduler';
 import { isValidConfig } from './firebase';
+declare const google: any;
 import workplaces from './config/workplaces.json';
 import * as XLSX from 'xlsx-js-style';
 
@@ -452,6 +453,10 @@ function App() {
   const [empTrainingPos, setEmpTrainingPos] = useState<'餐吧' | 'POS機' | '後吧' | '收班' | '開早' | null>(null);
   const [empTrainedPoss, setEmpTrainedPoss] = useState<('餐吧' | 'POS機' | '後吧' | '收班' | '開早')[]>([]);
   const [empCertificates, setEmpCertificates] = useState<('FBI' | '黃金吧檯手')[]>([]);
+  const [empIsNewcomer, setEmpIsNewcomer] = useState<boolean>(false);
+  const [isUploadingExcel, setIsUploadingExcel] = useState<boolean>(false);
+  const [uploadExcelStatus, setUploadExcelStatus] = useState<'idle' | 'success' | 'error' | 'noconfig'>('idle');
+  const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
 
   // Search/Filter for employee list
   const [empSearch, setEmpSearch] = useState('');
@@ -613,6 +618,7 @@ function App() {
       setEmpPhone(emp.phone || '');
       setEmpStatus(emp.status);
       setEmpActive(emp.active !== false);
+      setEmpIsNewcomer(emp.isNewcomer || false);
       setEmpTrainingPos(emp.trainingPosition || null);
       setEmpTrainedPoss(emp.trainedPositions || []);
       setEmpCertificates(emp.certificates || []);
@@ -623,6 +629,7 @@ function App() {
       setEmpPhone('');
       setEmpStatus('兼職夥伴');
       setEmpActive(true);
+      setEmpIsNewcomer(false);
       setEmpTrainingPos(null);
       setEmpTrainedPoss([]);
       setEmpCertificates([]);
@@ -645,6 +652,7 @@ function App() {
       phone: empPhone.trim(),
       status: empStatus,
       active: empActive,
+      isNewcomer: empIsNewcomer,
       trainingPosition: empTrainingPos,
       trainedPositions: empTrainedPoss,
       certificates: empCertificates
@@ -1766,23 +1774,23 @@ function App() {
   const totalHours = visibleSchedules.reduce((sum, item) => sum + calculateDuration(item.startTime, item.endTime), 0);
   const totalEmployees = new Set(visibleSchedules.map(item => item.employeeName.trim().toLowerCase()).filter(Boolean)).size;
 
-  const handleExportToExcel = () => {
+  const generateExcelWorkbook = (): { wb: XLSX.WorkBook; filename: string } | null => {
     if (!exportStartDate || !exportEndDate) {
       alert('請先選擇匯出的日期範圍。');
-      return;
+      return null;
     }
 
     const start = new Date(exportStartDate);
     const end = new Date(exportEndDate);
     if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) {
       alert('請輸入有效的日期範圍。');
-      return;
+      return null;
     }
 
     const exportDates = getDatesInRange(exportStartDate, exportEndDate);
     if (exportDates.length === 0) {
       alert('選擇的日期範圍內沒有日期。');
-      return;
+      return null;
     }
 
     const exportSchedules = schedules.filter(item => {
@@ -1791,7 +1799,7 @@ function App() {
 
     if (exportSchedules.length === 0) {
       alert('在此日期範圍內尚無排班資料可供匯出。');
-      return;
+      return null;
     }
 
     const getDayOfWeekName = (dateStr: string): string => {
@@ -1826,6 +1834,7 @@ function App() {
     const headers = ['人員姓名', ...dateHeaders, '總工時(hrs)'];
     const rows: string[][] = [];
     const changedCells = new Set<string>();
+    const redFontCells = new Set<string>();
 
     // Add employee rows
     allEmployees.forEach((empName, empIdx) => {
@@ -1836,6 +1845,14 @@ function App() {
         const empSchedules = schedules.filter(
           s => s.employeeName.trim().toLowerCase() === empName.trim().toLowerCase() && s.date === dateStr
         ).sort((a, b) => compareTimeStrings(a.startTime, b.startTime));
+
+        // Get availability submissions for this employee on this date
+        const empAvailabilities = availabilities.filter(
+          a => a.employeeName.trim().toLowerCase() === empName.trim().toLowerCase() && a.date === dateStr
+        );
+
+        // Check if worker registered standard work hours (not 00:00 to 00:00 rest day)
+        const registeredToWork = empAvailabilities.some(a => !(a.startTime === '00:00' && a.endTime === '00:00'));
 
         const hasChangedShift = empSchedules.some(
           s => s.originalStartTime && s.originalEndTime && (s.startTime !== s.originalStartTime || s.endTime !== s.originalEndTime)
@@ -1852,7 +1869,11 @@ function App() {
           totalHours += calculateDuration(sched.startTime, sched.endTime);
         });
 
-        if (empSchedules.length === 0) return '';
+        if (empSchedules.length === 0) {
+          const cellRef = XLSX.utils.encode_cell({ r: empIdx + 1, c: dateIdx + 1 });
+          redFontCells.add(cellRef);
+          return registeredToWork ? 'X' : 'RO';
+        }
 
         return empSchedules.map(sched => {
           const note = getCleanNote(sched.notes);
@@ -1877,12 +1898,63 @@ function App() {
     for (const cellRef in ws) {
       if (cellRef[0] === '!') continue;
       if (ws[cellRef]) {
+        const decoded = XLSX.utils.decode_cell(cellRef);
+        const { r, c } = decoded;
         const isChanged = changedCells.has(cellRef);
+        const isRedFont = redFontCells.has(cellRef);
+
+        // Check if employee for this row is a newcomer
+        let isNewcomer = false;
+        if (r > 0) {
+          const empName = allEmployees[r - 1];
+          if (empName) {
+            const empObj = employees.find(e => e.name.trim().toLowerCase() === empName.trim().toLowerCase());
+            isNewcomer = empObj ? !!empObj.isNewcomer : false;
+          }
+        }
+
+        // Check if this column represents a weekend date (Saturday or Sunday)
+        let isWeekend = false;
+        if (c > 0 && c < headers.length - 1) {
+          const dateObj = exportDates[c - 1];
+          const day = dateObj.getDay();
+          isWeekend = day === 0 || day === 6; // 0 is Sunday, 6 is Saturday
+        }
+
+        // Check if this column's header contains the word/comment "包"
+        let isPackageHeader = false;
+        if (c > 0 && c < headers.length - 1) {
+          const headerText = headers[c];
+          if (headerText && headerText.includes('包')) {
+            isPackageHeader = true;
+          }
+        }
+
         ws[cellRef].s = {
           alignment: { wrapText: true, vertical: 'center', horizontal: 'center' },
-          ...(isChanged ? {
+          font: {
+            // Apply red color and bold text to the weekend date headers
+            ...(isWeekend && r === 0 ? { color: { rgb: "EF4444" }, bold: true } : {}),
+            // Apply red color and bold text to RO / X cells
+            ...(isRedFont ? { color: { rgb: "EF4444" }, bold: true } : {})
+          },
+          border: {
+            top: { style: 'thin', color: { rgb: '000000' } },
+            bottom: { style: 'thin', color: { rgb: '000000' } },
+            left: { style: 'thin', color: { rgb: '000000' } },
+            right: { style: 'thin', color: { rgb: '000000' } }
+          },
+          ...((isPackageHeader && r === 0) ? {
             fill: {
-              fgColor: { rgb: "93C5FD" }
+              fgColor: { rgb: "86EFAC" } // Darker green background for headers containing "包"
+            }
+          } : (r > 0 && isNewcomer) ? {
+            fill: {
+              fgColor: { rgb: "FFC0CB" } // Pink background for newcomer row
+            }
+          } : isChanged ? {
+            fill: {
+              fgColor: { rgb: "93C5FD" } // Light blue background for changed shifts
             }
           } : {})
         };
@@ -1898,11 +1970,159 @@ function App() {
     // Set column widths in the sheet
     ws['!cols'] = colWidths;
 
+    // Freeze the first column (Column A - Personnel Name) and the header row (Row 1)
+    ws['!views'] = [
+      {
+        state: 'frozen',
+        xSplit: 1,
+        ySplit: 1,
+        topLeftCell: 'B2',
+        activePane: 'bottomRight'
+      }
+    ];
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, '排班網格表');
 
-    // Trigger browser download
-    XLSX.writeFile(wb, `${exportStartDate}_至_${exportEndDate}_精品咖啡館排班網格表.xlsx`);
+    return {
+      wb,
+      filename: `${exportStartDate}_至_${exportEndDate}_精品咖啡館排班網格表.xlsx`
+    };
+  };
+
+  const handleExportToExcel = () => {
+    const result = generateExcelWorkbook();
+    if (result) {
+      XLSX.writeFile(result.wb, result.filename);
+    }
+  };
+
+  const uploadToGoogleDrive = async (token: string, filename: string, blob: Blob) => {
+    try {
+      setIsUploadingExcel(true);
+      setUploadExcelStatus('idle');
+
+      const reader = new FileReader();
+      reader.readAsArrayBuffer(blob);
+      reader.onload = async () => {
+        try {
+          const arrayBuffer = reader.result as ArrayBuffer;
+
+          const metadata = {
+            name: filename,
+            mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+          };
+
+          const boundary = 'foo_bar_boundary';
+          const delimiter = `\r\n--${boundary}\r\n`;
+          const closeDelimiter = `\r\n--${boundary}--`;
+
+          const metadataPart = `Content-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n`;
+          const mediaHeader = `Content-Type: ${metadata.mimeType}\r\nContent-Transfer-Encoding: base64\r\n\r\n`;
+
+          const base64Data = btoa(
+            new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
+          );
+
+          const multipartBody = 
+            delimiter + 
+            metadataPart + 
+            delimiter + 
+            mediaHeader + 
+            base64Data + 
+            closeDelimiter;
+
+          const uploadUrl = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
+          const res = await fetch(uploadUrl, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': `multipart/related; boundary=${boundary}`,
+            },
+            body: multipartBody
+          });
+
+          if (!res.ok) {
+            const errorText = await res.text();
+            throw new Error(`Google Drive API responded with status ${res.status}: ${errorText}`);
+          }
+
+          setUploadExcelStatus('success');
+          alert(`已成功將排班表備份至您的 Google 雲端硬碟！☁️\n檔案名稱: ${filename}`);
+
+          setTimeout(() => {
+            setUploadExcelStatus('idle');
+          }, 3000);
+
+        } catch (innerErr: any) {
+          console.error('Constructing Google Drive upload body failed:', innerErr);
+          setUploadExcelStatus('error');
+          alert(`備份至 Google Drive 失敗，請稍後再試。\n錯誤原因: ${innerErr?.message || innerErr}`);
+        }
+      };
+      
+      reader.onerror = () => {
+        throw new Error('FileReader failed to read the Excel Blob.');
+      };
+
+    } catch (error: any) {
+      console.error('Google Drive upload failed:', error);
+      setUploadExcelStatus('error');
+      alert(`備份至 Google Drive 失敗，請確認您的網路連線與授權狀態。\n錯誤原因: ${error?.message || error}`);
+    } finally {
+      setIsUploadingExcel(false);
+    }
+  };
+
+  const handleUploadToStorage = () => {
+    const result = generateExcelWorkbook();
+    if (!result) return;
+
+    const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+
+    if (!clientId) {
+      setUploadExcelStatus('noconfig');
+      alert('Google OAuth 2.0 Client ID 尚未設定，無法進行備份。\n請至 .env.local 檔案中填寫 VITE_GOOGLE_CLIENT_ID。');
+      return;
+    }
+
+    const excelBuffer = XLSX.write(result.wb, { bookType: 'xlsx', type: 'array' });
+    const excelBlob = new Blob([excelBuffer], { 
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
+    });
+
+    if (googleAccessToken) {
+      uploadToGoogleDrive(googleAccessToken, result.filename, excelBlob);
+      return;
+    }
+
+    try {
+      if (typeof google === 'undefined' || !google.accounts || !google.accounts.oauth2) {
+        alert('無法載入 Google 驗證模組，請確認您的網路連線或 index.html 的 script 載入是否正常。');
+        return;
+      }
+
+      const tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: clientId,
+        scope: 'https://www.googleapis.com/auth/drive.file',
+        callback: (tokenResponse: any) => {
+          if (tokenResponse.error) {
+            console.error('Google Auth Token Client returned error:', tokenResponse);
+            alert('Google 授權驗證失敗，無法備份。');
+            return;
+          }
+          if (tokenResponse.access_token) {
+            setGoogleAccessToken(tokenResponse.access_token);
+            uploadToGoogleDrive(tokenResponse.access_token, result.filename, excelBlob);
+          }
+        },
+      });
+
+      tokenClient.requestAccessToken({ prompt: 'consent' });
+    } catch (err) {
+      console.error('Failed to initialize Google GSI Client:', err);
+      alert('Google 登入驗證初始化失敗，請稍後再試。');
+    }
   };
 
   const todayStr = formatDateString(new Date());
@@ -3042,6 +3262,12 @@ function App() {
                                         <span className={`w-1.5 h-1.5 rounded-full ${emp.status === '正式夥伴' ? 'bg-emerald-500' : 'bg-indigo-500'}`}></span>
                                         {emp.status}
                                       </span>
+                                      {emp.isNewcomer === true && (
+                                        <span className="inline-flex items-center gap-1 text-[10px] px-2.5 py-0.5 rounded-full font-bold border bg-pink-50 text-pink-700 border-pink-200">
+                                          <span className="w-1.5 h-1.5 rounded-full bg-pink-500"></span>
+                                          新進人員
+                                        </span>
+                                      )}
                                       {emp.active === false && (
                                         <span className="inline-flex items-center gap-1 text-[10px] px-2.5 py-0.5 rounded-full font-bold border bg-red-50 text-red-700 border-red-200">
                                           <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
@@ -3540,6 +3766,42 @@ function App() {
                         </svg>
                         匯出 Excel
                       </button>
+                      <button
+                        onClick={handleUploadToStorage}
+                        disabled={isUploadingExcel}
+                        className={`font-bold text-xs px-4.5 py-2.5 rounded-xl transition-all shadow-md flex items-center gap-1.5 cursor-pointer border ${
+                          isUploadingExcel
+                            ? 'bg-amber-600/50 border-amber-600/20 text-white cursor-not-allowed'
+                            : uploadExcelStatus === 'success'
+                              ? 'bg-indigo-650 hover:bg-indigo-700 border-indigo-650/30 text-white shadow-indigo-600/15'
+                              : 'bg-indigo-600 hover:bg-indigo-700 border-indigo-600/30 text-white hover:shadow-indigo-600/20 hover:-translate-y-0.5 active:translate-y-0'
+                        }`}
+                        title="備份目前日期範圍的排班表至您的 Google 雲端硬碟 (Google Drive)"
+                      >
+                        {isUploadingExcel ? (
+                          <>
+                            <svg className="animate-spin h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                            </svg>
+                            備份中...
+                          </>
+                        ) : uploadExcelStatus === 'success' ? (
+                          <>
+                            <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                            </svg>
+                            已備份 ☁️
+                          </>
+                        ) : (
+                          <>
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
+                            </svg>
+                            備份至雲端硬碟
+                          </>
+                        )}
+                      </button>
                     </div>
                   </div>
 
@@ -3886,55 +4148,64 @@ function App() {
                                 </td>
                               </tr>
                             ) : (
-                              allEmployees.map(empName => (
-                                <tr key={empName} className="border-b border-[#DAC0A3]/40 hover:bg-[#FAF7F2]/30 transition-colors group">
-                                  {/* Sticky Left Column Employee Initials */}
-                                  <td className="sticky left-0 z-10 bg-[#FAF7F2]/95 group-hover:bg-[#F5EBE6] backdrop-blur-sm px-3.5 py-3.5 text-sm font-extrabold text-[#3E2723] border-r border-b border-[#DAC0A3]/40 shadow-[4px_0_8px_-4px_rgba(100,70,50,0.1)] w-[145px] h-[96px] align-middle">
-                                    <div className="flex items-center gap-2 h-full select-none">
-                                      {activeRole === 'manager' && (
-                                        <div className="flex flex-col gap-1 shrink-0">
-                                          {/* Up Button */}
-                                          <button
-                                            onClick={() => handleMoveEmployeeUp(empName)}
-                                            disabled={allEmployees.indexOf(empName) === 0}
-                                            className="p-1 rounded text-[#8D6E63] hover:bg-[#8D6E63]/10 active:bg-[#8D6E63]/20 disabled:opacity-20 disabled:pointer-events-none transition-colors"
-                                            title="上移"
-                                          >
-                                            <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
-                                              <path d="M12 4l-8 8h16l-8-8z" />
-                                            </svg>
-                                          </button>
-                                          {/* Down Button */}
-                                          <button
-                                            onClick={() => handleMoveEmployeeDown(empName)}
-                                            disabled={allEmployees.indexOf(empName) === allEmployees.length - 1}
-                                            className="p-1 rounded text-[#8D6E63] hover:bg-[#8D6E63]/10 active:bg-[#8D6E63]/20 disabled:opacity-20 disabled:pointer-events-none transition-colors"
-                                            title="下移"
-                                          >
-                                            <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
-                                              <path d="M12 20l8-8H4l8 8z" />
-                                            </svg>
-                                          </button>
-                                        </div>
-                                      )}
-                                      <div className="flex flex-col gap-1 justify-center truncate min-w-0">
-                                        <span className="truncate" title={empName}>👤 {empName}</span>
-                                        {(() => {
-                                          const matchingEmp = employees.find(
-                                            e => e.name.trim().toLowerCase() === empName.trim().toLowerCase()
-                                          );
-                                          if (matchingEmp && matchingEmp.trainingPosition) {
-                                            return (
+                              allEmployees.map(empName => {
+                                const matchingEmp = employees.find(
+                                  e => e.name.trim().toLowerCase() === empName.trim().toLowerCase()
+                                );
+                                const isNewcomer = matchingEmp ? !!matchingEmp.isNewcomer : false;
+
+                                return (
+                                  <tr key={empName} className="border-b border-dotted border-[#DAC0A3]/70 hover:bg-[#FAF7F2]/30 transition-colors group">
+                                    {/* Sticky Left Column Employee Initials */}
+                                    <td className={`sticky left-0 z-10 backdrop-blur-sm px-3.5 py-1 text-sm font-extrabold border-r-2 border-solid border-b border-dotted border-[#DAC0A3]/90 shadow-[4px_0_8px_-4px_rgba(100,70,50,0.1)] w-[145px] h-[48px] align-middle transition-colors ${
+                                      isNewcomer
+                                        ? 'bg-pink-100/85 group-hover:bg-pink-200/90 text-pink-700'
+                                        : 'bg-[#FAF7F2]/95 group-hover:bg-[#F5EBE6] text-[#3E2723]'
+                                    }`}>
+                                      <div className="flex items-center gap-2 h-full select-none">
+                                        {activeRole === 'manager' && (
+                                          <div className="flex flex-col gap-1 shrink-0">
+                                            {/* Up Button */}
+                                            <button
+                                              onClick={() => handleMoveEmployeeUp(empName)}
+                                              disabled={allEmployees.indexOf(empName) === 0}
+                                              className="p-1 rounded text-[#8D6E63] hover:bg-[#8D6E63]/10 active:bg-[#8D6E63]/20 disabled:opacity-20 disabled:pointer-events-none transition-colors"
+                                              title="上移"
+                                            >
+                                              <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                                                <path d="M12 4l-8 8h16l-8-8z" />
+                                              </svg>
+                                            </button>
+                                            {/* Down Button */}
+                                            <button
+                                              onClick={() => handleMoveEmployeeDown(empName)}
+                                              disabled={allEmployees.indexOf(empName) === allEmployees.length - 1}
+                                              className="p-1 rounded text-[#8D6E63] hover:bg-[#8D6E63]/10 active:bg-[#8D6E63]/20 disabled:opacity-20 disabled:pointer-events-none transition-colors"
+                                              title="下移"
+                                            >
+                                              <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                                                <path d="M12 20l8-8H4l8 8z" />
+                                              </svg>
+                                            </button>
+                                          </div>
+                                        )}
+                                        <div className="flex flex-col gap-1 justify-center truncate min-w-0">
+                                          <span className="truncate" title={empName}>👤 {empName}</span>
+                                          <div className="flex flex-wrap gap-1">
+                                            {matchingEmp && matchingEmp.isNewcomer && (
+                                              <span className="text-[9px] text-pink-700 bg-pink-50 border border-pink-200 rounded-md px-1.5 py-0.5 w-fit font-bold select-none leading-none truncate animate-pulse">
+                                                新進
+                                              </span>
+                                            )}
+                                            {matchingEmp && matchingEmp.trainingPosition && (
                                               <span className="text-[10px] text-amber-700 bg-amber-500/10 border border-amber-500/20 rounded px-1.5 py-0.5 w-fit font-bold select-none leading-none truncate">
                                                 📖 {matchingEmp.trainingPosition}
                                               </span>
-                                            );
-                                          }
-                                          return null;
-                                        })()}
+                                            )}
+                                          </div>
+                                        </div>
                                       </div>
-                                    </div>
-                                  </td>
+                                    </td>
 
                                   {/* Column cell details */}
                                   {gridDates.map(dateObj => {
@@ -3955,7 +4226,7 @@ function App() {
                                       <td
                                         key={dateStr}
                                         onClick={() => setSelectedDateStr(dateStr)}
-                                        className={`p-1.5 border-r border-[#DAC0A3]/40 text-center w-[100px] h-[96px] relative align-middle transition-colors ${isSelected ? 'bg-[#8D6E63]/5' : ''
+                                        className={`p-0.5 pt-1 pb-1 border-r border-solid border-b border-dotted border-[#DAC0A3]/40 text-center w-[100px] h-[48px] relative align-middle transition-colors ${isSelected ? 'bg-[#8D6E63]/5' : ''
                                           }`}
                                       >
                                         {empSchedules.length > 0 || empAvails.length > 0 ? (
@@ -3969,11 +4240,10 @@ function App() {
                                                 <div
                                                   key={sched.id}
                                                   onClick={(e) => handleOpenEditModal(sched, e)}
-                                                  className={`text-xs py-1.5 px-2 rounded-md border font-semibold truncate cursor-pointer transition-all hover:scale-[1.02] ${theme.bg} ${theme.border} ${theme.text}`}
-                                                  title={`👤 ${sched.employeeName} (${sched.startTime}-${sched.endTime}) @ 📍 ${sched.workplace}${managerNote ? ` | 📝 主管備註: ${managerNote}` : ''}`}
+                                                  className={`text-xs py-0.5 px-1.5 rounded-md border font-semibold truncate cursor-pointer transition-all hover:scale-[1.02] ${theme.bg} ${theme.border} ${theme.text}`}
+                                                  title={`👤 ${sched.employeeName} (${sched.startTime}-${sched.endTime})${sched.workplace ? ` @ 📍 ${sched.workplace}` : ''}${managerNote ? ` | 📝 主管備註: ${managerNote}` : ''}`}
                                                 >
                                                   {sched.startTime}-{sched.endTime}
-                                                  <div className="text-[10px] opacity-75 truncate">{sched.workplace}</div>
                                                   {managerNote && (
                                                     <div className="text-[10px] opacity-90 truncate mt-0.5 leading-normal font-medium" title={managerNote}>
                                                       ({managerNote})
@@ -3991,7 +4261,7 @@ function App() {
                                                 return (
                                                   <div
                                                     key={avail.id}
-                                                    className="text-xs py-2 px-1 border border-red-200 bg-red-50 text-red-700 font-bold rounded-md relative flex flex-col justify-center items-center min-h-[72px] h-auto"
+                                                    className="text-xs py-0.5 px-1 border border-red-200 bg-red-50 text-red-700 font-bold rounded-md relative flex flex-col justify-center items-center min-h-[32px] h-auto"
                                                     title={`不克排班 (休假)${cleanNote ? ` | 📝 ${cleanNote}` : ''}`}
                                                   >
                                                     <div className="text-[10px] font-bold leading-none">❌ 休假/請假</div>
@@ -4008,11 +4278,10 @@ function App() {
                                               return (
                                                 <div
                                                   key={avail.id}
-                                                  className="text-xs py-2 px-1 border border-dashed border-emerald-600/30 bg-[#E8F5E9]/50 text-[#2E7D32] font-black rounded-md relative group/btn flex flex-col justify-center items-center min-h-[72px] h-auto"
-                                                  title={`可用時段: ${avail.startTime}-${avail.endTime} @ 📍 ${avail.workplace}${cleanNote ? ` | 📝 ${cleanNote}` : ''}`}
+                                                  className="text-xs py-0.5 px-0.5 border border-dashed border-emerald-600/30 bg-[#E8F5E9]/50 text-[#2E7D32] font-black rounded-md relative group/btn flex flex-col justify-center items-center min-h-[32px] h-auto"
+                                                  title={`可用時段: ${avail.startTime}-${avail.endTime}${avail.workplace ? ` @ 📍 ${avail.workplace}` : ''}${cleanNote ? ` | 📝 ${cleanNote}` : ''}`}
                                                 >
                                                   <div className="text-[10px] font-mono leading-none font-bold">{avail.startTime}-{avail.endTime}</div>
-                                                  <div className="text-[9px] opacity-75 mt-1 leading-none truncate w-full">{avail.workplace}</div>
                                                   {cleanNote && (
                                                     <div className="text-[9.5px] opacity-85 mt-1 leading-none truncate w-full">
                                                       ({cleanNote})
@@ -4052,7 +4321,7 @@ function App() {
                                               setFormOriginalEndTime(null);
                                               setIsModalOpen(true);
                                             }}
-                                            className="w-full h-full min-h-[72px] rounded-lg border border-transparent hover:border-[#8D6E63]/40 hover:bg-[#FAF7F2] transition-all flex items-center justify-center text-[#E5D3C3] hover:text-[#795548] cursor-pointer"
+                                            className="w-full h-full min-h-[32px] rounded-lg border border-transparent hover:border-[#8D6E63]/40 hover:bg-[#FAF7F2] transition-all flex items-center justify-center text-[#E5D3C3] hover:text-[#795548] cursor-pointer"
                                             title="在此日排班"
                                           >
                                             <svg className="w-4 h-4 opacity-0 hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -4064,9 +4333,10 @@ function App() {
                                     );
                                   })}
                                 </tr>
-                              ))
-                            )}
-                          </tbody>
+                              )
+                            })
+                          )}
+                        </tbody>
                         </table>
                       </div>
                     </main>
@@ -5404,6 +5674,33 @@ function App() {
                       }`}
                   >
                     離職 (Resigned)
+                  </button>
+                </div>
+              </div>
+
+              {/* Newcomer Status Selector */}
+              <div>
+                <label className="block text-xs font-bold text-[#6D4C41] uppercase tracking-wider mb-2">是否為新進人員</label>
+                <div className="grid grid-cols-2 gap-2 bg-[#FAF7F2] p-1.5 rounded-2xl border border-[#DAC0A3]/45">
+                  <button
+                    type="button"
+                    onClick={() => setEmpIsNewcomer(true)}
+                    className={`py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${empIsNewcomer === true
+                      ? 'bg-white text-amber-700 shadow-sm border border-amber-200'
+                      : 'text-[#8D6E63] hover:text-[#3E2723]'
+                      }`}
+                  >
+                    新進人員 (Newcomer)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEmpIsNewcomer(false)}
+                    className={`py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${empIsNewcomer === false
+                      ? 'bg-white text-[#8D6E63] shadow-sm border border-[#DAC0A3]/30'
+                      : 'text-[#8D6E63] hover:text-[#3E2723]'
+                      }`}
+                  >
+                    一般員工 (Regular)
                   </button>
                 </div>
               </div>
