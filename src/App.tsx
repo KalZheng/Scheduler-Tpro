@@ -1415,8 +1415,8 @@ function App() {
             managerNotes: notes.trim(),
             workerNotes: '',
             color: derivedColor,
-            originalStartTime: formOriginalStartTime || undefined,
-            originalEndTime: formOriginalEndTime || undefined
+            originalStartTime: formOriginalStartTime || null,
+            originalEndTime: formOriginalEndTime || null
           };
           await addSchedule(payload);
         }
@@ -1432,8 +1432,8 @@ function App() {
           managerNotes: notes.trim(),
           workerNotes: workerNotes,
           color: derivedColor,
-          originalStartTime: formOriginalStartTime || undefined,
-          originalEndTime: formOriginalEndTime || undefined
+          originalStartTime: formOriginalStartTime || null,
+          originalEndTime: formOriginalEndTime || null
         };
         await updateSchedule(editingId, payload);
       }

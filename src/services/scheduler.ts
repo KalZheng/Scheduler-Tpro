@@ -24,8 +24,8 @@ export interface WorkSchedule {
   workerNotes?: string;
   managerNotes?: string;
   createdAt: number;
-  originalStartTime?: string;
-  originalEndTime?: string;
+  originalStartTime?: string | null;
+  originalEndTime?: string | null;
 }
 
 export interface WorkerAvailability {
