@@ -99,11 +99,24 @@ let localShiftEveningEndListeners: ((time: string) => void)[] = [];
 let localShiftPresetsListeners: ((presets: ShiftPreset[]) => void)[] = [];
 let localEmployeeOrderListeners: ((order: string[]) => void)[] = [];
 let localMonthlyRevenuesListeners: ((revenues: Record<number, number>) => void)[] = [];
+let localRevenueStaffRulesListeners: ((rules: RevenueStaffRules) => void)[] = [];
 
 export interface ShiftPreset {
   name: string;
   startTime: string;
   endTime: string;
+}
+
+export interface RevenueStaffRules {
+  tier1Limit: number;
+  tier2Limit: number;
+  tier3Limit: number;
+  tier1Staff: number;
+  tier2Staff: number;
+  tier3Staff: number;
+  tier4Staff: number;
+  incrementAmount: number;
+  maxStaff: number;
 }
 
 interface DbSchema {
@@ -122,6 +135,7 @@ interface DbSchema {
   shiftPresets?: ShiftPreset[];
   employeeOrder?: string[];
   monthlyRevenues?: Record<string, number>;
+  revenueStaffRules?: RevenueStaffRules;
 }
 
 const inMemoryDb: DbSchema = {
@@ -142,7 +156,18 @@ const inMemoryDb: DbSchema = {
     { name: '晚班', startTime: '08:30', endTime: '17:30' }
   ],
   employeeOrder: [],
-  monthlyRevenues: {}
+  monthlyRevenues: {},
+  revenueStaffRules: {
+    tier1Limit: 1500,
+    tier2Limit: 2500,
+    tier3Limit: 3500,
+    tier1Staff: 2,
+    tier2Staff: 3,
+    tier3Staff: 4,
+    tier4Staff: 5,
+    incrementAmount: 1000,
+    maxStaff: 8
+  }
 };
 
 const loadedMonths = new Set<string>();
@@ -308,6 +333,9 @@ export const syncActiveMonth = async (monthStr: string) => {
       if (data.monthlyRevenues !== undefined) {
         inMemoryDb.monthlyRevenues = data.monthlyRevenues;
       }
+      if (data.revenueStaffRules !== undefined) {
+        inMemoryDb.revenueStaffRules = data.revenueStaffRules;
+      }
 
       // Update LocalStorage backup
       localStorage.setItem('weekly_work_schedules', JSON.stringify(inMemoryDb.schedules));
@@ -325,6 +353,7 @@ export const syncActiveMonth = async (monthStr: string) => {
       localStorage.setItem('scheduler_shift_presets', JSON.stringify(inMemoryDb.shiftPresets || []));
       localStorage.setItem('scheduler_employee_order', JSON.stringify(inMemoryDb.employeeOrder || []));
       localStorage.setItem('monthly_revenue_data', JSON.stringify(inMemoryDb.monthlyRevenues || {}));
+      localStorage.setItem('revenue_staff_rules', JSON.stringify(inMemoryDb.revenueStaffRules || {}));
 
       // Trigger all active UI listeners
       localListeners.forEach(listener => listener([...inMemoryDb.schedules]));
@@ -350,6 +379,17 @@ export const syncActiveMonth = async (monthStr: string) => {
         }
         listener(revenues);
       });
+      localRevenueStaffRulesListeners.forEach(listener => listener(inMemoryDb.revenueStaffRules || {
+        tier1Limit: 1500,
+        tier2Limit: 2500,
+        tier3Limit: 3500,
+        tier1Staff: 2,
+        tier2Staff: 3,
+        tier3Staff: 4,
+        tier4Staff: 5,
+        incrementAmount: 1000,
+        maxStaff: 8
+      }));
     }
   } catch (e) {
     console.error(`Failed to sync month data for ${monthStr}:`, e);
@@ -401,6 +441,9 @@ const loadFileDb = async () => {
       if (data.monthlyRevenues !== undefined) {
         inMemoryDb.monthlyRevenues = data.monthlyRevenues;
       }
+      if (data.revenueStaffRules !== undefined) {
+        inMemoryDb.revenueStaffRules = data.revenueStaffRules;
+      }
       
       // Update local storage backup
       localStorage.setItem('weekly_work_schedules', JSON.stringify(inMemoryDb.schedules));
@@ -418,6 +461,7 @@ const loadFileDb = async () => {
       localStorage.setItem('scheduler_shift_presets', JSON.stringify(inMemoryDb.shiftPresets || []));
       localStorage.setItem('scheduler_employee_order', JSON.stringify(inMemoryDb.employeeOrder || []));
       localStorage.setItem('monthly_revenue_data', JSON.stringify(inMemoryDb.monthlyRevenues || {}));
+      localStorage.setItem('revenue_staff_rules', JSON.stringify(inMemoryDb.revenueStaffRules || {}));
     } else {
       throw new Error("Local DB API response not OK");
     }
@@ -446,6 +490,11 @@ const loadFileDb = async () => {
     } catch {
       inMemoryDb.monthlyRevenues = {};
     }
+    try {
+      inMemoryDb.revenueStaffRules = JSON.parse(localStorage.getItem('revenue_staff_rules') || '{}');
+    } catch {
+      inMemoryDb.revenueStaffRules = undefined;
+    }
   } finally {
     // Notify all active listeners of loaded values
     localListeners.forEach(listener => listener([...inMemoryDb.schedules]));
@@ -471,6 +520,17 @@ const loadFileDb = async () => {
       }
       listener(revenues);
     });
+    localRevenueStaffRulesListeners.forEach(listener => listener(inMemoryDb.revenueStaffRules || {
+      tier1Limit: 1500,
+      tier2Limit: 2500,
+      tier3Limit: 3500,
+      tier1Staff: 2,
+      tier2Staff: 3,
+      tier3Staff: 4,
+      tier4Staff: 5,
+      incrementAmount: 1000,
+      maxStaff: 8
+    }));
   }
 };
 
@@ -498,6 +558,7 @@ const saveDbForDate = async (dateStr?: string) => {
   localStorage.setItem('scheduler_shift_presets', JSON.stringify(inMemoryDb.shiftPresets || []));
   localStorage.setItem('scheduler_employee_order', JSON.stringify(inMemoryDb.employeeOrder || []));
   localStorage.setItem('monthly_revenue_data', JSON.stringify(inMemoryDb.monthlyRevenues || {}));
+  localStorage.setItem('revenue_staff_rules', JSON.stringify(inMemoryDb.revenueStaffRules || {}));
 
   // Trigger active listeners immediately for immediate UI response
   localListeners.forEach(listener => listener([...inMemoryDb.schedules]));
@@ -523,6 +584,17 @@ const saveDbForDate = async (dateStr?: string) => {
     }
     listener(revenues);
   });
+  localRevenueStaffRulesListeners.forEach(listener => listener(inMemoryDb.revenueStaffRules || {
+    tier1Limit: 1500,
+    tier2Limit: 2500,
+    tier3Limit: 3500,
+    tier1Staff: 2,
+    tier2Staff: 3,
+    tier3Staff: 4,
+    tier4Staff: 5,
+    incrementAmount: 1000,
+    maxStaff: 8
+  }));
 
   // POST current in-memory state to local JSON file
   try {
@@ -545,7 +617,18 @@ const saveDbForDate = async (dateStr?: string) => {
       shiftEveningEnd: inMemoryDb.shiftEveningEnd || '17:30',
       shiftPresets: inMemoryDb.shiftPresets || [],
       employeeOrder: inMemoryDb.employeeOrder || [],
-      monthlyRevenues: inMemoryDb.monthlyRevenues || {}
+      monthlyRevenues: inMemoryDb.monthlyRevenues || {},
+      revenueStaffRules: inMemoryDb.revenueStaffRules || {
+        tier1Limit: 1500,
+        tier2Limit: 2500,
+        tier3Limit: 3500,
+        tier1Staff: 2,
+        tier2Staff: 3,
+        tier3Staff: 4,
+        tier4Staff: 5,
+        incrementAmount: 1000,
+        maxStaff: 8
+      }
     };
 
     await fetch(`/api/db?month=${monthStr}`, {
@@ -1194,6 +1277,48 @@ export const updateMonthlyRevenues = async (revenues: Record<number, number>) =>
       jsonRevenues[k] = v;
     });
     inMemoryDb.monthlyRevenues = jsonRevenues;
+    await saveDbForDate();
+  }
+};
+
+export const subscribeToRevenueStaffRules = (callback: (rules: RevenueStaffRules) => void) => {
+  const defaultRules: RevenueStaffRules = {
+    tier1Limit: 1500,
+    tier2Limit: 2500,
+    tier3Limit: 3500,
+    tier1Staff: 2,
+    tier2Staff: 3,
+    tier3Staff: 4,
+    tier4Staff: 5,
+    incrementAmount: 1000,
+    maxStaff: 8
+  };
+
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    return onSnapshot(docRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        callback(data.revenueStaffRules !== undefined ? data.revenueStaffRules : defaultRules);
+      } else {
+        callback(defaultRules);
+      }
+    });
+  } else {
+    localRevenueStaffRulesListeners.push(callback);
+    callback(inMemoryDb.revenueStaffRules || defaultRules);
+    return () => {
+      localRevenueStaffRulesListeners = localRevenueStaffRulesListeners.filter(l => l !== callback);
+    };
+  }
+};
+
+export const updateRevenueStaffRules = async (rules: RevenueStaffRules) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    return await setDoc(docRef, { revenueStaffRules: rules }, { merge: true });
+  } else {
+    inMemoryDb.revenueStaffRules = rules;
     await saveDbForDate();
   }
 };

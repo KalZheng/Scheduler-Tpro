@@ -37,9 +37,11 @@ import {
   updateEmployeeOrder,
   updateAvailability,
   subscribeToMonthlyRevenues,
-  updateMonthlyRevenues
+  updateMonthlyRevenues,
+  subscribeToRevenueStaffRules,
+  updateRevenueStaffRules
 } from './services/scheduler';
-import type { WorkSchedule, WorkerAvailability, StaffingTarget, Employee, ShiftPreset } from './services/scheduler';
+import type { WorkSchedule, WorkerAvailability, StaffingTarget, Employee, ShiftPreset, RevenueStaffRules } from './services/scheduler';
 import { isValidConfig } from './firebase';
 declare const google: any;
 import workplaces from './config/workplaces.json';
@@ -434,6 +436,45 @@ function App() {
   // Revenue-based staffing calculation states (persisted to database)
   const [monthlyRevenues, setMonthlyRevenues] = useState<Record<number, number>>({});
 
+  // Revenue staffing rules configuration
+  const [revenueStaffRules, setRevenueStaffRules] = useState<RevenueStaffRules>({
+    tier1Limit: 1500,
+    tier2Limit: 2500,
+    tier3Limit: 3500,
+    tier1Staff: 2,
+    tier2Staff: 3,
+    tier3Staff: 4,
+    tier4Staff: 5,
+    incrementAmount: 1000,
+    maxStaff: 8
+  });
+  const [tempRules, setTempRules] = useState<RevenueStaffRules>({
+    tier1Limit: 1500,
+    tier2Limit: 2500,
+    tier3Limit: 3500,
+    tier1Staff: 2,
+    tier2Staff: 3,
+    tier3Staff: 4,
+    tier4Staff: 5,
+    incrementAmount: 1000,
+    maxStaff: 8
+  });
+
+  const getRecommendedStaff = (dailyAvg: number, rules: RevenueStaffRules) => {
+    const { tier1Limit, tier2Limit, tier3Limit, tier1Staff, tier2Staff, tier3Staff, tier4Staff, incrementAmount, maxStaff } = rules;
+    if (dailyAvg <= tier1Limit) {
+      return tier1Staff;
+    } else if (dailyAvg <= tier2Limit) {
+      return tier2Staff;
+    } else if (dailyAvg <= tier3Limit) {
+      return tier3Staff;
+    } else {
+      const extraAmount = dailyAvg - tier3Limit;
+      const extraStaff = Math.floor(extraAmount / incrementAmount);
+      return Math.min(maxStaff, tier4Staff + extraStaff);
+    }
+  };
+
   // Employee list states
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
@@ -722,6 +763,10 @@ function App() {
     const unsubMonthlyRevenues = subscribeToMonthlyRevenues((data) => {
       setMonthlyRevenues(data);
     });
+    const unsubRevenueStaffRules = subscribeToRevenueStaffRules((rules) => {
+      setRevenueStaffRules(rules);
+      setTempRules(rules);
+    });
 
     return () => {
       unsubSchedules();
@@ -739,6 +784,7 @@ function App() {
       unsubShiftPresets();
       unsubEmployeeOrder();
       unsubMonthlyRevenues();
+      unsubRevenueStaffRules();
     };
   }, []);
 
@@ -843,16 +889,7 @@ function App() {
         for (let hour = 6; hour <= 19; hour++) {
           const monthlyVal = monthlyRevenues[hour] || 0;
           const dailyAvg = monthlyVal / 30;
-          let recommendedStaff = 2;
-          if (dailyAvg > 1500) {
-            if (dailyAvg <= 2500) {
-              recommendedStaff = 3;
-            } else if (dailyAvg <= 3500) {
-              recommendedStaff = 4;
-            } else {
-              recommendedStaff = Math.min(8, Math.floor((dailyAvg - 2501) / 1000) + 4);
-            }
-          }
+          const recommendedStaff = getRecommendedStaff(dailyAvg, revenueStaffRules);
           await updateStaffingTarget(hour, recommendedStaff); // no date -> updates global default targets
         }
         alert('已成功將營業額建議人數套用為預設排班目標需求！');
@@ -3409,10 +3446,10 @@ function App() {
                       <div className="mt-4 p-4 rounded-xl border border-[#DAC0A3]/45 bg-[#FAF7F2] space-y-1.5 shadow-xs">
                         <h4 className="text-xs font-extrabold text-[#5D4037] uppercase tracking-wider mb-1">📋 營業額排班人數對照規則：</h4>
                         <ul className="text-[11px] text-[#6D4C41] space-y-1 font-medium list-disc pl-4.5">
-                          <li>日平均營業額 <strong>1,500 元以下</strong>：配置 <span className="font-extrabold text-[#3E2723]">2 名</span> 員工</li>
-                          <li>日平均營業額 <strong>1,501 - 2,500 元</strong>：配置 <span className="font-extrabold text-[#3E2723]">3 名</span> 員工</li>
-                          <li>日平均營業額 <strong>2,501 - 3,500 元</strong>：配置 <span className="font-extrabold text-[#3E2723]">4 名</span> 員工</li>
-                          <li>日平均營業額 <strong>3,500 元以上</strong>：配置 <span className="font-extrabold text-[#3E2723]">5 名</span> 員工 (每增加 1,000 元再追加 1 人)</li>
+                          <li>日平均營業額 <strong>{revenueStaffRules.tier1Limit.toLocaleString()} 元以下</strong>：配置 <span className="font-extrabold text-[#3E2723]">{revenueStaffRules.tier1Staff} 名</span> 員工</li>
+                          <li>日平均營業額 <strong>{(revenueStaffRules.tier1Limit + 1).toLocaleString()} - {revenueStaffRules.tier2Limit.toLocaleString()} 元</strong>：配置 <span className="font-extrabold text-[#3E2723]">{revenueStaffRules.tier2Staff} 名</span> 員工</li>
+                          <li>日平均營業額 <strong>{(revenueStaffRules.tier2Limit + 1).toLocaleString()} - {revenueStaffRules.tier3Limit.toLocaleString()} 元</strong>：配置 <span className="font-extrabold text-[#3E2723]">{revenueStaffRules.tier3Staff} 名</span> 員工</li>
+                          <li>日平均營業額 <strong>{revenueStaffRules.tier3Limit.toLocaleString()} 元以上</strong>：配置 <span className="font-extrabold text-[#3E2723]">{revenueStaffRules.tier4Staff} 名</span> 員工 (每增加 {revenueStaffRules.incrementAmount.toLocaleString()} 元再追加 1 人，上限為 {revenueStaffRules.maxStaff} 人)</li>
                         </ul>
                       </div>
                     </div>
@@ -3453,16 +3490,7 @@ function App() {
                             const dailyAvg = Number((monthlyVal / 30).toFixed(1));
 
                             // Recommended staff count based on average income
-                            let recommendedStaff = 2;
-                            if (dailyAvg > 1500) {
-                              if (dailyAvg <= 2500) {
-                                recommendedStaff = 3;
-                              } else if (dailyAvg <= 3500) {
-                                recommendedStaff = 4;
-                              } else {
-                                recommendedStaff = Math.min(8, Math.floor((dailyAvg - 2501) / 1000) + 4);
-                              }
-                            }
+                            const recommendedStaff = getRecommendedStaff(dailyAvg, revenueStaffRules);
 
                             // Current default target count in global database (no specific date)
                             const currentDefaultTarget = staffingTargets.find(t => t.hour === hour && !t.date)?.targetCount ?? 2;
@@ -3712,6 +3740,118 @@ function App() {
                         </div>
                       </div>
 
+                      {/* Section 4: Revenue Staffing Rules */}
+                      <div className="border-t border-[#E5DCD5]/60 pt-4 space-y-3">
+                        <h4 className="text-xs font-bold text-[#3E2723] flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-[#795548]"></span>
+                          營業額建議排班人數對照規則設定
+                        </h4>
+                        
+                        <div className="space-y-4">
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-[10px] font-semibold text-[#6D4C41] mb-1">第一階段營業額 (元以下)</label>
+                              <input
+                                type="number"
+                                min="0"
+                                value={tempRules.tier1Limit}
+                                onChange={(e) => setTempRules({ ...tempRules, tier1Limit: Math.max(0, parseInt(e.target.value) || 0) })}
+                                className="w-full glass-input px-3 py-1.5 rounded-xl font-mono text-xs text-center"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-semibold text-[#6D4C41] mb-1">第一階段建議人數 (人)</label>
+                              <input
+                                type="number"
+                                min="1"
+                                value={tempRules.tier1Staff}
+                                onChange={(e) => setTempRules({ ...tempRules, tier1Staff: Math.max(1, parseInt(e.target.value) || 1) })}
+                                className="w-full glass-input px-3 py-1.5 rounded-xl font-mono text-xs text-center"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-[10px] font-semibold text-[#6D4C41] mb-1">第二階段營業額 (元以下)</label>
+                              <input
+                                type="number"
+                                min="0"
+                                value={tempRules.tier2Limit}
+                                onChange={(e) => setTempRules({ ...tempRules, tier2Limit: Math.max(0, parseInt(e.target.value) || 0) })}
+                                className="w-full glass-input px-3 py-1.5 rounded-xl font-mono text-xs text-center"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-semibold text-[#6D4C41] mb-1">第二階段建議人數 (人)</label>
+                              <input
+                                type="number"
+                                min="1"
+                                value={tempRules.tier2Staff}
+                                onChange={(e) => setTempRules({ ...tempRules, tier2Staff: Math.max(1, parseInt(e.target.value) || 1) })}
+                                className="w-full glass-input px-3 py-1.5 rounded-xl font-mono text-xs text-center"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-[10px] font-semibold text-[#6D4C41] mb-1">第三階段營業額 (元以下)</label>
+                              <input
+                                type="number"
+                                min="0"
+                                value={tempRules.tier3Limit}
+                                onChange={(e) => setTempRules({ ...tempRules, tier3Limit: Math.max(0, parseInt(e.target.value) || 0) })}
+                                className="w-full glass-input px-3 py-1.5 rounded-xl font-mono text-xs text-center"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-semibold text-[#6D4C41] mb-1">第三階段建議人數 (人)</label>
+                              <input
+                                type="number"
+                                min="1"
+                                value={tempRules.tier3Staff}
+                                onChange={(e) => setTempRules({ ...tempRules, tier3Staff: Math.max(1, parseInt(e.target.value) || 1) })}
+                                className="w-full glass-input px-3 py-1.5 rounded-xl font-mono text-xs text-center"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-3 gap-3">
+                            <div>
+                              <label className="block text-[10px] font-semibold text-[#6D4C41] mb-1">第四階段基準人數 (人)</label>
+                              <input
+                                type="number"
+                                min="1"
+                                value={tempRules.tier4Staff}
+                                onChange={(e) => setTempRules({ ...tempRules, tier4Staff: Math.max(1, parseInt(e.target.value) || 1) })}
+                                className="w-full glass-input px-3 py-1.5 rounded-xl font-mono text-xs text-center"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-semibold text-[#6D4C41] mb-1">每增加營業額額度 (元)</label>
+                              <input
+                                type="number"
+                                min="1"
+                                value={tempRules.incrementAmount}
+                                onChange={(e) => setTempRules({ ...tempRules, incrementAmount: Math.max(1, parseInt(e.target.value) || 1) })}
+                                className="w-full glass-input px-3 py-1.5 rounded-xl font-mono text-xs text-center"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-semibold text-[#6D4C41] mb-1">建議人數上限 (人)</label>
+                              <input
+                                type="number"
+                                min="1"
+                                value={tempRules.maxStaff}
+                                onChange={(e) => setTempRules({ ...tempRules, maxStaff: Math.max(1, parseInt(e.target.value) || 1) })}
+                                className="w-full glass-input px-3 py-1.5 rounded-xl font-mono text-xs text-center"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
                       {/* Action buttons */}
                       <div className="flex border-t border-[#E5DCD5] pt-4">
                         <button
@@ -3730,6 +3870,7 @@ function App() {
                               await updateShiftPresets(shiftPresets);
                               await updateStartDay(startDay);
                               await updateDeadlineDay(deadlineDay);
+                              await updateRevenueStaffRules(tempRules);
                               alert("已成功更新門市營業時間與排班限制設定！");
                             } catch (err) {
                               console.error("Failed to update settings:", err);
