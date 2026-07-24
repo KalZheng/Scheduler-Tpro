@@ -144,6 +144,18 @@ function localDbPlugin() {
                 { name: '晚班', startTime: '08:30', endTime: '17:30' }
               ];
               let employeeOrder = [];
+              let monthlyRevenues = {};
+              let revenueStaffRules = {
+                tier1Limit: 1500,
+                tier2Limit: 2500,
+                tier3Limit: 3500,
+                tier1Staff: 2,
+                tier2Staff: 3,
+                tier3Staff: 4,
+                tier4Staff: 5,
+                incrementAmount: 1000,
+                maxStaff: 8
+              };
               if (fs.existsSync(globalPath)) {
                 const globalData = JSON.parse(fs.readFileSync(globalPath, 'utf-8'));
                 globalTargets = globalData.staffingTargets || [];
@@ -177,6 +189,12 @@ function localDbPlugin() {
                 if (globalData.employeeOrder !== undefined) {
                   employeeOrder = globalData.employeeOrder;
                 }
+                if (globalData.monthlyRevenues !== undefined) {
+                  monthlyRevenues = globalData.monthlyRevenues;
+                }
+                if (globalData.revenueStaffRules !== undefined) {
+                  revenueStaffRules = globalData.revenueStaffRules;
+                }
               } else {
                 // Initialize default staffing targets if global doesn't exist
                 globalTargets = Array.from({ length: 14 }, (_, i) => ({
@@ -184,7 +202,7 @@ function localDbPlugin() {
                   hour: i + 6,
                   targetCount: 2
                 }));
-                fs.writeFileSync(globalPath, JSON.stringify({ staffingTargets: globalTargets, deadlineDay, startDay, operatingStartTime, operatingEndTime, shiftMorningStart, shiftMorningEnd, shiftEveningStart, shiftEveningEnd, shiftPresets }, null, 2), 'utf-8');
+                fs.writeFileSync(globalPath, JSON.stringify({ staffingTargets: globalTargets, deadlineDay, startDay, operatingStartTime, operatingEndTime, shiftMorningStart, shiftMorningEnd, shiftEveningStart, shiftEveningEnd, shiftPresets, monthlyRevenues, revenueStaffRules }, null, 2), 'utf-8');
               }
 
               const employeesPath = path.resolve(dataDir, 'db-employees.json');
@@ -218,7 +236,9 @@ function localDbPlugin() {
                 shiftEveningStart: shiftEveningStart,
                 shiftEveningEnd: shiftEveningEnd,
                 shiftPresets: shiftPresets,
-                employeeOrder: employeeOrder
+                employeeOrder: employeeOrder,
+                monthlyRevenues: monthlyRevenues,
+                revenueStaffRules: revenueStaffRules
               }));
             } catch (error) {
               res.statusCode = 500;
@@ -276,7 +296,19 @@ function localDbPlugin() {
                   shiftEveningStart: parsed.shiftEveningStart !== undefined ? parsed.shiftEveningStart : '08:30',
                   shiftEveningEnd: parsed.shiftEveningEnd !== undefined ? parsed.shiftEveningEnd : '17:30',
                   shiftPresets: parsed.shiftPresets !== undefined ? parsed.shiftPresets : [],
-                  employeeOrder: parsed.employeeOrder !== undefined ? parsed.employeeOrder : []
+                  employeeOrder: parsed.employeeOrder !== undefined ? parsed.employeeOrder : [],
+                  monthlyRevenues: parsed.monthlyRevenues !== undefined ? parsed.monthlyRevenues : {},
+                  revenueStaffRules: parsed.revenueStaffRules !== undefined ? parsed.revenueStaffRules : {
+                    tier1Limit: 1500,
+                    tier2Limit: 2500,
+                    tier3Limit: 3500,
+                    tier1Staff: 2,
+                    tier2Staff: 3,
+                    tier3Staff: 4,
+                    tier4Staff: 5,
+                    incrementAmount: 1000,
+                    maxStaff: 8
+                  }
                 }, null, 2), 'utf-8');
 
                 // Write employees file

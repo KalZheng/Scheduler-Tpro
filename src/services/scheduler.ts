@@ -26,6 +26,8 @@ export interface WorkSchedule {
   createdAt: number;
   originalStartTime?: string | null;
   originalEndTime?: string | null;
+  availabilityId?: string;
+  markedBlue?: boolean;
 }
 
 export interface WorkerAvailability {
@@ -37,6 +39,7 @@ export interface WorkerAvailability {
   endTime: string;   // "HH:MM"
   notes?: string;
   createdAt: number;
+  confirmed?: boolean;
 }
 
 export interface StaffingTarget {
@@ -96,11 +99,26 @@ let localShiftEveningStartListeners: ((time: string) => void)[] = [];
 let localShiftEveningEndListeners: ((time: string) => void)[] = [];
 let localShiftPresetsListeners: ((presets: ShiftPreset[]) => void)[] = [];
 let localEmployeeOrderListeners: ((order: string[]) => void)[] = [];
+let localMonthlyRevenuesListeners: ((revenues: Record<number, number>) => void)[] = [];
+let localRevenueStaffRulesListeners: ((rules: RevenueStaffRules) => void)[] = [];
+let localMarkedEmptyCellsListeners: ((markedCells: Record<string, boolean>) => void)[] = [];
 
 export interface ShiftPreset {
   name: string;
   startTime: string;
   endTime: string;
+}
+
+export interface RevenueStaffRules {
+  tier1Limit: number;
+  tier2Limit: number;
+  tier3Limit: number;
+  tier1Staff: number;
+  tier2Staff: number;
+  tier3Staff: number;
+  tier4Staff: number;
+  incrementAmount: number;
+  maxStaff: number;
 }
 
 interface DbSchema {
@@ -118,6 +136,9 @@ interface DbSchema {
   shiftEveningEnd?: string;
   shiftPresets?: ShiftPreset[];
   employeeOrder?: string[];
+  monthlyRevenues?: Record<string, number>;
+  revenueStaffRules?: RevenueStaffRules;
+  markedEmptyCells?: Record<string, boolean>;
 }
 
 const inMemoryDb: DbSchema = {
@@ -137,7 +158,20 @@ const inMemoryDb: DbSchema = {
     { name: '早班', startTime: '06:30', endTime: '15:30' },
     { name: '晚班', startTime: '08:30', endTime: '17:30' }
   ],
-  employeeOrder: []
+  employeeOrder: [],
+  monthlyRevenues: {},
+  revenueStaffRules: {
+    tier1Limit: 1500,
+    tier2Limit: 2500,
+    tier3Limit: 3500,
+    tier1Staff: 2,
+    tier2Staff: 3,
+    tier3Staff: 4,
+    tier4Staff: 5,
+    incrementAmount: 1000,
+    maxStaff: 8
+  },
+  markedEmptyCells: {}
 };
 
 const loadedMonths = new Set<string>();
@@ -300,6 +334,12 @@ export const syncActiveMonth = async (monthStr: string) => {
       if (data.employeeOrder !== undefined) {
         inMemoryDb.employeeOrder = data.employeeOrder;
       }
+      if (data.monthlyRevenues !== undefined) {
+        inMemoryDb.monthlyRevenues = data.monthlyRevenues;
+      }
+      if (data.revenueStaffRules !== undefined) {
+        inMemoryDb.revenueStaffRules = data.revenueStaffRules;
+      }
 
       // Update LocalStorage backup
       localStorage.setItem('weekly_work_schedules', JSON.stringify(inMemoryDb.schedules));
@@ -316,6 +356,8 @@ export const syncActiveMonth = async (monthStr: string) => {
       localStorage.setItem('scheduler_shift_evening_end', inMemoryDb.shiftEveningEnd || '17:30');
       localStorage.setItem('scheduler_shift_presets', JSON.stringify(inMemoryDb.shiftPresets || []));
       localStorage.setItem('scheduler_employee_order', JSON.stringify(inMemoryDb.employeeOrder || []));
+      localStorage.setItem('monthly_revenue_data', JSON.stringify(inMemoryDb.monthlyRevenues || {}));
+      localStorage.setItem('revenue_staff_rules', JSON.stringify(inMemoryDb.revenueStaffRules || {}));
 
       // Trigger all active UI listeners
       localListeners.forEach(listener => listener([...inMemoryDb.schedules]));
@@ -332,6 +374,26 @@ export const syncActiveMonth = async (monthStr: string) => {
       localShiftEveningEndListeners.forEach(listener => listener(inMemoryDb.shiftEveningEnd || '17:30'));
       localShiftPresetsListeners.forEach(listener => listener(inMemoryDb.shiftPresets || []));
       localEmployeeOrderListeners.forEach(listener => listener(inMemoryDb.employeeOrder || []));
+      localMonthlyRevenuesListeners.forEach(listener => {
+        const revenues: Record<number, number> = {};
+        if (inMemoryDb.monthlyRevenues) {
+          Object.entries(inMemoryDb.monthlyRevenues).forEach(([k, v]) => {
+            revenues[Number(k)] = Number(v);
+          });
+        }
+        listener(revenues);
+      });
+      localRevenueStaffRulesListeners.forEach(listener => listener(inMemoryDb.revenueStaffRules || {
+        tier1Limit: 1500,
+        tier2Limit: 2500,
+        tier3Limit: 3500,
+        tier1Staff: 2,
+        tier2Staff: 3,
+        tier3Staff: 4,
+        tier4Staff: 5,
+        incrementAmount: 1000,
+        maxStaff: 8
+      }));
     }
   } catch (e) {
     console.error(`Failed to sync month data for ${monthStr}:`, e);
@@ -380,6 +442,12 @@ const loadFileDb = async () => {
       if (data.employeeOrder !== undefined) {
         inMemoryDb.employeeOrder = data.employeeOrder;
       }
+      if (data.monthlyRevenues !== undefined) {
+        inMemoryDb.monthlyRevenues = data.monthlyRevenues;
+      }
+      if (data.revenueStaffRules !== undefined) {
+        inMemoryDb.revenueStaffRules = data.revenueStaffRules;
+      }
       
       // Update local storage backup
       localStorage.setItem('weekly_work_schedules', JSON.stringify(inMemoryDb.schedules));
@@ -396,6 +464,8 @@ const loadFileDb = async () => {
       localStorage.setItem('scheduler_shift_evening_end', inMemoryDb.shiftEveningEnd || '17:30');
       localStorage.setItem('scheduler_shift_presets', JSON.stringify(inMemoryDb.shiftPresets || []));
       localStorage.setItem('scheduler_employee_order', JSON.stringify(inMemoryDb.employeeOrder || []));
+      localStorage.setItem('monthly_revenue_data', JSON.stringify(inMemoryDb.monthlyRevenues || {}));
+      localStorage.setItem('revenue_staff_rules', JSON.stringify(inMemoryDb.revenueStaffRules || {}));
     } else {
       throw new Error("Local DB API response not OK");
     }
@@ -419,6 +489,16 @@ const loadFileDb = async () => {
     } catch {
       inMemoryDb.employeeOrder = [];
     }
+    try {
+      inMemoryDb.monthlyRevenues = JSON.parse(localStorage.getItem('monthly_revenue_data') || '{}');
+    } catch {
+      inMemoryDb.monthlyRevenues = {};
+    }
+    try {
+      inMemoryDb.revenueStaffRules = JSON.parse(localStorage.getItem('revenue_staff_rules') || '{}');
+    } catch {
+      inMemoryDb.revenueStaffRules = undefined;
+    }
   } finally {
     // Notify all active listeners of loaded values
     localListeners.forEach(listener => listener([...inMemoryDb.schedules]));
@@ -435,6 +515,26 @@ const loadFileDb = async () => {
     localShiftEveningEndListeners.forEach(listener => listener(inMemoryDb.shiftEveningEnd || '17:30'));
     localShiftPresetsListeners.forEach(listener => listener(inMemoryDb.shiftPresets || []));
     localEmployeeOrderListeners.forEach(listener => listener(inMemoryDb.employeeOrder || []));
+    localMonthlyRevenuesListeners.forEach(listener => {
+      const revenues: Record<number, number> = {};
+      if (inMemoryDb.monthlyRevenues) {
+        Object.entries(inMemoryDb.monthlyRevenues).forEach(([k, v]) => {
+          revenues[Number(k)] = Number(v);
+        });
+      }
+      listener(revenues);
+    });
+    localRevenueStaffRulesListeners.forEach(listener => listener(inMemoryDb.revenueStaffRules || {
+      tier1Limit: 1500,
+      tier2Limit: 2500,
+      tier3Limit: 3500,
+      tier1Staff: 2,
+      tier2Staff: 3,
+      tier3Staff: 4,
+      tier4Staff: 5,
+      incrementAmount: 1000,
+      maxStaff: 8
+    }));
   }
 };
 
@@ -461,6 +561,9 @@ const saveDbForDate = async (dateStr?: string) => {
   localStorage.setItem('scheduler_shift_evening_end', inMemoryDb.shiftEveningEnd || '17:30');
   localStorage.setItem('scheduler_shift_presets', JSON.stringify(inMemoryDb.shiftPresets || []));
   localStorage.setItem('scheduler_employee_order', JSON.stringify(inMemoryDb.employeeOrder || []));
+  localStorage.setItem('monthly_revenue_data', JSON.stringify(inMemoryDb.monthlyRevenues || {}));
+  localStorage.setItem('revenue_staff_rules', JSON.stringify(inMemoryDb.revenueStaffRules || {}));
+  localStorage.setItem('marked_empty_cells', JSON.stringify(inMemoryDb.markedEmptyCells || {}));
 
   // Trigger active listeners immediately for immediate UI response
   localListeners.forEach(listener => listener([...inMemoryDb.schedules]));
@@ -477,6 +580,27 @@ const saveDbForDate = async (dateStr?: string) => {
   localShiftEveningEndListeners.forEach(listener => listener(inMemoryDb.shiftEveningEnd || '17:30'));
   localShiftPresetsListeners.forEach(listener => listener(inMemoryDb.shiftPresets || []));
   localEmployeeOrderListeners.forEach(listener => listener(inMemoryDb.employeeOrder || []));
+  localMonthlyRevenuesListeners.forEach(listener => {
+    const revenues: Record<number, number> = {};
+    if (inMemoryDb.monthlyRevenues) {
+      Object.entries(inMemoryDb.monthlyRevenues).forEach(([k, v]) => {
+        revenues[Number(k)] = Number(v);
+      });
+    }
+    listener(revenues);
+  });
+  localRevenueStaffRulesListeners.forEach(listener => listener(inMemoryDb.revenueStaffRules || {
+    tier1Limit: 1500,
+    tier2Limit: 2500,
+    tier3Limit: 3500,
+    tier1Staff: 2,
+    tier2Staff: 3,
+    tier3Staff: 4,
+    tier4Staff: 5,
+    incrementAmount: 1000,
+    maxStaff: 8
+  }));
+  localMarkedEmptyCellsListeners.forEach(listener => listener(inMemoryDb.markedEmptyCells || {}));
 
   // POST current in-memory state to local JSON file
   try {
@@ -498,7 +622,19 @@ const saveDbForDate = async (dateStr?: string) => {
       shiftEveningStart: inMemoryDb.shiftEveningStart || '08:30',
       shiftEveningEnd: inMemoryDb.shiftEveningEnd || '17:30',
       shiftPresets: inMemoryDb.shiftPresets || [],
-      employeeOrder: inMemoryDb.employeeOrder || []
+      employeeOrder: inMemoryDb.employeeOrder || [],
+      monthlyRevenues: inMemoryDb.monthlyRevenues || {},
+      revenueStaffRules: inMemoryDb.revenueStaffRules || {
+        tier1Limit: 1500,
+        tier2Limit: 2500,
+        tier3Limit: 3500,
+        tier1Staff: 2,
+        tier2Staff: 3,
+        tier3Staff: 4,
+        tier4Staff: 5,
+        incrementAmount: 1000,
+        maxStaff: 8
+      }
     };
 
     await fetch(`/api/db?month=${monthStr}`, {
@@ -643,6 +779,23 @@ export const deleteAvailability = async (id: string) => {
     }
     inMemoryDb.availabilities = inMemoryDb.availabilities.filter(item => item.id !== id);
     await saveDbForDate(itemToDelete?.date);
+  }
+};
+
+export const updateAvailability = async (id: string, updates: Partial<Omit<WorkerAvailability, 'id' | 'createdAt'>>) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'availabilities', id);
+    return await updateDoc(docRef, updates);
+  } else {
+    let affectedDate = '';
+    inMemoryDb.availabilities = inMemoryDb.availabilities.map(item => {
+      if (item.id === id) {
+        affectedDate = updates.date || item.date;
+        return { ...item, ...updates };
+      }
+      return item;
+    });
+    await saveDbForDate(affectedDate);
   }
 };
 
@@ -1080,6 +1233,128 @@ export const updateEmployeeOrder = async (order: string[]) => {
     return await setDoc(docRef, { employeeOrder: order }, { merge: true });
   } else {
     inMemoryDb.employeeOrder = order;
+    await saveDbForDate();
+  }
+};
+
+export const subscribeToMonthlyRevenues = (callback: (revenues: Record<number, number>) => void) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    return onSnapshot(docRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        const revenues: Record<number, number> = {};
+        if (data.monthlyRevenues) {
+          Object.entries(data.monthlyRevenues).forEach(([k, v]) => {
+            revenues[Number(k)] = Number(v);
+          });
+        }
+        callback(revenues);
+      } else {
+        callback({});
+      }
+    });
+  } else {
+    localMonthlyRevenuesListeners.push(callback);
+    const revenues: Record<number, number> = {};
+    if (inMemoryDb.monthlyRevenues) {
+      Object.entries(inMemoryDb.monthlyRevenues).forEach(([k, v]) => {
+        revenues[Number(k)] = Number(v);
+      });
+    }
+    callback(revenues);
+    return () => {
+      localMonthlyRevenuesListeners = localMonthlyRevenuesListeners.filter(l => l !== callback);
+    };
+  }
+};
+
+export const updateMonthlyRevenues = async (revenues: Record<number, number>) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    const fsRevenues: Record<string, number> = {};
+    Object.entries(revenues).forEach(([k, v]) => {
+      fsRevenues[k] = v;
+    });
+    return await setDoc(docRef, { monthlyRevenues: fsRevenues }, { merge: true });
+  } else {
+    const jsonRevenues: Record<string, number> = {};
+    Object.entries(revenues).forEach(([k, v]) => {
+      jsonRevenues[k] = v;
+    });
+    inMemoryDb.monthlyRevenues = jsonRevenues;
+    await saveDbForDate();
+  }
+};
+
+export const subscribeToRevenueStaffRules = (callback: (rules: RevenueStaffRules) => void) => {
+  const defaultRules: RevenueStaffRules = {
+    tier1Limit: 1500,
+    tier2Limit: 2500,
+    tier3Limit: 3500,
+    tier1Staff: 2,
+    tier2Staff: 3,
+    tier3Staff: 4,
+    tier4Staff: 5,
+    incrementAmount: 1000,
+    maxStaff: 8
+  };
+
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    return onSnapshot(docRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        callback(data.revenueStaffRules !== undefined ? data.revenueStaffRules : defaultRules);
+      } else {
+        callback(defaultRules);
+      }
+    });
+  } else {
+    localRevenueStaffRulesListeners.push(callback);
+    callback(inMemoryDb.revenueStaffRules || defaultRules);
+    return () => {
+      localRevenueStaffRulesListeners = localRevenueStaffRulesListeners.filter(l => l !== callback);
+    };
+  }
+};
+
+export const updateRevenueStaffRules = async (rules: RevenueStaffRules) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    return await setDoc(docRef, { revenueStaffRules: rules }, { merge: true });
+  } else {
+    inMemoryDb.revenueStaffRules = rules;
+    await saveDbForDate();
+  }
+};
+
+export const subscribeToMarkedEmptyCells = (callback: (markedCells: Record<string, boolean>) => void) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    return onSnapshot(docRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        callback(data.markedEmptyCells !== undefined ? data.markedEmptyCells : {});
+      } else {
+        callback({});
+      }
+    });
+  } else {
+    localMarkedEmptyCellsListeners.push(callback);
+    callback(inMemoryDb.markedEmptyCells || {});
+    return () => {
+      localMarkedEmptyCellsListeners = localMarkedEmptyCellsListeners.filter(l => l !== callback);
+    };
+  }
+};
+
+export const updateMarkedEmptyCells = async (markedCells: Record<string, boolean>) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    return await setDoc(docRef, { markedEmptyCells: markedCells }, { merge: true });
+  } else {
+    inMemoryDb.markedEmptyCells = markedCells;
     await saveDbForDate();
   }
 };
