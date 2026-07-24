@@ -2041,10 +2041,6 @@ function App() {
             fill: {
               fgColor: { rgb: "FFC0CB" } // Pink background for newcomer row
             }
-          } : isChanged ? {
-            fill: {
-              fgColor: { rgb: "93C5FD" } // Light blue background for changed shifts
-            }
           } : {})
         };
       }
