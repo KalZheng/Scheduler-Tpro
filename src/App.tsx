@@ -555,6 +555,7 @@ function App() {
   const [endTime, setEndTime] = useState('17:00');
   const [notes, setNotes] = useState('');
   const [workerNotes, setWorkerNotes] = useState('');
+  const [registerTime, setRegisterTime] = useState('');
   const [formOriginalStartTime, setFormOriginalStartTime] = useState<string | null>(null);
   const [formOriginalEndTime, setFormOriginalEndTime] = useState<string | null>(null);
 
@@ -1393,6 +1394,21 @@ function App() {
     setFormOriginalStartTime(schedule.originalStartTime || schedule.startTime);
     setFormOriginalEndTime(schedule.originalEndTime || schedule.endTime);
 
+    // Find original registered availability
+    const originalAvail = availabilities.find(a => a.id === schedule.availabilityId);
+    if (originalAvail) {
+      setRegisterTime(`${originalAvail.startTime} - ${originalAvail.endTime}`);
+    } else {
+      const fallbackAvail = availabilities.find(
+        a => a.employeeName.trim().toLowerCase() === schedule.employeeName.trim().toLowerCase() && a.date === schedule.date
+      );
+      if (fallbackAvail) {
+        setRegisterTime(`${fallbackAvail.startTime} - ${fallbackAvail.endTime}`);
+      } else {
+        setRegisterTime('');
+      }
+    }
+
     setIsModalOpen(true);
   };
 
@@ -1723,12 +1739,7 @@ function App() {
     }
   };
 
-  const getScheduleTheme = (schedule: WorkSchedule) => {
-    if (schedule.originalStartTime && schedule.originalEndTime) {
-      if (schedule.startTime !== schedule.originalStartTime || schedule.endTime !== schedule.originalEndTime) {
-        return COLOR_THEMES.lightBlue;
-      }
-    }
+  const getScheduleTheme = (_schedule: WorkSchedule) => {
     return COLOR_THEMES.indigo;
   };
 
@@ -4392,12 +4403,14 @@ function App() {
                                             {empSchedules.map(sched => {
                                               const theme = getScheduleTheme(sched);
                                               const managerNote = sched.managerNotes !== undefined ? sched.managerNotes : getManagerNote(sched);
+                                               const originalAvail = availabilities.find(a => a.id === sched.availabilityId);
+                                               const registerNotes = originalAvail?.notes ? getCleanNote(originalAvail.notes) : '';
                                               return (
                                                 <div
                                                   key={sched.id}
                                                   onClick={(e) => handleOpenEditModal(sched, e)}
                                                   className={`text-xs py-0.5 px-1.5 rounded-md border font-semibold truncate cursor-pointer transition-all hover:scale-[1.02] ${theme.bg} ${theme.border} ${theme.text}`}
-                                                  title={`👤 ${sched.employeeName} (${sched.startTime}-${sched.endTime})${sched.workplace ? ` @ 📍 ${sched.workplace}` : ''}${managerNote ? ` | 📝 主管備註: ${managerNote}` : ''}`}
+                                                  title={`👤 ${sched.employeeName} (${sched.startTime}-${sched.endTime})${registerNotes ? ` | 備註: ${registerNotes}` : ''}${managerNote ? ` | 📝 主管備註: ${managerNote}` : ''}`}
                                                 >
                                                   {sched.startTime}-{sched.endTime}
                                                   {managerNote && (
@@ -5671,6 +5684,12 @@ function App() {
 
               {/* Notes */}
               <div className="space-y-4">
+                {modalMode === 'edit' && registerTime && (
+                  <div className="p-3 rounded-xl bg-[#E8F5E9]/70 border border-emerald-200">
+                    <span className="block text-xs font-bold text-[#2E7D32] mb-1">🕒 同仁登記可用時間</span>
+                    <p className="text-xs text-[#1B5E20] font-bold font-mono">{registerTime}</p>
+                  </div>
+                )}
                 {modalMode === 'edit' && workerNotes && (
                   <div className="p-3 rounded-xl bg-indigo-50 border border-indigo-200">
                     <span className="block text-xs font-bold text-indigo-850 mb-1">💬 同仁登記備註</span>
