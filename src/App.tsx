@@ -1922,7 +1922,6 @@ function App() {
 
     const headers = ['人員姓名', ...dateHeaders, '總工時(hrs)'];
     const rows: string[][] = [];
-    const changedCells = new Set<string>();
     const redFontCells = new Set<string>();
 
     // Add employee rows
@@ -1942,16 +1941,6 @@ function App() {
 
         // Check if worker registered standard work hours (not 00:00 to 00:00 rest day)
         const registeredToWork = empAvailabilities.some(a => !(a.startTime === '00:00' && a.endTime === '00:00'));
-
-        const hasChangedShift = empSchedules.some(
-          s => s.originalStartTime && s.originalEndTime && (s.startTime !== s.originalStartTime || s.endTime !== s.originalEndTime)
-        );
-
-        if (hasChangedShift) {
-          // +1 because col 0 = name, col 1+ = dates
-          const cellRef = XLSX.utils.encode_cell({ r: empIdx + 1, c: dateIdx + 1 });
-          changedCells.add(cellRef);
-        }
 
         // Accumulate hours
         empSchedules.forEach(sched => {
@@ -1989,7 +1978,6 @@ function App() {
       if (ws[cellRef]) {
         const decoded = XLSX.utils.decode_cell(cellRef);
         const { r, c } = decoded;
-        const isChanged = changedCells.has(cellRef);
         const isRedFont = redFontCells.has(cellRef);
 
         // Check if employee for this row is a newcomer
@@ -3618,7 +3606,7 @@ function App() {
 
                           {/* Days loop */}
                           <div className="flex flex-1 justify-around">
-                            {getDaysInMonth(currentMonthStart).map((dateObj, idx, arr) => {
+                            {getDaysInMonth(currentMonthStart).map((dateObj) => {
                               const dNum = dateObj.getDate();
                               const dayName = DAYS_OF_WEEK[dateObj.getDay() === 0 ? 6 : dateObj.getDay() - 1].name.substring(1);
                               const isWeekend = dateObj.getDay() === 0 || dateObj.getDay() === 6;
