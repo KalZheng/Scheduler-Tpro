@@ -34,7 +34,10 @@ import {
   subscribeToShiftPresets,
   updateShiftPresets,
   subscribeToEmployeeOrder,
-  updateEmployeeOrder
+  updateEmployeeOrder,
+  updateAvailability,
+  subscribeToMonthlyRevenues,
+  updateMonthlyRevenues
 } from './services/scheduler';
 import type { WorkSchedule, WorkerAvailability, StaffingTarget, Employee, ShiftPreset } from './services/scheduler';
 import { isValidConfig } from './firebase';
@@ -428,16 +431,8 @@ function App() {
     };
   }, [managerViewMode, activeRole, isAuthenticated]);
 
-  // Revenue-based staffing calculation states (persisted to localStorage)
-  const [monthlyRevenues, setMonthlyRevenues] = useState<Record<number, number>>(() => {
-    const data = localStorage.getItem('monthly_revenue_data');
-    if (!data) return {};
-    try {
-      return JSON.parse(data);
-    } catch {
-      return {};
-    }
-  });
+  // Revenue-based staffing calculation states (persisted to database)
+  const [monthlyRevenues, setMonthlyRevenues] = useState<Record<number, number>>({});
 
   // Employee list states
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -724,6 +719,9 @@ function App() {
     const unsubEmployeeOrder = subscribeToEmployeeOrder((data) => {
       setEmployeeOrder(data);
     });
+    const unsubMonthlyRevenues = subscribeToMonthlyRevenues((data) => {
+      setMonthlyRevenues(data);
+    });
 
     return () => {
       unsubSchedules();
@@ -740,6 +738,7 @@ function App() {
       unsubShiftEveningEnd();
       unsubShiftPresets();
       unsubEmployeeOrder();
+      unsubMonthlyRevenues();
     };
   }, []);
 
@@ -865,10 +864,13 @@ function App() {
   };
 
   // Reset monthly revenues input data
-  const handleResetRevenues = () => {
+  const handleResetRevenues = async () => {
     if (safeConfirm('確定要清空所有時段的月營業額輸入數據嗎？')) {
-      setMonthlyRevenues({});
-      localStorage.removeItem('monthly_revenue_data');
+      try {
+        await updateMonthlyRevenues({});
+      } catch (error) {
+        console.error("Failed to reset monthly revenues: ", error);
+      }
     }
   };
 
@@ -1169,11 +1171,12 @@ function App() {
         managerNotes: '',
         color: derivedColor,
         originalStartTime: avail.startTime,
-        originalEndTime: avail.endTime
+        originalEndTime: avail.endTime,
+        availabilityId: avail.id
       };
       await addSchedule(payload);
-      // Remove the confirmed availability so it no longer shows as unconfirmed in the grid
-      await deleteAvailability(avail.id);
+      // Mark availability as confirmed so it no longer shows as unconfirmed in the grid
+      await updateAvailability(avail.id, { confirmed: true });
     } catch (error) {
       console.error("Error doing instant assign: ", error);
       alert('自動排程失敗，請重試。');
@@ -1226,10 +1229,11 @@ function App() {
         managerNotes: '',
         color: derivedColor,
         originalStartTime: sTime,
-        originalEndTime: eTime
+        originalEndTime: eTime,
+        availabilityId: avail.id
       };
       await addSchedule(payload);
-      await deleteAvailability(avail.id);
+      await updateAvailability(avail.id, { confirmed: true });
     } catch (error) {
       console.error("Error doing full-time assign: ", error);
       alert('自動排程失敗，請重試。');
@@ -1449,7 +1453,11 @@ function App() {
     e.stopPropagation();
     if (safeConfirm('確定要刪除此排程紀錄嗎？')) {
       try {
+        const scheduleToDelete = schedules.find(s => s.id === id);
         await deleteSchedule(id);
+        if (scheduleToDelete?.availabilityId) {
+          await updateAvailability(scheduleToDelete.availabilityId, { confirmed: false });
+        }
       } catch (error) {
         console.error("Error deleting schedule: ", error);
       }
@@ -1753,7 +1761,7 @@ function App() {
 
   const getAvailabilitiesForDate = (dateStr: string) => {
     return availabilities
-      .filter(item => item.date === dateStr)
+      .filter(item => item.date === dateStr && item.confirmed !== true)
       .sort((a, b) => compareTimeStrings(a.startTime, b.startTime));
   };
 
@@ -2585,7 +2593,7 @@ function App() {
                                   <span className="text-sm font-extrabold text-red-800">
                                     ❌ {avail.date} ({dayInfo.name})
                                   </span>
-                                  {isWorkerEditable && (
+                                  {isWorkerEditable && !avail.confirmed && (
                                     <div className="flex gap-1.5">
                                       {!isFullTime && (
                                         <button
@@ -2633,7 +2641,7 @@ function App() {
                                 <span className="text-sm font-extrabold text-[#3E2723]">
                                   {avail.date} ({dayInfo.name})
                                 </span>
-                                {isWorkerEditable && (
+                                {isWorkerEditable && !avail.confirmed && (
                                   <div className="flex gap-1.5">
                                     {!isFullTime && (
                                       <button
@@ -2663,6 +2671,14 @@ function App() {
                                   <span className="text-[10px] px-2 py-0.5 rounded bg-[#F5EBE6] text-[#5D4037] border border-[#DAC0A3]/40 font-bold w-fit">
                                     📍 {avail.workplace}
                                   </span>
+                                  {avail.confirmed && (
+                                    <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-50 text-[#1B5E20] border border-[#2E7D32]/25 font-extrabold w-fit flex items-center gap-0.5 animate-scale-in">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-[#2E7D32]"></span>
+                                      已確認排班
+                                    </span>
+                                  )}
+                                  <span className="hidden">
+                                  </span>
                                   <span className="text-xs text-[#6D4C41]/90 font-medium flex items-center gap-1 font-mono">
                                     🕒 可配合時間：{avail.startTime} - {avail.endTime}
                                   </span>
@@ -2686,7 +2702,8 @@ function App() {
                 const nextMonthStr = formatDateString(workerNextMonthStart).substring(0, 7);
                 const teamAvails = availabilities.filter(a =>
                   a.date.startsWith(nextMonthStr) &&
-                  !(a.startTime === '00:00' && a.endTime === '00:00')
+                  !(a.startTime === '00:00' && a.endTime === '00:00') &&
+                  a.confirmed !== true
                 );
                 const teamCalendarDates = workerCalendarGridDates;
 
@@ -3465,11 +3482,9 @@ function App() {
                                       value={monthlyVal || ''}
                                       onChange={(e) => {
                                         const val = Math.max(0, parseInt(e.target.value) || 0);
-                                        setMonthlyRevenues(prev => {
-                                          const next = { ...prev, [hour]: val };
-                                          localStorage.setItem('monthly_revenue_data', JSON.stringify(next));
-                                          return next;
-                                        });
+                                        const next = { ...monthlyRevenues, [hour]: val };
+                                        setMonthlyRevenues(next);
+                                        updateMonthlyRevenues(next);
                                       }}
                                       className="w-full glass-input pl-7 pr-3 py-1.5 rounded-xl text-xs font-mono text-left focus:border-[#795548]"
                                     />
@@ -4219,7 +4234,7 @@ function App() {
 
                                     // Worker Availability
                                     const empAvails = availabilities.filter(
-                                      a => a.employeeName.trim().toLowerCase() === empName.toLowerCase() && a.date === dateStr
+                                      a => a.employeeName.trim().toLowerCase() === empName.toLowerCase() && a.date === dateStr && a.confirmed !== true
                                     ).sort((a, b) => compareTimeStrings(a.startTime, b.startTime));
 
                                     return (
@@ -4462,8 +4477,8 @@ function App() {
                         );
                         if (!hasRegisteredInMonth) return false;
 
-                        const hasAvailToday = dayAvailabilities.some(
-                          a => a.employeeName.trim().toLowerCase() === empName.toLowerCase()
+                        const hasAvailToday = availabilities.some(
+                          a => a.employeeName.trim().toLowerCase() === empName.toLowerCase() && a.date === selectedDateStr
                         );
                         return !hasAvailToday;
                       }).map(emp => {
@@ -5025,7 +5040,8 @@ function App() {
                       const dayAvails = availabilities.filter(
                         a => a.date === config.date &&
                           a.employeeName.trim().toLowerCase() !== workerName.trim().toLowerCase() &&
-                          !(a.startTime === '00:00' && a.endTime === '00:00')
+                          !(a.startTime === '00:00' && a.endTime === '00:00') &&
+                          a.confirmed !== true
                       );
                       if (dayAvails.length === 0) return null;
                       return (
@@ -5548,7 +5564,11 @@ function App() {
                     onClick={async () => {
                       if (editingId && safeConfirm('確定要刪除此排程紀錄嗎？')) {
                         try {
+                          const scheduleToDelete = schedules.find(s => s.id === editingId);
                           await deleteSchedule(editingId);
+                          if (scheduleToDelete?.availabilityId) {
+                            await updateAvailability(scheduleToDelete.availabilityId, { confirmed: false });
+                          }
                           setIsModalOpen(false);
                         } catch (error) {
                           console.error("Error deleting schedule from modal: ", error);

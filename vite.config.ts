@@ -144,6 +144,7 @@ function localDbPlugin() {
                 { name: '晚班', startTime: '08:30', endTime: '17:30' }
               ];
               let employeeOrder = [];
+              let monthlyRevenues = {};
               if (fs.existsSync(globalPath)) {
                 const globalData = JSON.parse(fs.readFileSync(globalPath, 'utf-8'));
                 globalTargets = globalData.staffingTargets || [];
@@ -177,6 +178,9 @@ function localDbPlugin() {
                 if (globalData.employeeOrder !== undefined) {
                   employeeOrder = globalData.employeeOrder;
                 }
+                if (globalData.monthlyRevenues !== undefined) {
+                  monthlyRevenues = globalData.monthlyRevenues;
+                }
               } else {
                 // Initialize default staffing targets if global doesn't exist
                 globalTargets = Array.from({ length: 14 }, (_, i) => ({
@@ -184,7 +188,7 @@ function localDbPlugin() {
                   hour: i + 6,
                   targetCount: 2
                 }));
-                fs.writeFileSync(globalPath, JSON.stringify({ staffingTargets: globalTargets, deadlineDay, startDay, operatingStartTime, operatingEndTime, shiftMorningStart, shiftMorningEnd, shiftEveningStart, shiftEveningEnd, shiftPresets }, null, 2), 'utf-8');
+                fs.writeFileSync(globalPath, JSON.stringify({ staffingTargets: globalTargets, deadlineDay, startDay, operatingStartTime, operatingEndTime, shiftMorningStart, shiftMorningEnd, shiftEveningStart, shiftEveningEnd, shiftPresets, monthlyRevenues }, null, 2), 'utf-8');
               }
 
               const employeesPath = path.resolve(dataDir, 'db-employees.json');
@@ -218,7 +222,8 @@ function localDbPlugin() {
                 shiftEveningStart: shiftEveningStart,
                 shiftEveningEnd: shiftEveningEnd,
                 shiftPresets: shiftPresets,
-                employeeOrder: employeeOrder
+                employeeOrder: employeeOrder,
+                monthlyRevenues: monthlyRevenues
               }));
             } catch (error) {
               res.statusCode = 500;
@@ -276,7 +281,8 @@ function localDbPlugin() {
                   shiftEveningStart: parsed.shiftEveningStart !== undefined ? parsed.shiftEveningStart : '08:30',
                   shiftEveningEnd: parsed.shiftEveningEnd !== undefined ? parsed.shiftEveningEnd : '17:30',
                   shiftPresets: parsed.shiftPresets !== undefined ? parsed.shiftPresets : [],
-                  employeeOrder: parsed.employeeOrder !== undefined ? parsed.employeeOrder : []
+                  employeeOrder: parsed.employeeOrder !== undefined ? parsed.employeeOrder : [],
+                  monthlyRevenues: parsed.monthlyRevenues !== undefined ? parsed.monthlyRevenues : {}
                 }, null, 2), 'utf-8');
 
                 // Write employees file
