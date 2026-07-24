@@ -39,7 +39,9 @@ import {
   subscribeToMonthlyRevenues,
   updateMonthlyRevenues,
   subscribeToRevenueStaffRules,
-  updateRevenueStaffRules
+  updateRevenueStaffRules,
+  subscribeToMarkedEmptyCells,
+  updateMarkedEmptyCells
 } from './services/scheduler';
 import type { WorkSchedule, WorkerAvailability, StaffingTarget, Employee, ShiftPreset, RevenueStaffRules } from './services/scheduler';
 import { isValidConfig } from './firebase';
@@ -581,6 +583,13 @@ function App() {
   const [isFTAssignModalOpen, setIsFTAssignModalOpen] = useState(false);
   const [pendingAssignAvail, setPendingAssignAvail] = useState<WorkerAvailability | null>(null);
 
+  // Context menu state for right-click shift/cell actions
+  const [contextMenu, setContextMenu] = useState<{
+    x: number; y: number; schedule?: WorkSchedule; emptyCell?: { employeeName: string; dateStr: string };
+  } | null>(null);
+
+  const [markedEmptyCells, setMarkedEmptyCells] = useState<Record<string, boolean>>({});
+
   // Form states
   const [employeeName, setEmployeeName] = useState('');
   const [workplace, setWorkplace] = useState(workplaces[0]?.name || '');
@@ -801,6 +810,9 @@ function App() {
       setRevenueStaffRules(rules);
       setTempRules(rules);
     });
+    const unsubMarkedEmptyCells = subscribeToMarkedEmptyCells((cells) => {
+      setMarkedEmptyCells(cells);
+    });
 
     return () => {
       unsubSchedules();
@@ -819,6 +831,7 @@ function App() {
       unsubEmployeeOrder();
       unsubMonthlyRevenues();
       unsubRevenueStaffRules();
+      unsubMarkedEmptyCells();
     };
   }, []);
 
@@ -1772,8 +1785,34 @@ function App() {
     }
   };
 
-  const getScheduleTheme = (_schedule: WorkSchedule) => {
+  const getScheduleTheme = (schedule: WorkSchedule) => {
+    if (schedule.markedBlue) return COLOR_THEMES.lightBlue;
     return COLOR_THEMES.indigo;
+  };
+
+  const handleToggleMarkBlue = async (schedule: WorkSchedule) => {
+    try {
+      await updateSchedule(schedule.id, { markedBlue: !schedule.markedBlue });
+    } catch (err) {
+      console.error('Failed to toggle mark blue:', err);
+    }
+    setContextMenu(null);
+  };
+
+  const handleToggleMarkEmptyCellBlue = async (employeeName: string, dateStr: string) => {
+    const key = `${employeeName.trim().toLowerCase()}|${dateStr}`;
+    const next = { ...markedEmptyCells };
+    if (next[key]) {
+      delete next[key];
+    } else {
+      next[key] = true;
+    }
+    try {
+      await updateMarkedEmptyCells(next);
+    } catch (err) {
+      console.error('Failed to toggle mark empty cell blue:', err);
+    }
+    setContextMenu(null);
   };
 
   // Calendar calculations (filtered by the currently active visible month grid)
@@ -1923,6 +1962,7 @@ function App() {
     const headers = ['人員姓名', ...dateHeaders, '總工時(hrs)'];
     const rows: string[][] = [];
     const redFontCells = new Set<string>();
+    const markedBlueCells = new Set<string>();
 
     // Add employee rows
     allEmployees.forEach((empName, empIdx) => {
@@ -1941,6 +1981,14 @@ function App() {
 
         // Check if worker registered standard work hours (not 00:00 to 00:00 rest day)
         const registeredToWork = empAvailabilities.some(a => !(a.startTime === '00:00' && a.endTime === '00:00'));
+
+        // Track marked-blue cells
+        const cellKey = `${empName.trim().toLowerCase()}|${dateStr}`;
+        const hasMarkedBlue = empSchedules.some(s => s.markedBlue) || !!markedEmptyCells[cellKey];
+        if (hasMarkedBlue) {
+          const cellRef = XLSX.utils.encode_cell({ r: empIdx + 1, c: dateIdx + 1 });
+          markedBlueCells.add(cellRef);
+        }
 
         // Accumulate hours
         empSchedules.forEach(sched => {
@@ -1979,6 +2027,7 @@ function App() {
         const decoded = XLSX.utils.decode_cell(cellRef);
         const { r, c } = decoded;
         const isRedFont = redFontCells.has(cellRef);
+        const isMarkedBlue = markedBlueCells.has(cellRef);
 
         // Check if employee for this row is a newcomer
         let isNewcomer = false;
@@ -2023,11 +2072,15 @@ function App() {
           },
           ...((isPackageHeader && r === 0) ? {
             fill: {
-              fgColor: { rgb: "86EFAC" } // Darker green background for headers containing "包"
+              fgColor: { rgb: "86EFAC" } // Green background for headers containing "包"
             }
           } : (r > 0 && isNewcomer) ? {
             fill: {
               fgColor: { rgb: "FFC0CB" } // Pink background for newcomer row
+            }
+          } : isMarkedBlue ? {
+            fill: {
+              fgColor: { rgb: "93C5FD" } // Light blue for marked shifts
             }
           } : {})
         };
@@ -4683,13 +4736,22 @@ function App() {
                                         a => a.employeeName.trim().toLowerCase() === empName.toLowerCase() && a.date === dateStr && a.confirmed !== true
                                       ).sort((a, b) => compareTimeStrings(a.startTime, b.startTime));
 
-                                      return (
-                                        <td
-                                          key={dateStr}
-                                          onClick={() => setSelectedDateStr(dateStr)}
-                                          className={`p-0.5 pt-1 pb-1 border-r border-solid border-b border-dotted border-[#DAC0A3]/40 text-center w-[100px] h-[48px] relative align-middle transition-colors ${isSelected ? 'bg-[#8D6E63]/5' : ''
-                                            }`}
-                                        >
+                                       const cellKey = `${empName.trim().toLowerCase()}|${dateStr}`;
+                                       const isCellMarkedBlue = !!markedEmptyCells[cellKey];
+
+                                       return (
+                                         <td
+                                           key={dateStr}
+                                           onClick={() => setSelectedDateStr(dateStr)}
+                                           onContextMenu={(e) => {
+                                             if (e.target === e.currentTarget || empSchedules.length === 0) {
+                                               e.preventDefault();
+                                               e.stopPropagation();
+                                               setContextMenu({ x: e.clientX, y: e.clientY, emptyCell: { employeeName: empName, dateStr } });
+                                             }
+                                           }}
+                                           className={`p-0.5 pt-1 pb-1 border-r border-solid border-b border-dotted border-[#DAC0A3]/40 text-center w-[100px] h-[48px] relative align-middle transition-colors ${isSelected ? 'bg-[#8D6E63]/5' : ''} ${isCellMarkedBlue ? '!bg-[#93C5FD]/40' : ''}`}
+                                         >
                                           {empSchedules.length > 0 || empAvails.length > 0 ? (
                                             // Scheduled shifts + remaining availabilities (both shown together)
                                             <div className="space-y-0.5">
@@ -4700,13 +4762,19 @@ function App() {
                                                 const originalAvail = availabilities.find(a => a.id === sched.availabilityId);
                                                 const registerNotes = originalAvail?.notes ? getCleanNote(originalAvail.notes) : '';
                                                 return (
-                                                  <div
-                                                    key={sched.id}
-                                                    onClick={(e) => handleOpenEditModal(sched, e)}
-                                                    className={`text-xs py-0.5 px-1.5 rounded-md border font-semibold truncate cursor-pointer transition-all hover:scale-[1.02] ${theme.bg} ${theme.border} ${theme.text}`}
-                                                    title={`👤 ${sched.employeeName} (${sched.startTime}-${sched.endTime})${registerNotes ? ` | 備註: ${registerNotes}` : ''}${managerNote ? ` | 📝 主管備註: ${managerNote}` : ''}`}
-                                                  >
-                                                    {sched.startTime}-{sched.endTime}
+                                                   <div
+                                                     key={sched.id}
+                                                     onClick={(e) => handleOpenEditModal(sched, e)}
+                                                     onContextMenu={(e) => {
+                                                       e.preventDefault();
+                                                       e.stopPropagation();
+                                                       setContextMenu({ x: e.clientX, y: e.clientY, schedule: sched });
+                                                     }}
+                                                     className={`text-xs py-0.5 px-1.5 rounded-md border font-semibold truncate cursor-pointer transition-all hover:scale-[1.02] ${theme.bg} ${theme.border} ${theme.text}`}
+                                                     title={`👤 ${sched.employeeName} (${sched.startTime}-${sched.endTime})${registerNotes ? ` | 備註: ${registerNotes}` : ''}${managerNote ? ` | 📝 主管備註: ${managerNote}` : ''}`}
+                                                   >
+                                                     {sched.markedBlue && <span className="mr-0.5">🔵</span>}
+                                                     {sched.startTime}-{sched.endTime}
                                                     {managerNote && (
                                                       <div className="text-[10px] opacity-90 truncate mt-0.5 leading-normal font-medium" title={managerNote}>
                                                         ({managerNote})
@@ -6330,6 +6398,47 @@ function App() {
             </form>
           </div>
         </div>
+      )}
+      {/* Right-click Context Menu */}
+      {contextMenu && (
+        <>
+          <div
+            className="fixed inset-0 z-[200]"
+            onClick={() => setContextMenu(null)}
+            onContextMenu={(e) => { e.preventDefault(); setContextMenu(null); }}
+          />
+          <div
+            className="fixed z-[201] bg-white rounded-xl shadow-xl border border-[#DAC0A3]/50 py-1.5 min-w-[180px]"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+          >
+            <div className="px-3 py-1.5 text-[10px] font-bold text-[#8D6E63] uppercase tracking-wider border-b border-[#DAC0A3]/30 mb-1">
+              {contextMenu.schedule ? contextMenu.schedule.employeeName : contextMenu.emptyCell?.employeeName} ({contextMenu.emptyCell ? contextMenu.emptyCell.dateStr : contextMenu.schedule?.date})
+            </div>
+            {contextMenu.schedule ? (
+              <button
+                onClick={() => handleToggleMarkBlue(contextMenu.schedule!)}
+                className="w-full text-left px-3 py-2 text-xs font-semibold text-[#1e40af] hover:bg-blue-50 transition-colors flex items-center gap-2 cursor-pointer"
+              >
+                {contextMenu.schedule.markedBlue ? (
+                  <><span className="text-base">⬜</span><span>取消藍色標記</span></>
+                ) : (
+                  <><span className="text-base">🔵</span><span>藍色標記此班次</span></>
+                )}
+              </button>
+            ) : contextMenu.emptyCell ? (
+              <button
+                onClick={() => handleToggleMarkEmptyCellBlue(contextMenu.emptyCell!.employeeName, contextMenu.emptyCell!.dateStr)}
+                className="w-full text-left px-3 py-2 text-xs font-semibold text-[#1e40af] hover:bg-blue-50 transition-colors flex items-center gap-2 cursor-pointer"
+              >
+                {markedEmptyCells[`${contextMenu.emptyCell.employeeName.trim().toLowerCase()}|${contextMenu.emptyCell.dateStr}`] ? (
+                  <><span className="text-base">⬜</span><span>取消日期藍色標記</span></>
+                ) : (
+                  <><span className="text-base">🔵</span><span>藍色標記此日期</span></>
+                )}
+              </button>
+            ) : null}
+          </div>
+        </>
       )}
     </div>
   );

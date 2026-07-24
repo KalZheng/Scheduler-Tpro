@@ -27,6 +27,7 @@ export interface WorkSchedule {
   originalStartTime?: string | null;
   originalEndTime?: string | null;
   availabilityId?: string;
+  markedBlue?: boolean;
 }
 
 export interface WorkerAvailability {
@@ -100,6 +101,7 @@ let localShiftPresetsListeners: ((presets: ShiftPreset[]) => void)[] = [];
 let localEmployeeOrderListeners: ((order: string[]) => void)[] = [];
 let localMonthlyRevenuesListeners: ((revenues: Record<number, number>) => void)[] = [];
 let localRevenueStaffRulesListeners: ((rules: RevenueStaffRules) => void)[] = [];
+let localMarkedEmptyCellsListeners: ((markedCells: Record<string, boolean>) => void)[] = [];
 
 export interface ShiftPreset {
   name: string;
@@ -136,6 +138,7 @@ interface DbSchema {
   employeeOrder?: string[];
   monthlyRevenues?: Record<string, number>;
   revenueStaffRules?: RevenueStaffRules;
+  markedEmptyCells?: Record<string, boolean>;
 }
 
 const inMemoryDb: DbSchema = {
@@ -167,7 +170,8 @@ const inMemoryDb: DbSchema = {
     tier4Staff: 5,
     incrementAmount: 1000,
     maxStaff: 8
-  }
+  },
+  markedEmptyCells: {}
 };
 
 const loadedMonths = new Set<string>();
@@ -559,6 +563,7 @@ const saveDbForDate = async (dateStr?: string) => {
   localStorage.setItem('scheduler_employee_order', JSON.stringify(inMemoryDb.employeeOrder || []));
   localStorage.setItem('monthly_revenue_data', JSON.stringify(inMemoryDb.monthlyRevenues || {}));
   localStorage.setItem('revenue_staff_rules', JSON.stringify(inMemoryDb.revenueStaffRules || {}));
+  localStorage.setItem('marked_empty_cells', JSON.stringify(inMemoryDb.markedEmptyCells || {}));
 
   // Trigger active listeners immediately for immediate UI response
   localListeners.forEach(listener => listener([...inMemoryDb.schedules]));
@@ -595,6 +600,7 @@ const saveDbForDate = async (dateStr?: string) => {
     incrementAmount: 1000,
     maxStaff: 8
   }));
+  localMarkedEmptyCellsListeners.forEach(listener => listener(inMemoryDb.markedEmptyCells || {}));
 
   // POST current in-memory state to local JSON file
   try {
@@ -1319,6 +1325,36 @@ export const updateRevenueStaffRules = async (rules: RevenueStaffRules) => {
     return await setDoc(docRef, { revenueStaffRules: rules }, { merge: true });
   } else {
     inMemoryDb.revenueStaffRules = rules;
+    await saveDbForDate();
+  }
+};
+
+export const subscribeToMarkedEmptyCells = (callback: (markedCells: Record<string, boolean>) => void) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    return onSnapshot(docRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        callback(data.markedEmptyCells !== undefined ? data.markedEmptyCells : {});
+      } else {
+        callback({});
+      }
+    });
+  } else {
+    localMarkedEmptyCellsListeners.push(callback);
+    callback(inMemoryDb.markedEmptyCells || {});
+    return () => {
+      localMarkedEmptyCellsListeners = localMarkedEmptyCellsListeners.filter(l => l !== callback);
+    };
+  }
+};
+
+export const updateMarkedEmptyCells = async (markedCells: Record<string, boolean>) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    return await setDoc(docRef, { markedEmptyCells: markedCells }, { merge: true });
+  } else {
+    inMemoryDb.markedEmptyCells = markedCells;
     await saveDbForDate();
   }
 };
