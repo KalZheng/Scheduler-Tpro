@@ -16,38 +16,63 @@ import {
   deleteEmployee,
   updateDayNote,
   subscribeToDeadlineDay,
-  updateDeadlineDay,
   subscribeToStartDay,
-  updateStartDay,
   subscribeToOperatingStartTime,
-  updateOperatingStartTime,
   subscribeToOperatingEndTime,
-  updateOperatingEndTime,
   subscribeToShiftMorningStart,
-  updateShiftMorningStart,
   subscribeToShiftMorningEnd,
-  updateShiftMorningEnd,
-  subscribeToShiftEveningStart,
-  updateShiftEveningStart,
-  subscribeToShiftEveningEnd,
-  updateShiftEveningEnd,
   subscribeToShiftPresets,
-  updateShiftPresets,
   subscribeToEmployeeOrder,
   updateEmployeeOrder,
   updateAvailability,
   subscribeToMonthlyRevenues,
   updateMonthlyRevenues,
   subscribeToRevenueStaffRules,
-  updateRevenueStaffRules,
   subscribeToMarkedEmptyCells,
   updateMarkedEmptyCells
 } from './services/scheduler';
 import type { WorkSchedule, WorkerAvailability, StaffingTarget, Employee, ShiftPreset, RevenueStaffRules } from './services/scheduler';
 import { isValidConfig } from './firebase';
-declare const google: any;
 import workplaces from './config/workplaces.json';
+
+import { COLOR_THEMES } from './utils/constants';
+import {
+  safeConfirm,
+  formatDateString,
+  getMonthGridDates,
+  getDaysInMonth,
+  calculateDuration,
+  isOverEightHours,
+  hasSevenConsecutiveDays,
+  getColorFromName,
+  isShiftActiveAtHour,
+  getManagerNote,
+  getWorkerNote,
+  compareTimeStrings
+} from './utils/dateUtils';
+import { exportToExcel, generateExcelWorkbook } from './utils/excelExport';
+
+import { ContextMenu } from './components/modals/ContextMenu';
+import { EmployeeModal } from './components/modals/EmployeeModal';
+import { ShiftModal } from './components/modals/ShiftModal';
+import { FTAssignModal } from './components/modals/FTAssignModal';
+
+import { WorkerLogin } from './components/worker/WorkerLogin';
+import { WorkerAvailForm } from './components/worker/WorkerAvailForm';
+import { WorkerAvailModal } from './components/worker/WorkerAvailModal';
+
+import { ManagerLogin } from './components/manager/ManagerLogin';
+import { ManagerHeader } from './components/manager/ManagerHeader';
+import { ManagerCalendarView } from './components/manager/ManagerCalendarView';
+import { ManagerGridView } from './components/manager/ManagerGridView';
+import { ManagerEmployeeView } from './components/manager/ManagerEmployeeView';
+import { ManagerCalculationView } from './components/manager/ManagerCalculationView';
+import { ManagerSystemView } from './components/manager/ManagerSystemView';
+import { ManagerAnalysisView } from './components/manager/ManagerAnalysisView';
+import { ManagerSelectedDateDetail } from './components/manager/ManagerSelectedDateDetail';
+
 import * as XLSX from 'xlsx-js-style';
+declare const google: any;
 
 export interface WorkerAvailConfig {
   date: string;
@@ -56,284 +81,6 @@ export interface WorkerAvailConfig {
   workplace: string;
   notes: string;
 }
-
-
-const safeConfirm = (message: string): boolean => {
-  const isNoConfirm = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('noconfirm') === 'true';
-  return isNoConfirm || window.confirm(message);
-};
-
-const ALL_POSITIONS: ('餐吧' | 'POS機' | '後吧' | '收班' | '開早')[] = ['餐吧', 'POS機', '後吧', '收班', '開早'];
-
-const DAYS_OF_WEEK = [
-  { value: 1, name: '週一', english: 'Monday', short: 'Mon' },
-  { value: 2, name: '週二', english: 'Tuesday', short: 'Tue' },
-  { value: 3, name: '週三', english: 'Wednesday', short: 'Wed' },
-  { value: 4, name: '週四', english: 'Thursday', short: 'Thu' },
-  { value: 5, name: '週五', english: 'Friday', short: 'Fri' },
-  { value: 6, name: '週六', english: 'Saturday', short: 'Sat' },
-  { value: 7, name: '週日', english: 'Sunday', short: 'Sun' }
-];
-
-// Helper: Calculate date list in a start-end range
-const getDatesInRange = (startStr: string, endStr: string): Date[] => {
-  const dates: Date[] = [];
-  const start = new Date(startStr);
-  const end = new Date(endStr);
-
-  if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) {
-    return [];
-  }
-
-  const current = new Date(start);
-  while (current <= end) {
-    dates.push(new Date(current));
-    current.setDate(current.getDate() + 1);
-  }
-  return dates;
-};
-const ALL_TIME_CHOICES = Array.from({ length: 48 }, (_, i) => {
-  const h = Math.floor(i / 2).toString().padStart(2, '0');
-  const m = i % 2 === 0 ? '00' : '30';
-  return `${h}:${m}`;
-});
-
-const compareTimeStrings = (timeA: string, timeB: string): number => {
-  if (!timeA || !timeB) return 0;
-  const [hA, mA] = timeA.split(':').map(val => parseInt(val, 10) || 0);
-  const [hB, mB] = timeB.split(':').map(val => parseInt(val, 10) || 0);
-  if (hA !== hB) return hA - hB;
-  return mA - mB;
-};
-
-const COLOR_THEMES: Record<string, { bg: string, border: string, text: string, dot: string, hover: string, badgeBg: string }> = {
-  indigo: {
-    // Espresso / Deep Roasted Coffee
-    bg: 'bg-[#5D4037]/8',
-    border: 'border-[#4E342E]/25',
-    text: 'text-[#3E2723]',
-    dot: 'bg-[#4E342E]',
-    hover: 'hover:border-[#4E342E]/50 hover:bg-[#5D4037]/12',
-    badgeBg: 'bg-[#4E342E]'
-  },
-  emerald: {
-    // Matcha / Green Tea Accent
-    bg: 'bg-[#2E7D32]/8',
-    border: 'border-[#2E7D32]/25',
-    text: 'text-[#1B5E20]',
-    dot: 'bg-[#2E7D32]',
-    hover: 'hover:border-[#2E7D32]/50 hover:bg-[#2E7D32]/12',
-    badgeBg: 'bg-[#2E7D32]'
-  },
-  violet: {
-    // Cappuccino / Cinnamon Warm Cocoa
-    bg: 'bg-[#8D6E63]/10',
-    border: 'border-[#8D6E63]/30',
-    text: 'text-[#5D4037]',
-    dot: 'bg-[#8D6E63]',
-    hover: 'hover:border-[#8D6E63]/60 hover:bg-[#8D6E63]/15',
-    badgeBg: 'bg-[#8D6E63]'
-  },
-  amber: {
-    // Caramel / Sweet Orange Tan
-    bg: 'bg-[#E65100]/8',
-    border: 'border-[#E65100]/25',
-    text: 'text-[#BF360C]',
-    dot: 'bg-[#E65100]',
-    hover: 'hover:border-[#E65100]/50 hover:bg-[#E65100]/12',
-    badgeBg: 'bg-[#E65100]'
-  },
-  rose: {
-    // Latte / Milky Tan Beige
-    bg: 'bg-[#D7CCC8]/35',
-    border: 'border-[#BCAAA4]/40',
-    text: 'text-[#6D4C41]',
-    dot: 'bg-[#A1887F]',
-    hover: 'hover:border-[#BCAAA4]/70 hover:bg-[#D7CCC8]/50',
-    badgeBg: 'bg-[#8D6E63]'
-  },
-  lightBlue: {
-    bg: '!bg-[#E0F2FE]',
-    border: '!border-[#bae6fd]',
-    text: 'text-[#0369a1]',
-    dot: 'bg-[#0284c7]',
-    hover: 'hover:border-[#38bdf8] hover:bg-[#e0f2fe]/90',
-    badgeBg: 'bg-[#0284c7]'
-  }
-};
-
-
-
-// Date helper: Generate YYYY-MM-DD string
-const formatDateString = (date: Date): string => {
-  const y = date.getFullYear();
-  const m = (date.getMonth() + 1).toString().padStart(2, '0');
-  const d = date.getDate().toString().padStart(2, '0');
-  return `${y}-${m}-${d}`;
-};
-
-// Date helper: Format month and day (e.g. "5/25")
-const formatMMDD = (date: Date): string => {
-  return `${date.getMonth() + 1}/${date.getDate()}`;
-};
-
-// Date helper: Generate calendar grid dates (42 days, starting on Monday of the first week of the month)
-const getMonthGridDates = (monthStart: Date): Date[] => {
-  const start = new Date(monthStart);
-  const day = start.getDay();
-  // Find how many days to go back to reach Monday (0=Sun, 1=Mon, ..., 6=Sat)
-  const daysToSubtract = day === 0 ? 6 : day - 1;
-  start.setDate(start.getDate() - daysToSubtract);
-
-  const dates = [];
-  // Generate 42 days (6 weeks) to cover all calendar rows
-  for (let i = 0; i < 42; i++) {
-    const d = new Date(start);
-    d.setDate(start.getDate() + i);
-    dates.push(d);
-  }
-  return dates;
-};
-
-
-
-// Date helper: Get all dates in the currently selected month
-const getDaysInMonth = (monthStart: Date): Date[] => {
-  const year = monthStart.getFullYear();
-  const month = monthStart.getMonth();
-  const date = new Date(year, month, 1);
-  const days = [];
-  while (date.getMonth() === month) {
-    days.push(new Date(date));
-    date.setDate(date.getDate() + 1);
-  }
-  return days;
-};
-
-
-// Date helper: Calculate duration (supporting overnight shifts)
-const calculateDuration = (start: string, end: string): number => {
-  if (!start || !end) return 0;
-  const [startH, startM] = start.split(':').map(Number);
-  const [endH, endM] = end.split(':').map(Number);
-  if (isNaN(startH) || isNaN(startM) || isNaN(endH) || isNaN(endM)) return 0;
-
-  const startMinutes = startH * 60 + startM;
-  let endMinutes = endH * 60 + endM;
-
-  if (endMinutes < startMinutes) {
-    // Overnight shift
-    endMinutes += 24 * 60;
-  }
-
-  return (endMinutes - startMinutes) / 60;
-};
-
-// Check 1: Effective work hours check (1 hour break deducted)
-// Returns true if effective work hours (raw - 1h break) exceed 8 hours
-const isOverEightHours = (start: string, end: string): boolean => {
-  const raw = calculateDuration(start, end);
-  const effective = raw - 1; // deduct mandatory 1-hour break
-  return effective > 8;
-};
-
-// Check 2: Consecutive days check
-// Given a set of date strings (YYYY-MM-DD), returns true if any run of consecutive days >= 7
-const hasSevenConsecutiveDays = (dateStrings: string[]): boolean => {
-  if (dateStrings.length < 7) return false;
-  const sorted = [...dateStrings]
-    .map(s => new Date(s).getTime())
-    .filter(t => !isNaN(t))
-    .sort((a, b) => a - b);
-  const unique = Array.from(new Set(sorted));
-  let streak = 1;
-  for (let i = 1; i < unique.length; i++) {
-    const diffDays = (unique[i] - unique[i - 1]) / (1000 * 60 * 60 * 24);
-    if (diffDays === 1) {
-      streak++;
-      if (streak >= 7) return true;
-    } else {
-      streak = 1;
-    }
-  }
-  return false;
-};
-
-// Automate color mapping based on Employee Name
-const getColorFromName = (name: string): string => {
-  if (!name || !name.trim()) return 'indigo';
-  const trimmed = name.trim();
-  let hash = 0;
-  for (let i = 0; i < trimmed.length; i++) {
-    hash = trimmed.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  const colors = ['indigo', 'emerald', 'violet', 'amber', 'rose'];
-  const index = Math.abs(hash) % colors.length;
-  return colors[index];
-};
-
-// Helper: check if scheduled shift is active during a specific hour Index (0-23)
-const isShiftActiveAtHour = (startTime: string, endTime: string, hourIndex: number): boolean => {
-  if (!startTime || !endTime) return false;
-  const [sh, sm] = startTime.split(':').map(Number);
-  const [eh, em] = endTime.split(':').map(Number);
-  if (isNaN(sh) || isNaN(sm) || isNaN(eh) || isNaN(em)) return false;
-
-  const start = sh + sm / 60;
-  const end = eh + em / 60;
-  const checkTime = hourIndex + 0.5; // midpoint of the hour
-
-  if (end < start) {
-    // Overnight shift
-    return (checkTime >= start) || (checkTime < end);
-  }
-  return (checkTime >= start) && (checkTime < end);
-};
-
-const getCleanNote = (notes?: string): string => {
-  if (!notes) return '';
-  const prefix = '由登記可用時間自動排入: ';
-  if (notes.startsWith(prefix)) {
-    return notes.substring(prefix.length).trim();
-  }
-  if (notes === '由登記可用時間自動排入') {
-    return '';
-  }
-  return notes.trim();
-};
-
-const getManagerNote = (sched: WorkSchedule): string => {
-  if (sched.managerNotes !== undefined) return sched.managerNotes;
-  const n = sched.notes || '';
-  if (n.startsWith('由登記可用時間自動排入')) {
-    return '';
-  }
-  return n;
-};
-
-const getWorkerNote = (sched: WorkSchedule): string => {
-  if (sched.workerNotes !== undefined) return sched.workerNotes;
-  const n = sched.notes || '';
-  if (n.startsWith('由登記可用時間自動排入: ')) {
-    return n.substring('由登記可用時間自動排入: '.length);
-  }
-  if (n === '由登記可用時間自動排入') {
-    return '';
-  }
-  return '';
-};
-
-const getTooltipAlignment = (dayIndex: number, totalDays: number): string => {
-  if (dayIndex < 5) return 'left-0';
-  if (dayIndex > totalDays - 6) return 'right-0';
-  return 'left-1/2 -translate-x-1/2';
-};
-
-const getTooltipArrowAlignment = (dayIndex: number, totalDays: number): string => {
-  if (dayIndex < 5) return 'left-4';
-  if (dayIndex > totalDays - 6) return 'right-4';
-  return 'left-1/2 -translate-x-1/2';
-};
 
 function App() {
   const [schedules, setSchedules] = useState<WorkSchedule[]>([]);
@@ -359,9 +106,7 @@ function App() {
       }
     };
 
-    // Run once on load
     handleHashChange();
-
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
@@ -388,7 +133,7 @@ function App() {
     window.location.hash = '#/worker';
   };
 
-  // Manager view sub-mode: calendar or grid or employees or calculation or system or analysis
+  // Manager view sub-mode
   const [managerViewMode, setManagerViewMode] = useState<'calendar' | 'grid' | 'employees' | 'calculation' | 'system' | 'analysis'>('calendar');
   const [deadlineDay, setDeadlineDay] = useState<number>(20);
   const [startDay, setStartDay] = useState<number>(15);
@@ -396,12 +141,8 @@ function App() {
   const [operatingEndTime, setOperatingEndTime] = useState<string>('20:00');
   const [shiftMorningStart, setShiftMorningStart] = useState<string>('06:30');
   const [shiftMorningEnd, setShiftMorningEnd] = useState<string>('15:30');
-  const [shiftEveningStart, setShiftEveningStart] = useState<string>('08:30');
-  const [shiftEveningEnd, setShiftEveningEnd] = useState<string>('17:30');
   const [shiftPresets, setShiftPresets] = useState<ShiftPreset[]>([]);
   const [employeeOrder, setEmployeeOrder] = useState<string[]>([]);
-
-
 
   const timeSlots = useMemo(() => {
     if (!operatingStartTime || !operatingEndTime) return [];
@@ -413,7 +154,6 @@ function App() {
     let endMinutes = endH * 60 + endM;
 
     if (endMinutes < startMinutes) {
-      // Overnight shift
       endMinutes += 24 * 60;
     }
 
@@ -448,7 +188,6 @@ function App() {
     return list;
   }, [operatingStartTime, operatingEndTime]);
 
-  // Reference to the grid scroll container to enable horizontal scrolling via mouse wheel
   const gridContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -468,10 +207,7 @@ function App() {
     };
   }, [managerViewMode, activeRole, isAuthenticated]);
 
-  // Revenue-based staffing calculation states (persisted to database)
   const [monthlyRevenues, setMonthlyRevenues] = useState<Record<number, number>>({});
-
-  // Revenue staffing rules configuration
   const [revenueStaffRules, setRevenueStaffRules] = useState<RevenueStaffRules>({
     tier1Limit: 1500,
     tier2Limit: 2500,
@@ -510,13 +246,11 @@ function App() {
     }
   };
 
-  // Employee list states
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
   const [employeeFormMode, setEmployeeFormMode] = useState<'create' | 'edit'>('create');
   const [editingEmployeeId, setEditingEmployeeId] = useState<string | null>(null);
 
-  // Employee Form fields
   const [empName, setEmpName] = useState('');
   const [empPhone, setEmpPhone] = useState('');
   const [empStatus, setEmpStatus] = useState<'正式夥伴' | '兼職夥伴'>('兼職夥伴');
@@ -529,12 +263,10 @@ function App() {
   const [uploadExcelStatus, setUploadExcelStatus] = useState<'idle' | 'success' | 'error' | 'noconfig'>('idle');
   const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
 
-  // Search/Filter for employee list
   const [empSearch, setEmpSearch] = useState('');
   const [empStatusFilter, setEmpStatusFilter] = useState<'all' | '正式夥伴' | '兼職夥伴'>('all');
   const [empActiveFilter, setEmpActiveFilter] = useState<'all' | 'active' | 'inactive'>('active');
 
-  // Worker identity (cached in localStorage)
   const [workerName, setWorkerName] = useState(() => localStorage.getItem('scheduler_worker_name') || '');
   const [isWorkerVerified, setIsWorkerVerified] = useState(() => localStorage.getItem('scheduler_worker_verified') === 'true' && !!localStorage.getItem('scheduler_worker_name'));
 
@@ -547,23 +279,11 @@ function App() {
   const [workerPhoneInput, setWorkerPhoneInput] = useState('');
   const [workerVerifyError, setWorkerVerifyError] = useState('');
 
-  // Worker availability submission form states
   const [availNotes, setAvailNotes] = useState('');
   const [availSelectedDates, setAvailSelectedDates] = useState<string[]>([]);
-
-
-  // Modal and config state for per-day availability settings
   const [isWorkerAvailModalOpen, setIsWorkerAvailModalOpen] = useState(false);
   const [availConfigs, setAvailConfigs] = useState<WorkerAvailConfig[]>([]);
 
-
-  // Worker confirmed shifts calendar month state
-  const [workerCalendarMonth, setWorkerCalendarMonth] = useState<Date>(() => {
-    const today = new Date();
-    return new Date(today.getFullYear(), today.getMonth() + 1, 1);
-  });
-
-  // Month Calendar View states
   const [currentMonthStart, setCurrentMonthStart] = useState<Date>(() => {
     const today = new Date();
     return new Date(today.getFullYear(), today.getMonth() + 1, 1);
@@ -576,21 +296,18 @@ function App() {
   const [exportStartDate, setExportStartDate] = useState<string>('');
   const [exportEndDate, setExportEndDate] = useState<string>('');
 
-  // Modal states
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isFTAssignModalOpen, setIsFTAssignModalOpen] = useState(false);
   const [pendingAssignAvail, setPendingAssignAvail] = useState<WorkerAvailability | null>(null);
 
-  // Context menu state for right-click shift/cell actions
   const [contextMenu, setContextMenu] = useState<{
     x: number; y: number; schedule?: WorkSchedule; emptyCell?: { employeeName: string; dateStr: string };
   } | null>(null);
 
   const [markedEmptyCells, setMarkedEmptyCells] = useState<Record<string, boolean>>({});
 
-  // Form states
   const [employeeName, setEmployeeName] = useState('');
   const [workplace, setWorkplace] = useState(workplaces[0]?.name || '');
   const [startTime, setStartTime] = useState('09:00');
@@ -601,23 +318,19 @@ function App() {
   const [formOriginalStartTime, setFormOriginalStartTime] = useState<string | null>(null);
   const [formOriginalEndTime, setFormOriginalEndTime] = useState<string | null>(null);
 
-  // Creation Mode: multiple date selects (aligned in 2 rows of 7 columns)
   const [selectedDates, setSelectedDates] = useState<string[]>([]);
-  // Editing Mode: single date picker input
   const [singleDate, setSingleDate] = useState('');
 
-  // Generate date checklist for the modal form aligned with the current viewing month
   const pickerDates = getMonthGridDates(currentMonthStart);
 
-  // Date calculations for worker's availability selection (Next Month)
-  const workerNextMonthStart = (() => {
+  const workerNextMonthStart = useMemo(() => {
     const today = new Date();
     return new Date(today.getFullYear(), today.getMonth() + 1, 1);
-  })();
+  }, []);
   const workerCalendarGridDates = getMonthGridDates(workerNextMonthStart);
   const workerDaysInMonth = getDaysInMonth(workerNextMonthStart);
 
-  const isWorkerEditable = (() => {
+  const isWorkerEditable = useMemo(() => {
     if (!workerName.trim()) return true;
     const targetMonthStr = formatDateString(workerNextMonthStart).substring(0, 7);
     const hasConfirmed = schedules.some(
@@ -627,33 +340,20 @@ function App() {
     const todayNum = new Date().getDate();
     if (todayNum < startDay) return false;
     return (todayNum <= deadlineDay) || !hasConfirmed;
-  })();
-
-  const handleStatusChange = (status: '正式夥伴' | '兼職夥伴') => {
-    setEmpStatus(status);
-  };
+  }, [workerName, workerNextMonthStart, schedules, startDay, deadlineDay]);
 
   const handleTagClick = (pos: '餐吧' | 'POS機' | '後吧' | '收班' | '開早') => {
     if (empTrainingPos === pos) {
-      // Training -> Trained
       setEmpTrainingPos(null);
-      setEmpTrainedPoss(prev => {
-        const next = prev.includes(pos) ? prev : [...prev, pos];
-        return next;
-      });
+      setEmpTrainedPoss(prev => (prev.includes(pos) ? prev : [...prev, pos]));
     } else if (empTrainedPoss.includes(pos)) {
-      // Trained -> Available
       setEmpTrainedPoss(prev => prev.filter(p => p !== pos));
     } else {
-      // Available -> Training if empty, else -> Trained
       if (!empTrainingPos) {
         setEmpTrainingPos(pos);
       } else {
-        setEmpTrainedPoss(prev => {
-          const next = prev.includes(pos) ? prev : [...prev, pos];
-          setEmpTrainingPos(null);
-          return next;
-        });
+        setEmpTrainedPoss(prev => (prev.includes(pos) ? prev : [...prev, pos]));
+        setEmpTrainingPos(null);
       }
     }
   };
@@ -683,10 +383,7 @@ function App() {
     const pos = e.dataTransfer.getData('text/plain') as '餐吧' | 'POS機' | '後吧' | '收班' | '開早';
     if (!pos) return;
     if (empTrainingPos === pos) setEmpTrainingPos(null);
-    setEmpTrainedPoss(prev => {
-      const next = prev.includes(pos) ? prev : [...prev, pos];
-      return next;
-    });
+    setEmpTrainedPoss(prev => (prev.includes(pos) ? prev : [...prev, pos]));
   };
 
   const handleOpenEmployeeModal = (emp?: Employee) => {
@@ -761,58 +458,24 @@ function App() {
   };
 
   useEffect(() => {
-    const unsubSchedules = subscribeToSchedules((data) => {
-      setSchedules(data);
-    });
-    const unsubAvailabilities = subscribeToAvailabilities((data) => {
-      setAvailabilities(data);
-    });
-    const unsubStaffingTargets = subscribeToStaffingTargets((data) => {
-      setStaffingTargets(data);
-    });
-    const unsubEmployees = subscribeToEmployees((data) => {
-      setEmployees(data);
-    });
-    const unsubDeadlineDay = subscribeToDeadlineDay((day) => {
-      setDeadlineDay(day);
-    });
-    const unsubStartDay = subscribeToStartDay((day) => {
-      setStartDay(day);
-    });
-    const unsubOperatingStartTime = subscribeToOperatingStartTime((time) => {
-      setOperatingStartTime(time);
-    });
-    const unsubOperatingEndTime = subscribeToOperatingEndTime((time) => {
-      setOperatingEndTime(time);
-    });
-    const unsubShiftMorningStart = subscribeToShiftMorningStart((time) => {
-      setShiftMorningStart(time);
-    });
-    const unsubShiftMorningEnd = subscribeToShiftMorningEnd((time) => {
-      setShiftMorningEnd(time);
-    });
-    const unsubShiftEveningStart = subscribeToShiftEveningStart((time) => {
-      setShiftEveningStart(time);
-    });
-    const unsubShiftEveningEnd = subscribeToShiftEveningEnd((time) => {
-      setShiftEveningEnd(time);
-    });
-    const unsubShiftPresets = subscribeToShiftPresets((data) => {
-      setShiftPresets(data);
-    });
-    const unsubEmployeeOrder = subscribeToEmployeeOrder((data) => {
-      setEmployeeOrder(data);
-    });
-    const unsubMonthlyRevenues = subscribeToMonthlyRevenues((data) => {
-      setMonthlyRevenues(data);
-    });
+    const unsubSchedules = subscribeToSchedules((data) => setSchedules(data));
+    const unsubAvailabilities = subscribeToAvailabilities((data) => setAvailabilities(data));
+    const unsubStaffingTargets = subscribeToStaffingTargets((data) => setStaffingTargets(data));
+    const unsubEmployees = subscribeToEmployees((data) => setEmployees(data));
+    const unsubDeadlineDay = subscribeToDeadlineDay((day) => setDeadlineDay(day));
+    const unsubStartDay = subscribeToStartDay((day) => setStartDay(day));
+    const unsubOperatingStartTime = subscribeToOperatingStartTime((time) => setOperatingStartTime(time));
+    const unsubOperatingEndTime = subscribeToOperatingEndTime((time) => setOperatingEndTime(time));
+    const unsubShiftMorningStart = subscribeToShiftMorningStart((time) => setShiftMorningStart(time));
+    const unsubShiftMorningEnd = subscribeToShiftMorningEnd((time) => setShiftMorningEnd(time));
+    const unsubShiftPresets = subscribeToShiftPresets((data) => setShiftPresets(data));
+    const unsubEmployeeOrder = subscribeToEmployeeOrder((data) => setEmployeeOrder(data));
+    const unsubMonthlyRevenues = subscribeToMonthlyRevenues((data) => setMonthlyRevenues(data));
     const unsubRevenueStaffRules = subscribeToRevenueStaffRules((rules) => {
       setRevenueStaffRules(rules);
       setTempRules(rules);
     });
-    const unsubMarkedEmptyCells = subscribeToMarkedEmptyCells((cells) => {
-      setMarkedEmptyCells(cells);
-    });
+    const unsubMarkedEmptyCells = subscribeToMarkedEmptyCells((cells) => setMarkedEmptyCells(cells));
 
     return () => {
       unsubSchedules();
@@ -825,8 +488,6 @@ function App() {
       unsubOperatingEndTime();
       unsubShiftMorningStart();
       unsubShiftMorningEnd();
-      unsubShiftEveningStart();
-      unsubShiftEveningEnd();
       unsubShiftPresets();
       unsubEmployeeOrder();
       unsubMonthlyRevenues();
@@ -849,7 +510,6 @@ function App() {
     }
   }, [currentMonthStart]);
 
-  // Compute full-time worker's database registered rest days
   const dbRestDates = useMemo(() => {
     if (!isFullTime || !workerName.trim()) return [];
     const targetMonthStr = formatDateString(workerNextMonthStart).substring(0, 7);
@@ -875,12 +535,9 @@ function App() {
     return Array.from(new Set([...computedRestDates, ...legacyRestDates])).sort();
   }, [availabilities, workerName, isFullTime, workerNextMonthStart]);
 
-  // Keep track of the last synced DB rest dates to detect when DB actually changes
   const lastSyncedDbRestDatesRef = useRef<string[]>([]);
 
-  // Synchronize full-time worker's calendar selection with registered rest days in the database
   useEffect(() => {
-    // Only update availSelectedDates if the database state itself has changed
     const isDbChanged = dbRestDates.length !== lastSyncedDbRestDatesRef.current.length ||
       !dbRestDates.every((d, i) => d === lastSyncedDbRestDatesRef.current[i]);
 
@@ -890,7 +547,6 @@ function App() {
     }
   }, [dbRestDates]);
 
-  // Worker Identity handlers
   const handleWorkerVerify = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedWorkerName) {
@@ -905,7 +561,6 @@ function App() {
       return;
     }
 
-    // Normalize phone numbers to do a robust comparison (strip spaces, dashes, etc.)
     const cleanInput = workerPhoneInput.replace(/[-\s]/g, '');
     const cleanDb = (matchingEmp.phone || '').replace(/[-\s]/g, '');
 
@@ -929,15 +584,14 @@ function App() {
     localStorage.removeItem('scheduler_worker_verified');
   };
 
-  // Apply revenue-calculated staffing targets to global default targets
   const handleApplyRevenuesToGlobalTargets = async () => {
     if (safeConfirm('確定要將此營業額計算出的建議人數，套用為系統的預設排班目標 (db-global) 嗎？\n這將直接覆蓋目前的預設排班人數需求。')) {
       try {
-        for (let hour = 6; hour <= 19; hour++) {
+        for (const hour of analysisHoursRange) {
           const monthlyVal = monthlyRevenues[hour] || 0;
           const dailyAvg = monthlyVal / 30;
           const recommendedStaff = getRecommendedStaff(dailyAvg, revenueStaffRules);
-          await updateStaffingTarget(hour, recommendedStaff); // no date -> updates global default targets
+          await updateStaffingTarget(hour, recommendedStaff);
         }
         alert('已成功將營業額建議人數套用為預設排班目標需求！');
       } catch (error) {
@@ -947,7 +601,6 @@ function App() {
     }
   };
 
-  // Reset monthly revenues input data
   const handleResetRevenues = async () => {
     if (safeConfirm('確定要清空所有時段的月營業額輸入數據嗎？')) {
       try {
@@ -958,7 +611,6 @@ function App() {
     }
   };
 
-  // Submit worker availability
   const handleAddAvailability = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!workerName.trim()) {
@@ -993,18 +645,15 @@ function App() {
             a.date.startsWith(nextMonthStr)
         );
 
-        // Delete existing availability records for the month sequentially
         for (const record of existingRecords) {
           await deleteAvailability(record.id);
         }
 
-        // Calculate working days (all month days except selected rest days)
         const activeMonthDays = getDaysInMonth(workerNextMonthStart);
         const workDays = activeMonthDays
           .map(formatDateString)
           .filter(dateStr => !availSelectedDates.includes(dateStr));
 
-        // Save working days sequentially
         for (const dateStr of workDays) {
           await addAvailability({
             employeeName: workerName.trim(),
@@ -1027,7 +676,6 @@ function App() {
     }
   };
 
-  // Open the Part-Time availability configurations modal
   const handleOpenWorkerAvailModal = () => {
     if (!workerName.trim()) {
       alert('請先輸入您的姓名。');
@@ -1039,16 +687,12 @@ function App() {
       return;
     }
 
-    // Sort selected dates chronologically
     const sortedDates = [...availSelectedDates].sort((a, b) => a.localeCompare(b));
 
-    // Pre-populate configs: use existing DB record if available, then in-memory config, then defaults
     const initialConfigs: WorkerAvailConfig[] = sortedDates.map(date => {
-      // Already edited in this modal session
       const inSession = availConfigs.find(c => c.date === date);
       if (inSession) return inSession;
 
-      // Existing DB record for this worker+date
       const dbRecord = availabilities.find(
         a => a.date === date && a.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase()
       );
@@ -1064,7 +708,6 @@ function App() {
         };
       }
 
-      // Brand-new date — default to shiftMorningStart & shiftMorningEnd if exists
       const defStart = Math.max(0, timeSlots.indexOf(shiftMorningStart));
       const defEnd = Math.max(0, timeSlots.indexOf(shiftMorningEnd));
       return {
@@ -1080,12 +723,10 @@ function App() {
     setIsWorkerAvailModalOpen(true);
   };
 
-  // Update a single config in the list
   const updateAvailConfig = (index: number, updates: Partial<WorkerAvailConfig>) => {
     setAvailConfigs(prev => prev.map((config, idx) => {
       if (idx === index) {
         const newConfig = { ...config, ...updates };
-        // Enforce start time is less than or equal to end time
         if (newConfig.startIdx > newConfig.endIdx) {
           if (updates.startIdx !== undefined) {
             newConfig.endIdx = newConfig.startIdx;
@@ -1099,7 +740,6 @@ function App() {
     }));
   };
 
-  // Remove a config from the modal and deselect it in the calendar
   const removeAvailConfig = (index: number) => {
     const configToRemove = availConfigs[index];
     if (!configToRemove) return;
@@ -1108,7 +748,6 @@ function App() {
     setAvailSelectedDates(prev => prev.filter(d => d !== configToRemove.date));
   };
 
-  // Synchronize first card's details to all other cards in the list
   const handleSyncAllAvailConfigs = () => {
     if (availConfigs.length < 2) return;
     const base = availConfigs[0];
@@ -1123,7 +762,6 @@ function App() {
     }));
   };
 
-  // Submit all PT availability configurations
   const handleWorkerAvailModalSubmit = async () => {
     if (!workerName.trim()) {
       alert('請先輸入您的姓名。');
@@ -1144,7 +782,6 @@ function App() {
       return;
     }
 
-    // Check consecutive 7 days limit
     const existingDates = availabilities
       .filter(a => a.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase())
       .map(a => a.date);
@@ -1156,11 +793,8 @@ function App() {
       return;
     }
 
-
     try {
-      // Upsert each configured availability: delete existing record first if present, then add new
       for (const config of availConfigs) {
-        // Find and delete any existing record for this worker+date
         const existing = availabilities.filter(
           a => a.date === config.date &&
             a.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase()
@@ -1191,10 +825,6 @@ function App() {
     }
   };
 
-
-
-  // Instant Schedule Assign (Zero-Click Modal)
-  // Instant Schedule Assign (Zero-Click Modal)
   const handleInstantAssign = async (avail: WorkerAvailability) => {
     if (avail.startTime === '00:00' && avail.endTime === '00:00') {
       alert('此同仁此日登記為休假，無法直接指派排班！');
@@ -1212,9 +842,7 @@ function App() {
       return;
     }
 
-    // Part-time worker assign logic
     try {
-      // Check staffing limit warning
       const daySchedules = schedules.filter(s => s.date === avail.date);
       let wouldExceedOrReach = false;
       let limitHour = -1;
@@ -1259,7 +887,6 @@ function App() {
         availabilityId: avail.id
       };
       await addSchedule(payload);
-      // Mark availability as confirmed so it no longer shows as unconfirmed in the grid
       await updateAvailability(avail.id, { confirmed: true });
     } catch (error) {
       console.error("Error doing instant assign: ", error);
@@ -1272,7 +899,6 @@ function App() {
     setPendingAssignAvail(null);
 
     try {
-      // Check staffing limit warning
       const daySchedules = schedules.filter(s => s.date === avail.date);
       let wouldExceedOrReach = false;
       let limitHour = -1;
@@ -1336,18 +962,6 @@ function App() {
     return false;
   };
 
-
-  // Update staffing target
-  const handleUpdateTarget = async (hour: number, change: number) => {
-    const currentCount = getStaffingTargetForHour(hour, selectedDateStr);
-    const newCount = Math.max(0, currentCount + change);
-    try {
-      await updateStaffingTarget(hour, newCount, selectedDateStr);
-    } catch (error) {
-      console.error("Error updating staffing target: ", error);
-    }
-  };
-
   const getStaffingTargetForHour = (hour: number, dateStr?: string): number => {
     const targetDate = dateStr || selectedDateStr;
     const dateMatch = staffingTargets.find(t => t.hour === hour && t.date === targetDate);
@@ -1359,20 +973,6 @@ function App() {
     return 2;
   };
 
-  const handleAdjustSelectedDate = (days: number) => {
-    const current = new Date(selectedDateStr);
-    current.setDate(current.getDate() + days);
-    const newDateStr = formatDateString(current);
-    setSelectedDateStr(newDateStr);
-
-    const currentMonth = currentMonthStart.getMonth();
-    const currentYear = currentMonthStart.getFullYear();
-    if (current.getMonth() !== currentMonth || current.getFullYear() !== currentYear) {
-      setCurrentMonthStart(new Date(current.getFullYear(), current.getMonth(), 1));
-    }
-  };
-
-  // Toggle date selection for worker availability form
   const toggleAvailDateSelection = (dateStr: string) => {
     if (availSelectedDates.includes(dateStr)) {
       setAvailSelectedDates(availSelectedDates.filter(d => d !== dateStr));
@@ -1381,7 +981,6 @@ function App() {
     }
   };
 
-  // Quick select shortcuts for worker availability
   const handleSelectAvailAllDays = () => {
     setAvailSelectedDates(workerDaysInMonth.map(formatDateString));
   };
@@ -1404,7 +1003,6 @@ function App() {
     setAvailSelectedDates([]);
   };
 
-  // Open modal to add shift
   const handleOpenAddModal = (defaultDateStr?: string) => {
     setModalMode('create');
     setEditingId(null);
@@ -1425,7 +1023,6 @@ function App() {
     setIsModalOpen(true);
   };
 
-  // Open modal to edit shift
   const handleOpenEditModal = (schedule: WorkSchedule, e: React.MouseEvent) => {
     e.stopPropagation();
     setModalMode('edit');
@@ -1440,7 +1037,6 @@ function App() {
     setFormOriginalStartTime(schedule.originalStartTime || schedule.startTime);
     setFormOriginalEndTime(schedule.originalEndTime || schedule.endTime);
 
-    // Find original registered availability
     const originalAvail = availabilities.find(a => a.id === schedule.availabilityId);
     if (originalAvail) {
       setRegisterTime(`${originalAvail.startTime} - ${originalAvail.endTime}`);
@@ -1458,7 +1054,6 @@ function App() {
     setIsModalOpen(true);
   };
 
-  // Submit handler
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!employeeName.trim() || !startTime || !endTime || !workplace) {
@@ -1473,7 +1068,6 @@ function App() {
 
     const targetName = employeeName.trim();
 
-    // Check 2: Consecutive 7 days for schedules
     if (modalMode === 'create') {
       const existingScheduleDates = schedules
         .filter(s => s.employeeName.trim().toLowerCase() === targetName.toLowerCase())
@@ -1494,7 +1088,6 @@ function App() {
       }
     }
 
-    // Check 1: Over 8 effective hours warning for schedules
     if (isOverEightHours(startTime, endTime)) {
       const proceed = window.confirm(
         `⚠️ 注意：此班次（${startTime} - ${endTime}）扣除 1 小時休息後，有效工時超過 8 小時。\n\n建議單次排班不超過 8 小時（含休息共 9 小時）。\n\n確定仍要儲存此排班嗎？`
@@ -1547,7 +1140,6 @@ function App() {
     }
   };
 
-  // Delete handler
   const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (safeConfirm('確定要刪除此排程紀錄嗎？')) {
@@ -1557,13 +1149,13 @@ function App() {
         if (scheduleToDelete?.availabilityId) {
           await updateAvailability(scheduleToDelete.availabilityId, { confirmed: false });
         }
+        setIsModalOpen(false);
       } catch (error) {
         console.error("Error deleting schedule: ", error);
       }
     }
   };
 
-  // Delete availability handler
   const handleDeleteAvailability = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
 
@@ -1576,7 +1168,6 @@ function App() {
       return;
     }
 
-    // Check if it is a virtual ID or a real rest day record (00:00 - 00:00)
     const avail = id.startsWith('virtual-off-') ? null : availabilities.find(a => a.id === id);
     const isRestDay = id.startsWith('virtual-off-') || (avail && avail.startTime === '00:00' && avail.endTime === '00:00');
 
@@ -1584,7 +1175,6 @@ function App() {
       const dateStr = id.startsWith('virtual-off-') ? id.replace('virtual-off-', '') : avail!.date;
       const targetMonthStr = dateStr.substring(0, 7);
 
-      // Get all availabilities for this worker in this target month
       const workerAvails = availabilities.filter(
         a => a.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase() && a.date.startsWith(targetMonthStr)
       );
@@ -1605,10 +1195,8 @@ function App() {
       const allRestDates = Array.from(new Set([...computedRestDates, ...legacyRestDates]));
 
       if (allRestDates.length === 1 && allRestDates.includes(dateStr)) {
-        // Deleting the last rest day means they have 0 rest days, which means we should clear their entire month's registration
         if (safeConfirm(`這是您本月最後一個休假日期。變更此日期將會清除您本月的整月排班登記（避免因無休息日而違反連續工作規定）。確定要清除所有登記嗎？`)) {
           try {
-            // Delete all worker availabilities for this month
             for (const record of workerAvails) {
               await deleteAvailability(record.id);
             }
@@ -1639,7 +1227,6 @@ function App() {
       return;
     }
 
-    // Real work day DB record (avail is found and not 00:00-00:00)
     if (!avail) return;
 
     if (avail.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase() && isFullTime) {
@@ -1661,7 +1248,6 @@ function App() {
     }
   };
 
-  // Edit availability handler for worker page
   const handleEditAvailability = (avail: WorkerAvailability) => {
     if (!isWorkerEditable) {
       if (new Date().getDate() < startDay) {
@@ -1701,7 +1287,6 @@ function App() {
     }
   };
 
-  // Date Navigation handlers (by Month)
   const handlePrevMonth = () => {
     const prev = new Date(currentMonthStart);
     prev.setMonth(prev.getMonth() - 1);
@@ -1720,7 +1305,6 @@ function App() {
     setCurrentMonthStart(new Date(today.getFullYear(), today.getMonth(), 1));
   };
 
-  // Date Selector Helpers inside Modal
   const toggleDateSelection = (dateStr: string) => {
     if (selectedDates.includes(dateStr)) {
       setSelectedDates(selectedDates.filter(d => d !== dateStr));
@@ -1815,7 +1399,6 @@ function App() {
     setContextMenu(null);
   };
 
-  // Calendar calculations (filtered by the currently active visible month grid)
   const monthGridDates = getMonthGridDates(currentMonthStart);
   const gridDates = getDaysInMonth(currentMonthStart);
 
@@ -1844,7 +1427,6 @@ function App() {
     const currentOrder = [...allEmployees];
     const index = currentOrder.indexOf(name);
     if (index > 0) {
-      // Swap with index - 1
       currentOrder[index] = currentOrder[index - 1];
       currentOrder[index - 1] = name;
       setEmployeeOrder(currentOrder);
@@ -1860,7 +1442,6 @@ function App() {
     const currentOrder = [...allEmployees];
     const index = currentOrder.indexOf(name);
     if (index !== -1 && index < currentOrder.length - 1) {
-      // Swap with index + 1
       currentOrder[index] = currentOrder[index + 1];
       currentOrder[index + 1] = name;
       setEmployeeOrder(currentOrder);
@@ -1871,7 +1452,6 @@ function App() {
       }
     }
   };
-
 
   const getSchedulesForDate = (dateStr: string) => {
     return schedules
@@ -1891,7 +1471,6 @@ function App() {
     return Math.round(hours * 10) / 10;
   };
 
-  // Visible Month Statistics
   const visibleSchedules = schedules.filter(item => {
     if (!item.date) return false;
     const [y, m] = item.date.split('-').map(Number);
@@ -1902,225 +1481,17 @@ function App() {
   const totalHours = visibleSchedules.reduce((sum, item) => sum + calculateDuration(item.startTime, item.endTime), 0);
   const totalEmployees = new Set(visibleSchedules.map(item => item.employeeName.trim().toLowerCase()).filter(Boolean)).size;
 
-  const generateExcelWorkbook = (): { wb: XLSX.WorkBook; filename: string } | null => {
-    if (!exportStartDate || !exportEndDate) {
-      alert('請先選擇匯出的日期範圍。');
-      return null;
-    }
-
-    const start = new Date(exportStartDate);
-    const end = new Date(exportEndDate);
-    if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) {
-      alert('請輸入有效的日期範圍。');
-      return null;
-    }
-
-    const exportDates = getDatesInRange(exportStartDate, exportEndDate);
-    if (exportDates.length === 0) {
-      alert('選擇的日期範圍內沒有日期。');
-      return null;
-    }
-
-    const exportSchedules = schedules.filter(item => {
-      return item.date && item.date >= exportStartDate && item.date <= exportEndDate;
-    });
-
-    if (exportSchedules.length === 0) {
-      alert('在此日期範圍內尚無排班資料可供匯出。');
-      return null;
-    }
-
-    const getDayOfWeekName = (dateStr: string): string => {
-      if (!dateStr) return '';
-      const parts = dateStr.split('-').map(Number);
-      if (parts.length < 3) return '';
-      const dateObj = new Date(parts[0], parts[1] - 1, parts[2]);
-      const dayIdx = dateObj.getDay();
-      const mapped = dayIdx === 0 ? 7 : dayIdx;
-      const match = DAYS_OF_WEEK.find(d => d.value === mapped);
-      return match ? match.name : '';
-    };
-
-    // Columns: Personnel Name, Date 1, Date 2, ..., Date N
-    const dateHeaders = exportDates.map(dateObj => {
-      const dateStr = formatDateString(dateObj);
-      const dayName = getDayOfWeekName(dateStr);
-      const parts = dateStr.split('-');
-      const mmdd = parts.length >= 3 ? `${parts[1]}/${parts[2]}` : dateStr;
-      const dayOfWeekIndex = dateObj.getDay();
-      const mappedDayIndex = dayOfWeekIndex === 0 ? 7 : dayOfWeekIndex;
-      const isERP = mappedDayIndex === 1 || mappedDayIndex === 3 || mappedDayIndex === 5;
-      const customNote = getDayNote(dateStr);
-
-      let headerVal = isERP ? `${mmdd}\n(${dayName} ERP)` : `${mmdd}\n(${dayName})`;
-      if (customNote) {
-        headerVal += `\n[${customNote}]`;
-      }
-      return headerVal;
-    });
-
-    const headers = ['人員姓名', ...dateHeaders, '總工時(hrs)'];
-    const rows: string[][] = [];
-    const redFontCells = new Set<string>();
-    const markedBlueCells = new Set<string>();
-
-    // Add employee rows
-    allEmployees.forEach((empName, empIdx) => {
-      let totalHours = 0;
-
-      const dateCells = exportDates.map((dateObj, dateIdx) => {
-        const dateStr = formatDateString(dateObj);
-        const empSchedules = schedules.filter(
-          s => s.employeeName.trim().toLowerCase() === empName.trim().toLowerCase() && s.date === dateStr
-        ).sort((a, b) => compareTimeStrings(a.startTime, b.startTime));
-
-        // Get availability submissions for this employee on this date
-        const empAvailabilities = availabilities.filter(
-          a => a.employeeName.trim().toLowerCase() === empName.trim().toLowerCase() && a.date === dateStr
-        );
-
-        // Check if worker registered standard work hours (not 00:00 to 00:00 rest day)
-        const registeredToWork = empAvailabilities.some(a => !(a.startTime === '00:00' && a.endTime === '00:00'));
-
-        // Track marked-blue cells
-        const cellKey = `${empName.trim().toLowerCase()}|${dateStr}`;
-        const hasMarkedBlue = empSchedules.some(s => s.markedBlue) || !!markedEmptyCells[cellKey];
-        if (hasMarkedBlue) {
-          const cellRef = XLSX.utils.encode_cell({ r: empIdx + 1, c: dateIdx + 1 });
-          markedBlueCells.add(cellRef);
-        }
-
-        // Accumulate hours
-        empSchedules.forEach(sched => {
-          totalHours += calculateDuration(sched.startTime, sched.endTime);
-        });
-
-        if (empSchedules.length === 0) {
-          const cellRef = XLSX.utils.encode_cell({ r: empIdx + 1, c: dateIdx + 1 });
-          redFontCells.add(cellRef);
-          return registeredToWork ? 'X' : 'RO';
-        }
-
-        return empSchedules.map(sched => {
-          const note = getCleanNote(sched.notes);
-          return note
-            ? `${sched.startTime}-${sched.endTime}\n(${note})`
-            : `${sched.startTime}-${sched.endTime}`;
-        }).join('\n');
-      });
-
-      const totalHoursStr = totalHours > 0 ? `${Math.round(totalHours * 10) / 10}` : '';
-      const row = [empName, ...dateCells, totalHoursStr];
-      rows.push(row);
-    });
-
-    // Combine headers and data for the sheet
-    const aoaData = [headers, ...rows];
-
-    // Generate XLSX workbook & sheet
-    const ws = XLSX.utils.aoa_to_sheet(aoaData);
-
-    // Enable wrap text style and center alignment on all cells
-    for (const cellRef in ws) {
-      if (cellRef[0] === '!') continue;
-      if (ws[cellRef]) {
-        const decoded = XLSX.utils.decode_cell(cellRef);
-        const { r, c } = decoded;
-        const isRedFont = redFontCells.has(cellRef);
-        const isMarkedBlue = markedBlueCells.has(cellRef);
-
-        // Check if employee for this row is a newcomer
-        let isNewcomer = false;
-        if (r > 0) {
-          const empName = allEmployees[r - 1];
-          if (empName) {
-            const empObj = employees.find(e => e.name.trim().toLowerCase() === empName.trim().toLowerCase());
-            isNewcomer = empObj ? !!empObj.isNewcomer : false;
-          }
-        }
-
-        // Check if this column represents a weekend date (Saturday or Sunday)
-        let isWeekend = false;
-        if (c > 0 && c < headers.length - 1) {
-          const dateObj = exportDates[c - 1];
-          const day = dateObj.getDay();
-          isWeekend = day === 0 || day === 6; // 0 is Sunday, 6 is Saturday
-        }
-
-        // Check if this column's header contains the word/comment "包"
-        let isPackageHeader = false;
-        if (c > 0 && c < headers.length - 1) {
-          const headerText = headers[c];
-          if (headerText && headerText.includes('包')) {
-            isPackageHeader = true;
-          }
-        }
-
-        ws[cellRef].s = {
-          alignment: { wrapText: true, vertical: 'center', horizontal: 'center' },
-          font: {
-            // Apply red color and bold text to the weekend date headers
-            ...(isWeekend && r === 0 ? { color: { rgb: "EF4444" }, bold: true } : {}),
-            // Apply red color and bold text to RO / X cells
-            ...(isRedFont ? { color: { rgb: "EF4444" }, bold: true } : {})
-          },
-          border: {
-            top: { style: 'thin', color: { rgb: '000000' } },
-            bottom: { style: 'thin', color: { rgb: '000000' } },
-            left: { style: 'thin', color: { rgb: '000000' } },
-            right: { style: 'thin', color: { rgb: '000000' } }
-          },
-          ...((isPackageHeader && r === 0) ? {
-            fill: {
-              fgColor: { rgb: "86EFAC" } // Green background for headers containing "包"
-            }
-          } : (r > 0 && isNewcomer) ? {
-            fill: {
-              fgColor: { rgb: "FFC0CB" } // Pink background for newcomer row
-            }
-          } : isMarkedBlue ? {
-            fill: {
-              fgColor: { rgb: "93C5FD" } // Light blue for marked shifts
-            }
-          } : {})
-        };
-      }
-    }
-
-    // Auto-fit column widths
-    const maxCols = headers.length;
-    const colWidths = Array(maxCols).fill({ wch: 10 });
-    colWidths[0] = { wch: 15 }; // Employee name
-    colWidths[maxCols - 1] = { wch: 12 }; // Total hours (last column)
-
-    // Set column widths in the sheet
-    ws['!cols'] = colWidths;
-
-    // Freeze the first column (Column A - Personnel Name) and the header row (Row 1)
-    ws['!views'] = [
-      {
-        state: 'frozen',
-        xSplit: 1,
-        ySplit: 1,
-        topLeftCell: 'B2',
-        activePane: 'bottomRight'
-      }
-    ];
-
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, '排班網格表');
-
-    return {
-      wb,
-      filename: `${exportStartDate}_至_${exportEndDate}_精品咖啡館排班網格表.xlsx`
-    };
-  };
-
   const handleExportToExcel = () => {
-    const result = generateExcelWorkbook();
-    if (result) {
-      XLSX.writeFile(result.wb, result.filename);
-    }
+    exportToExcel({
+      exportStartDate,
+      exportEndDate,
+      schedules,
+      availabilities,
+      allEmployees,
+      employees,
+      markedEmptyCells,
+      getDayNote
+    });
   };
 
   const uploadToGoogleDrive = async (token: string, filename: string, blob: Blob) => {
@@ -2130,21 +1501,25 @@ function App() {
 
       const reader = new FileReader();
       reader.readAsArrayBuffer(blob);
-      reader.onload = async () => {
+      reader.onloadend = async () => {
         try {
           const arrayBuffer = reader.result as ArrayBuffer;
+          const boundary = 'foo_bar_baz';
+          const delimiter = `\r\n--${boundary}\r\n`;
+          const closeDelimiter = `\r\n--${boundary}--`;
 
           const metadata = {
             name: filename,
             mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
           };
 
-          const boundary = 'foo_bar_boundary';
-          const delimiter = `\r\n--${boundary}\r\n`;
-          const closeDelimiter = `\r\n--${boundary}--`;
+          const metadataPart =
+            'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+            JSON.stringify(metadata);
 
-          const metadataPart = `Content-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n`;
-          const mediaHeader = `Content-Type: ${metadata.mimeType}\r\nContent-Transfer-Encoding: base64\r\n\r\n`;
+          const mediaHeader =
+            'Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\r\n' +
+            'Content-Transfer-Encoding: base64\r\n\r\n';
 
           const base64Data = btoa(
             new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
@@ -2201,7 +1576,16 @@ function App() {
   };
 
   const handleUploadToStorage = () => {
-    const result = generateExcelWorkbook();
+    const result = generateExcelWorkbook({
+      exportStartDate,
+      exportEndDate,
+      schedules,
+      availabilities,
+      allEmployees,
+      employees,
+      markedEmptyCells,
+      getDayNote
+    });
     if (!result) return;
 
     const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
@@ -2251,19 +1635,6 @@ function App() {
     }
   };
 
-  const todayStr = formatDateString(new Date());
-
-  // Get selected day details (used in mobile view detail block)
-  const selectedDateObject = new Date(selectedDateStr);
-  const selectedDateShifts = getSchedulesForDate(selectedDateStr);
-  const selectedDateTotalHours = getDateTotalHours(selectedDateStr);
-  const selectedDayOfWeekIndex = selectedDateObject.getDay();
-  const selectedDayOfWeekMapped = selectedDayOfWeekIndex === 0 ? 7 : selectedDayOfWeekIndex;
-  const selectedDayInfo = DAYS_OF_WEEK.find(d => d.value === selectedDayOfWeekMapped) || DAYS_OF_WEEK[0];
-
-  // Availabilities on selected day
-  const dayAvailabilities = getAvailabilitiesForDate(selectedDateStr);
-
   const getWorkerDisplayAvailabilities = () => {
     const cleanWorkerName = workerName.trim().toLowerCase();
     if (!cleanWorkerName) return [];
@@ -2276,7 +1647,6 @@ function App() {
       const nextMonthStr = formatDateString(workerNextMonthStart).substring(0, 7);
       return workerAvails.filter(a => a.date.startsWith(nextMonthStr));
     }
-
 
     const registeredMonths = Array.from(
       new Set(
@@ -2385,14 +1755,12 @@ function App() {
           </div>
         </header>
 
-        {/* Role Switcher - Only visible to authenticated managers */}
+        {/* Role Switcher */}
         {isAuthenticated && (
           <div className="flex justify-center">
             <div className="bg-white/60 p-1.5 rounded-2xl border border-[#DAC0A3]/50 backdrop-blur-md flex gap-2 shadow-sm">
               <button
-                onClick={() => {
-                  window.location.hash = '#/worker';
-                }}
+                onClick={() => { window.location.hash = '#/worker'; }}
                 className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 cursor-pointer ${activeRole === 'worker'
                   ? 'bg-[#6D4C41] text-white shadow-md shadow-[#6D4C41]/15'
                   : 'text-[#8D6E63] hover:text-[#5D4037] hover:bg-[#F5EBE6]/60'
@@ -2404,9 +1772,7 @@ function App() {
                 員工：登記可用時間
               </button>
               <button
-                onClick={() => {
-                  window.location.hash = '#/manager';
-                }}
+                onClick={() => { window.location.hash = '#/manager'; }}
                 className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 cursor-pointer ${activeRole === 'manager'
                   ? 'bg-[#6D4C41] text-white shadow-md shadow-[#6D4C41]/15'
                   : 'text-[#8D6E63] hover:text-[#5D4037] hover:bg-[#F5EBE6]/60'
@@ -2424,1827 +1790,114 @@ function App() {
         {/* WORKER ROLE VIEW */}
         {activeRole === 'worker' && (
           !isWorkerVerified ? (
-            /* Worker Verification Screen */
-            <div className="max-w-md mx-auto my-12 animate-scale-in">
-              <div className="glass-panel p-8 rounded-3xl border border-[#DAC0A3]/50 shadow-2xl flex flex-col space-y-6">
-                <div className="text-center space-y-2">
-                  <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-[#FAF7F2] border border-[#DAC0A3]/50 text-3xl shadow-sm">
-                    👤
-                  </div>
-                  <h2 className="text-xl font-black text-[#3E2723] pt-2">
-                    員工可用時間系統 ☕ 驗證身分
-                  </h2>
-                  <p className="text-xs text-[#6D4C41] font-medium">
-                    請選擇您的姓名並輸入聯絡電話以確認身分
-                  </p>
-                </div>
-
-                <form onSubmit={handleWorkerVerify} className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-bold text-[#6D4C41] uppercase tracking-wider mb-2">員工姓名</label>
-                    <select
-                      required
-                      value={selectedWorkerName}
-                      onChange={(e) => setSelectedWorkerName(e.target.value)}
-                      className="w-full glass-input px-4 py-2.5 rounded-xl text-sm cursor-pointer"
-                    >
-                      <option value="" className="bg-white text-[#3E2723]">請選擇您的姓名...</option>
-                      {employees.filter(emp => emp.active !== false).map(emp => (
-                        <option key={emp.id} value={emp.name} className="bg-white text-[#3E2723]">
-                          {emp.name} ({emp.status})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-[#6D4C41] uppercase tracking-wider mb-2">聯絡電話</label>
-                    <input
-                      type="tel"
-                      required
-                      placeholder="請輸入您的聯絡電話..."
-                      value={workerPhoneInput}
-                      onChange={(e) => setWorkerPhoneInput(e.target.value)}
-                      className="w-full glass-input px-4 py-2.5 rounded-xl text-sm text-center"
-                    />
-                  </div>
-
-                  {workerVerifyError && (
-                    <div className="text-xs text-red-650 font-bold text-center bg-red-50/50 py-2 rounded-lg border border-red-100 animate-pulse">
-                      {workerVerifyError}
-                    </div>
-                  )}
-
-                  <button
-                    type="submit"
-                    className="w-full bg-[#795548] hover:bg-[#5D4037] text-white font-semibold px-4 py-3 rounded-xl transition-all shadow-lg shadow-[#795548]/15 cursor-pointer text-center text-sm"
-                  >
-                    驗證並登入
-                  </button>
-                </form>
-              </div>
-            </div>
+            <WorkerLogin
+              employees={employees}
+              selectedWorkerName={selectedWorkerName}
+              setSelectedWorkerName={setSelectedWorkerName}
+              workerPhoneInput={workerPhoneInput}
+              setWorkerPhoneInput={setWorkerPhoneInput}
+              workerVerifyError={workerVerifyError}
+              onVerify={handleWorkerVerify}
+            />
           ) : (
-            <div className="space-y-6">
-              {/* Name Input Banner Card */}
-              <div className="glass-panel p-6 rounded-2xl border border-[#DAC0A3]/50 flex flex-col sm:flex-row items-center gap-4 justify-between shadow-sm">
-                <div className="space-y-1 text-center sm:text-left">
-                  <h2 className="text-lg font-bold text-[#3E2723] flex items-center justify-center sm:justify-start gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-[#2E7D32]"></span>
-                    員工身分已驗證
-                  </h2>
-                  <p className="text-xs text-[#6D4C41]">
-                    您目前是以「<span className="font-extrabold text-[#3E2723]">{workerName}</span>」的身分填寫可用時間
-                  </p>
-                </div>
-                <button
-                  onClick={handleWorkerLogout}
-                  className="w-full sm:w-auto bg-white hover:bg-red-50 border border-[#E5DCD5] text-[#5D4037] hover:text-red-650 font-semibold px-5 py-2.5 rounded-xl transition-all cursor-pointer text-center text-sm shadow-sm"
-                >
-                  切換/變更身分
-                </button>
-              </div>
-
-              {/* Worker Dashboard Split Grid */}
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-
-                {/* Submission Form Card */}
-                <div className="glass-panel p-6 rounded-2xl border border-[#DAC0A3]/50 lg:col-span-5 space-y-4 shadow-sm">
-                  <div>
-                    <h3 className="text-base font-bold text-[#3E2723] flex items-center gap-2">
-                      <span className="w-2.5 h-2.5 rounded-full bg-[#2E7D32]"></span>
-                      {isFullTime ? '登記不克排班日期' : '登記可用日期'} ({workerNextMonthStart.getFullYear()}年 {workerNextMonthStart.getMonth() + 1}月)
-                    </h3>
-                    <p className="text-xs text-[#6D4C41] mt-0.5 font-medium">
-                      {isFullTime
-                        ? '正式夥伴預設為全配合，請選取您下個月「無法上班/休假/請假」的日期。'
-                        : '請選取您可以配合的日期，下一步即可設定地點與時間。'}
-                    </p>
-                  </div>
-
-                  {!isWorkerEditable && (
-                    <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-amber-50 border border-amber-200">
-                      <span className="text-lg leading-none mt-0.5">⚠️</span>
-                      <div className="space-y-0.5">
-                        <p className="text-xs font-bold text-amber-800">
-                          {new Date().getDate() < startDay ? '尚未開放登記' : '登記已截止/鎖定'}
-                        </p>
-                        <p className="text-[11px] text-amber-700 leading-snug">
-                          {new Date().getDate() < startDay
-                            ? `目前尚未開放下月排班登記。開放登記時間為每月 ${startDay} 日至 ${deadlineDay} 日。`
-                            : `目前已逾下月排班登記截止時間（每月 {deadlineDay} 日），且店長已開始為您確認/安排排班，因此目前已鎖定登記。如有特殊需求，請直接聯繫店長。`}
-                        </p>
-                      </div>
-                    </div>
-                  )}
-
-                  <form onSubmit={handleAddAvailability} className="space-y-4 pt-2">
-                    {/* Date Multi-selector */}
-                    <div>
-                      <div className="flex justify-between items-center mb-2">
-                        <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider">
-                          {isFullTime ? '選擇不克排班日期 (可複選)' : '選擇可用日期 (可複選)'}
-                        </label>
-                        <span className="text-[10px] text-[#795548] font-bold bg-[#8D6E63]/10 px-2 py-0.5 rounded font-mono">
-                          已選 {availSelectedDates.length} 天
-                        </span>
-                      </div>
-
-                      {/* Shortcuts */}
-                      <div className="flex flex-wrap gap-1.5 mb-2.5">
-                        <button
-                          type="button"
-                          onClick={handleSelectAvailMonWedFri}
-                          disabled={!isWorkerEditable}
-                          className={`text-[10px] px-2.5 py-1 rounded bg-white border border-[#DAC0A3]/65 text-[#6D4C41] hover:border-[#8D6E63] hover:text-[#3E2723] hover:bg-[#FAF7F2] font-bold transition-all ${!isWorkerEditable ? 'opacity-50 cursor-not-allowed border-gray-200 text-gray-400' : 'cursor-pointer'
-                            }`}
-                        >
-                          一/三/五
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleSelectAvailTueThu}
-                          disabled={!isWorkerEditable}
-                          className={`text-[10px] px-2.5 py-1 rounded bg-white border border-[#DAC0A3]/65 text-[#6D4C41] hover:border-[#8D6E63] hover:text-[#3E2723] hover:bg-[#FAF7F2] font-bold transition-all ${!isWorkerEditable ? 'opacity-50 cursor-not-allowed border-gray-200 text-gray-400' : 'cursor-pointer'
-                            }`}
-                        >
-                          二/四
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleSelectAvailAllDays}
-                          disabled={!isWorkerEditable}
-                          className={`text-[10px] px-2.5 py-1 rounded bg-white border border-[#DAC0A3]/65 text-[#6D4C41] hover:border-[#8D6E63] hover:text-[#3E2723] hover:bg-[#FAF7F2] font-bold transition-all ${!isWorkerEditable ? 'opacity-50 cursor-not-allowed border-gray-200 text-gray-400' : 'cursor-pointer'
-                            }`}
-                        >
-                          全選 (整月)
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleClearAvailAllSelected}
-                          disabled={!isWorkerEditable}
-                          className={`text-[10px] px-2.5 py-1 rounded bg-white border border-[#DAC0A3]/65 text-[#6D4C41]/70 hover:border-[#DAC0A3] font-bold transition-all ${!isWorkerEditable ? 'opacity-50 cursor-not-allowed border-gray-200 text-gray-400' : 'cursor-pointer'
-                            }`}
-                        >
-                          清除
-                        </button>
-                      </div>
-
-                      {/* Monthly Calendar checklist grid */}
-                      <div className="p-2 border border-[#DAC0A3]/50 rounded-xl bg-white/40">
-                        <div className="grid grid-cols-7 gap-1 text-center text-[10px] text-[#6D4C41]/80 font-bold mb-1">
-                          <div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div><div>日</div>
-                        </div>
-                        <div className="grid grid-cols-7 gap-1">
-                          {workerCalendarGridDates.map(dateObj => {
-                            const dateStr = formatDateString(dateObj);
-                            const isSelected = availSelectedDates.includes(dateStr);
-                            const isToday = dateStr === todayStr;
-                            const isNextMonth = dateObj.getMonth() === workerNextMonthStart.getMonth() && dateObj.getFullYear() === workerNextMonthStart.getFullYear();
-
-                            if (!isNextMonth) {
-                              return <div key={dateStr} className="h-9" />;
-                            }
-
-                            return (
-                              <button
-                                key={dateStr}
-                                type="button"
-                                onClick={() => toggleAvailDateSelection(dateStr)}
-                                disabled={!isWorkerEditable}
-                                className={`relative py-1.5 px-0.5 rounded-lg border text-center transition-all text-[10px] font-mono font-bold flex flex-col items-center justify-center h-9 ${!isWorkerEditable
-                                  ? 'bg-gray-100/70 border-gray-200/50 text-gray-400 cursor-not-allowed'
-                                  : isSelected
-                                    ? 'bg-[#8D6E63]/20 border-[#8D6E63] text-[#5D4037] shadow-sm cursor-pointer'
-                                    : 'bg-white/70 border-[#DAC0A3]/40 text-[#6D4C41] hover:border-[#8D6E63]/60 hover:bg-white cursor-pointer'
-                                  } ${isToday ? 'ring-1 ring-[#8D6E63]/40' : ''}`}
-                              >
-                                <span>{dateObj.getDate()}</span>
-                                {isToday && (
-                                  <span className="absolute top-0.5 right-0.5 w-1 h-1 rounded-full bg-[#8D6E63]"></span>
-                                )}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Notes for Full-Time only */}
-                    {isFullTime && (
-                      <div>
-                        <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">
-                          請假/休假備註事項 (選填)
-                        </label>
-                        <textarea
-                          placeholder="填寫不克排班原因或備註..."
-                          value={availNotes}
-                          onChange={(e) => setAvailNotes(e.target.value)}
-                          disabled={!isWorkerEditable}
-                          className={`w-full glass-input px-4 py-2.5 rounded-xl text-sm min-h-[70px] resize-none ${!isWorkerEditable ? 'opacity-50 cursor-not-allowed bg-gray-50/50 text-[#8D6E63]/60' : ''
-                            }`}
-                        />
-                      </div>
-                    )}
-
-                    <button
-                      type={isFullTime ? "submit" : "button"}
-                      onClick={!isFullTime ? handleOpenWorkerAvailModal : undefined}
-                      disabled={!isWorkerEditable}
-                      className={`w-full font-bold py-3 rounded-xl transition-all text-center text-sm ${!isWorkerEditable
-                        ? 'bg-gray-300 text-gray-500 cursor-not-allowed shadow-none'
-                        : 'bg-[#795548] hover:bg-[#6D4C41] text-white shadow-lg shadow-[#795548]/15 cursor-pointer'
-                        }`}
-                    >
-                      {isFullTime ? '送出不克排班日期' : '下一步：設定時間與地點 →'}
-                    </button>
-                  </form>
-
-                </div>
-
-                {/* Submitted Availabilities List */}
-                <div className="glass-panel p-6 rounded-2xl border border-[#DAC0A3]/50 lg:col-span-7 space-y-4 shadow-sm">
-                  <div>
-                    <h3 className="text-base font-bold text-[#3E2723] flex items-center gap-2">
-                      <span className="w-2.5 h-2.5 rounded-full bg-[#8D6E63]"></span>
-                      {isFullTime ? '您登記的不克排班日期紀錄' : '您登記的可用時間紀錄'}
-                    </h3>
-                    <p className="text-xs text-[#6D4C41] mt-0.5 font-medium">
-                      {isFullTime
-                        ? `以下為「${workerName || '未填寫姓名'}」已登記提交的「不克排班/休假」日期。店長排班時會避開這些日期。`
-                        : `以下為「${workerName || '未填寫姓名'}」已登記並提交的可用時段。店長可以在此時段安排您的排班。`}
-                    </p>
-                  </div>
-
-                  <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
-                    {!workerName.trim() ? (
-                      <div className="py-12 text-center border-2 border-dashed border-[#DAC0A3]/45 rounded-xl">
-                        <p className="text-xs text-[#6D4C41]/80 font-medium">請在上方輸入姓名以檢信您的可用時間紀錄</p>
-                      </div>
-                    ) : getWorkerDisplayAvailabilities().length === 0 ? (
-                      <div className="py-12 text-center border-2 border-dashed border-[#DAC0A3]/45 rounded-xl">
-                        <p className="text-xs text-[#6D4C41]/80 font-medium">
-                          {isFullTime ? '尚無登記任何不克排班日期' : '尚無登記任何可用時間'}
-                        </p>
-                      </div>
-                    ) : (
-                      getWorkerDisplayAvailabilities()
-                        .sort((a, b) => {
-                          const dateCompare = b.date.localeCompare(a.date);
-                          if (dateCompare !== 0) return dateCompare;
-                          return compareTimeStrings(a.startTime, b.startTime);
-                        })
-                        .map(avail => {
-                          const dateObj = new Date(avail.date);
-                          const dayOfWeekIndex = dateObj.getDay();
-                          const mappedDayIndex = dayOfWeekIndex === 0 ? 7 : dayOfWeekIndex;
-                          const dayInfo = DAYS_OF_WEEK.find(d => d.value === mappedDayIndex) || DAYS_OF_WEEK[0];
-                          const isOffDay = avail.startTime === '00:00' && avail.endTime === '00:00';
-
-                          if (isOffDay) {
-                            return (
-                              <div
-                                key={avail.id}
-                                className="glass-card p-4 rounded-xl border border-red-200/60 bg-red-50/20 space-y-2"
-                              >
-                                <div className="flex items-center justify-between gap-2 border-b border-red-200/40 pb-1.5">
-                                  <span className="text-sm font-extrabold text-red-800">
-                                    ❌ {avail.date} ({dayInfo.name})
-                                  </span>
-                                  {isWorkerEditable && !avail.confirmed && (
-                                    <div className="flex gap-1.5">
-                                      {!isFullTime && (
-                                        <button
-                                          onClick={() => handleEditAvailability(avail)}
-                                          className="p-1 rounded-lg bg-white hover:bg-[#FAF7F2] border border-[#DAC0A3]/50 text-[#6D4C41] hover:text-[#3E2723] transition-colors cursor-pointer"
-                                          title="編輯此登記"
-                                        >
-                                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                                          </svg>
-                                        </button>
-                                      )}
-                                      <button
-                                        onClick={(e) => handleDeleteAvailability(avail.id, e)}
-                                        className="p-1 rounded-lg bg-white hover:bg-red-50 border border-[#DAC0A3]/50 text-[#6D4C41] hover:text-red-650 transition-colors cursor-pointer"
-                                        title="刪除此登記"
-                                      >
-                                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                        </svg>
-                                      </button>
-                                    </div>
-                                  )}
-                                </div>
-                                <div className="flex flex-col gap-1.5">
-                                  <span className="text-[10px] px-2 py-0.5 rounded bg-red-100 text-red-700 border border-red-200 font-bold w-fit">
-                                    不克排班 (休假)
-                                  </span>
-                                  {avail.notes && (
-                                    <p className="text-xs text-red-800/80 font-medium">
-                                      📝 備註：{getCleanNote(avail.notes) || avail.notes}
-                                    </p>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          }
-
-                          return (
-                            <div
-                              key={avail.id}
-                              className="glass-card p-4 rounded-xl border border-[#DAC0A3]/45 space-y-2.5"
-                            >
-                              <div className="flex items-center justify-between gap-2 border-b border-[#DAC0A3]/30 pb-1.5">
-                                <span className="text-sm font-extrabold text-[#3E2723]">
-                                  {avail.date} ({dayInfo.name})
-                                </span>
-                                {isWorkerEditable && !avail.confirmed && (
-                                  <div className="flex gap-1.5">
-                                    {!isFullTime && (
-                                      <button
-                                        onClick={() => handleEditAvailability(avail)}
-                                        className="p-1 rounded-lg bg-white hover:bg-[#FAF7F2] border border-[#DAC0A3]/50 text-[#6D4C41] hover:text-[#3E2723] transition-colors cursor-pointer"
-                                        title="編輯此登記"
-                                      >
-                                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                                        </svg>
-                                      </button>
-                                    )}
-                                    <button
-                                      onClick={(e) => handleDeleteAvailability(avail.id, e)}
-                                      className="p-1 rounded-lg bg-white hover:bg-red-50 border border-[#DAC0A3]/50 text-[#6D4C41] hover:text-red-650 transition-colors cursor-pointer"
-                                      title="刪除此登記"
-                                    >
-                                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                      </svg>
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                              <div className="flex flex-col gap-2">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <span className="text-[10px] px-2 py-0.5 rounded bg-[#F5EBE6] text-[#5D4037] border border-[#DAC0A3]/40 font-bold w-fit">
-                                    📍 {avail.workplace}
-                                  </span>
-                                  {avail.confirmed && (
-                                    <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-50 text-[#1B5E20] border border-[#2E7D32]/25 font-extrabold w-fit flex items-center gap-0.5 animate-scale-in">
-                                      <span className="w-1.5 h-1.5 rounded-full bg-[#2E7D32]"></span>
-                                      已確認排班
-                                    </span>
-                                  )}
-                                  <span className="hidden">
-                                  </span>
-                                  <span className="text-xs text-[#6D4C41]/90 font-medium flex items-center gap-1 font-mono">
-                                    🕒 可配合時間：{avail.startTime} - {avail.endTime}
-                                  </span>
-                                </div>
-                                {avail.notes && (
-                                  <p className="text-xs text-[#5D4037] bg-white/50 px-2.5 py-1.5 rounded border border-[#DAC0A3]/40 border-dashed w-fit text-left">
-                                    📝 備註：{avail.notes}
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Team Availability Calendar — all workers' registered times for next month */}
-              {(() => {
-                const nextMonthStr = formatDateString(workerNextMonthStart).substring(0, 7);
-                const teamAvails = availabilities.filter(a =>
-                  a.date.startsWith(nextMonthStr) &&
-                  !(a.startTime === '00:00' && a.endTime === '00:00') &&
-                  a.confirmed !== true
-                );
-                const teamCalendarDates = workerCalendarGridDates;
-
-                return (
-                  <div className="glass-panel p-6 rounded-2xl border border-[#DAC0A3]/50 shadow-sm space-y-4 bg-white/40 hidden sm:block">
-                    <div className="border-b border-[#DAC0A3]/35 pb-3">
-                      <h3 className="text-base font-bold text-[#3E2723] flex items-center gap-2">
-                        <span className="w-2.5 h-2.5 rounded-full bg-[#8D6E63]"></span>
-                        團隊可用時段總覽 ({workerNextMonthStart.getFullYear()}年 {workerNextMonthStart.getMonth() + 1}月)
-                      </h3>
-                      <p className="text-xs text-[#6D4C41] mt-0.5 font-medium">
-                        以下為所有同仁在下個月已登記的可用時段，供參考排班協調。
-                      </p>
-                    </div>
-
-                    {/* Calendar grid */}
-                    <div className="border border-[#DAC0A3]/50 rounded-2xl overflow-hidden bg-white/70">
-                      {/* Day headers */}
-                      <div className="grid grid-cols-7 border-b border-[#DAC0A3]/50 bg-[#F5EBE6]/60">
-                        {DAYS_OF_WEEK.map(day => (
-                          <div key={day.value} className="py-2 text-center text-xs font-bold text-[#6D4C41]">
-                            {day.name}
-                          </div>
-                        ))}
-                      </div>
-
-                      <div className="grid grid-cols-7 gap-px bg-[#EADBC8]/60">
-                        {teamCalendarDates.map(dateObj => {
-                          const dateStr = formatDateString(dateObj);
-                          const isToday = dateStr === todayStr;
-                          const isInMonth = dateObj.getMonth() === workerNextMonthStart.getMonth() &&
-                            dateObj.getFullYear() === workerNextMonthStart.getFullYear();
-
-                          // All workers available on this date
-                          const dayAvails = teamAvails
-                            .filter(a => a.date === dateStr)
-                            .sort((a, b) => a.employeeName.localeCompare(b.employeeName));
-
-                          const isFirstOfMonth = dateObj.getDate() === 1;
-                          const dateLabel = isFirstOfMonth ? `${dateObj.getMonth() + 1}/1` : dateObj.getDate().toString();
-
-                          return (
-                            <div
-                              key={dateStr}
-                              className={`min-h-[90px] p-1.5 flex flex-col gap-0.5 relative ${isToday ? 'bg-[#FAF7F2]'
-                                : isInMonth ? 'bg-white/95'
-                                  : 'bg-[#FAF7F2]/40 opacity-40'
-                                }`}
-                            >
-                              {/* Date label */}
-                              <span className={`text-[11px] font-bold font-mono px-1 py-0.5 rounded-full w-fit mb-0.5 ${isToday ? 'bg-[#795548] text-white' : 'text-[#3E2723]'
-                                }`}>
-                                {dateLabel}
-                              </span>
-
-                              {/* Worker chips */}
-                              {isInMonth && dayAvails.map(avail => {
-                                const isMe = avail.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase();
-                                return (
-                                  <div
-                                    key={avail.id}
-                                    className={`text-[11px] leading-tight px-1.5 py-0.5 rounded font-bold truncate ${isMe
-                                      ? 'bg-[#795548] text-white'
-                                      : 'bg-[#8D6E63]/15 text-[#5D4037]'
-                                      }`}
-                                    title={`${avail.employeeName}: ${avail.startTime}–${avail.endTime} @ ${avail.workplace}`}
-                                  >
-                                    {avail.employeeName.split('').slice(0, 3).join('')}
-                                    {' '}
-                                    <span className="opacity-80 font-mono text-[10px]">
-                                      {avail.startTime.substring(0, 5)}-{avail.endTime.substring(0, 5)}
-                                    </span>
-                                  </div>
-                                );
-                              })}
-
-                              {/* "empty" indicator */}
-                              {isInMonth && dayAvails.length === 0 && (
-                                <span className="text-[9px] text-[#8D6E63]/40 mt-auto">-</span>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Legend */}
-                    <div className="flex flex-wrap gap-3 pt-1">
-                      <div className="flex items-center gap-1.5">
-                        <span className="w-3 h-3 rounded bg-[#795548]"></span>
-                        <span className="text-[10px] text-[#6D4C41] font-medium">您自己的登記</span>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="w-3 h-3 rounded bg-[#8D6E63]/15 border border-[#8D6E63]/30"></span>
-                        <span className="text-[10px] text-[#6D4C41] font-medium">其他同仁的登記</span>
-                      </div>
-                      <div className="flex items-center gap-1.5 ml-auto">
-                        <span className="text-[10px] text-[#8D6E63] font-medium">顯示格式：姓名 + 時間區間 (例: 09:00-17:00)</span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* Confirmed Schedule Calendar Card */}
-
-              <div className="glass-panel p-6 rounded-2xl border border-[#DAC0A3]/50 shadow-sm space-y-4 bg-white/40">
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-[#DAC0A3]/35 pb-3">
-                  <div>
-                    <h3 className="text-base font-bold text-[#3E2723] flex items-center gap-2">
-                      <span className="w-2.5 h-2.5 rounded-full bg-[#795548]"></span>
-                      您的已確認班表 (個人行事曆)
-                    </h3>
-                    <p className="text-xs text-[#6D4C41] mt-0.5 font-medium">
-                      以下為您在該月份已被主管確認並安排的排班時段。
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const today = new Date();
-                        setWorkerCalendarMonth(new Date(today.getFullYear(), today.getMonth() + 1, 1));
-                      }}
-                      className="px-3 py-1.5 rounded-lg bg-white hover:bg-[#FAF7F2] text-[#5D4037] border border-[#DAC0A3]/65 text-xs font-semibold transition-all cursor-pointer"
-                    >
-                      預設
-                    </button>
-                    <div className="flex items-center rounded-lg border border-[#DAC0A3]/60 bg-white overflow-hidden">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const prev = new Date(workerCalendarMonth);
-                          prev.setMonth(prev.getMonth() - 1);
-                          setWorkerCalendarMonth(prev);
-                        }}
-                        className="p-1.5 hover:bg-[#FAF7F2] text-[#6D4C41] border-r border-[#DAC0A3]/60 transition-colors cursor-pointer"
-                        title="前一個月"
-                      >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" />
-                        </svg>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const next = new Date(workerCalendarMonth);
-                          next.setMonth(next.getMonth() + 1);
-                          setWorkerCalendarMonth(next);
-                        }}
-                        className="p-1.5 hover:bg-[#FAF7F2] text-[#6D4C41] transition-colors cursor-pointer"
-                        title="後一個月"
-                      >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
-                        </svg>
-                      </button>
-                    </div>
-                    <span className="text-sm font-bold text-[#3E2723] ml-1 select-none">
-                      {workerCalendarMonth.getFullYear()}年 {workerCalendarMonth.getMonth() + 1}月
-                    </span>
-                  </div>
-                </div>
-
-                {/* Calendar monthly grid */}
-                <div className="border border-[#DAC0A3]/50 rounded-2xl overflow-hidden bg-white/70">
-                  <div className="grid grid-cols-7 border-b border-[#DAC0A3]/50 bg-[#F5EBE6]/60">
-                    {DAYS_OF_WEEK.map(day => (
-                      <div key={day.value} className="py-2 text-center text-xs font-bold text-[#6D4C41]">
-                        {day.name}
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="grid grid-cols-7 gap-px bg-[#EADBC8]/60">
-                    {getMonthGridDates(workerCalendarMonth).map((dateObj) => {
-                      const dateStr = formatDateString(dateObj);
-                      const isToday = dateStr === todayStr;
-                      const isCurrentMonth = dateObj.getMonth() === workerCalendarMonth.getMonth();
-
-                      // Filter confirmed schedules for this employee on this date
-                      const daySchedules = schedules.filter(
-                        s => s.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase() && s.date === dateStr
-                      ).sort((a, b) => compareTimeStrings(a.startTime, b.startTime));
-
-                      const isFirstOfMonth = dateObj.getDate() === 1;
-                      const dateLabel = isFirstOfMonth ? `${dateObj.getMonth() + 1}/1` : dateObj.getDate().toString();
-
-                      return (
-                        <div
-                          key={dateStr}
-                          className={`min-h-[85px] p-1.5 flex flex-col justify-between select-none relative ${isToday
-                            ? 'bg-[#FAF7F2]'
-                            : isCurrentMonth
-                              ? 'bg-white/95'
-                              : 'bg-[#FAF7F2]/40 text-[#8D6E63]/40 opacity-40'
-                            }`}
-                        >
-                          {/* Date Label */}
-                          <div className="flex items-center justify-between mb-1">
-                            <span
-                              className={`text-[11px] font-bold font-mono px-1.5 py-0.5 rounded-full ${isToday
-                                ? 'bg-[#795548] text-white shadow-sm'
-                                : 'text-[#3E2723]'
-                                }`}
-                            >
-                              {dateLabel}
-                            </span>
-                          </div>
-
-                          {/* Shifts */}
-                          <div className="flex-1 space-y-1 overflow-y-auto">
-                            {daySchedules.map(schedule => {
-                              const theme = getScheduleTheme(schedule);
-                              const mNote = schedule.managerNotes !== undefined ? schedule.managerNotes : getManagerNote(schedule);
-                              const wNote = schedule.workerNotes !== undefined ? schedule.workerNotes : getWorkerNote(schedule);
-
-                              let displayNote = '';
-                              if (wNote && mNote) {
-                                displayNote = `同仁: ${wNote} | 主管: ${mNote}`;
-                              } else if (wNote) {
-                                displayNote = `同仁: ${wNote}`;
-                              } else if (mNote) {
-                                displayNote = `主管: ${mNote}`;
-                              }
-
-                              return (
-                                <div
-                                  key={schedule.id}
-                                  className={`text-[9px] py-1 px-1.5 rounded border font-semibold flex flex-col gap-0.5 ${theme.bg} ${theme.border} ${theme.text}`}
-                                  title={displayNote ? `📝 ${displayNote}` : undefined}
-                                >
-                                  <div className="font-mono font-bold leading-tight">{schedule.startTime} - {schedule.endTime}</div>
-                                  {displayNote && (
-                                    <div className="opacity-95 italic truncate" title={displayNote}>({displayNote})</div>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-
-              {/* Subtle Manager Login link at the bottom of the Worker view */}
-              <div className="flex justify-center pt-8 pb-4">
-                <a
-                  href="#/manager"
-                  className="text-[10px] text-[#6D4C41]/35 hover:text-[#795548] font-bold flex items-center gap-1 transition-all select-none"
-                >
-                  🔒 管理登入
-                </a>
-              </div>
-            </div>
+            <WorkerAvailForm
+              workerName={workerName}
+              isFullTime={isFullTime}
+              workerNextMonthStart={workerNextMonthStart}
+              isWorkerEditable={isWorkerEditable}
+              startDay={startDay}
+              deadlineDay={deadlineDay}
+              availSelectedDates={availSelectedDates}
+              workerCalendarGridDates={workerCalendarGridDates}
+              availNotes={availNotes}
+              setAvailNotes={setAvailNotes}
+              onWorkerLogout={handleWorkerLogout}
+              onAddAvailability={handleAddAvailability}
+              onOpenWorkerAvailModal={handleOpenWorkerAvailModal}
+              toggleAvailDateSelection={toggleAvailDateSelection}
+              handleSelectAvailMonWedFri={handleSelectAvailMonWedFri}
+              handleSelectAvailTueThu={handleSelectAvailTueThu}
+              handleSelectAvailAllDays={handleSelectAvailAllDays}
+              handleClearAvailAllSelected={handleClearAvailAllSelected}
+              getWorkerDisplayAvailabilities={getWorkerDisplayAvailabilities}
+              handleEditAvailability={handleEditAvailability}
+              handleDeleteAvailability={handleDeleteAvailability}
+            />
           )
         )}
 
         {/* MANAGER ROLE VIEW */}
         {activeRole === 'manager' && (
           !isAuthenticated ? (
-            /* Cozy Coffee-Themed Passcode Login Screen */
-            <div className="max-w-md mx-auto my-12 animate-scale-in">
-              <div className="glass-panel p-8 rounded-3xl border border-[#DAC0A3]/50 shadow-2xl flex flex-col space-y-6">
-                <div className="text-center space-y-2">
-                  <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-[#FAF7F2] border border-[#DAC0A3]/50 text-3xl shadow-sm">
-                    ☕
-                  </div>
-                  <h2 className="text-xl font-black text-[#3E2723] pt-2">
-                    精品咖啡館 ☕ 主管登入
-                  </h2>
-                  <p className="text-xs text-[#6D4C41] font-medium">
-                    請輸入管理密碼以進入排班規劃中心
-                  </p>
-                </div>
-
-                <form onSubmit={handleLogin} className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">管理密碼</label>
-                    <input
-                      type="password"
-                      required
-                      placeholder="請輸入密碼..."
-                      value={passcodeInput}
-                      onChange={(e) => setPasscodeInput(e.target.value)}
-                      className="w-full glass-input px-4 py-2.5 rounded-xl text-sm font-mono tracking-widest text-center"
-                      autoFocus
-                    />
-                  </div>
-
-                  {loginError && (
-                    <div className="text-xs text-red-650 font-bold text-center bg-red-50/50 py-2 rounded-lg border border-red-100 animate-pulse">
-                      {loginError}
-                    </div>
-                  )}
-
-                  <div className="flex gap-3 pt-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        window.location.hash = '#/worker';
-                      }}
-                      className="flex-1 bg-white hover:bg-[#FAF7F2] border border-[#E5DCD5] text-[#5D4037] font-semibold px-4 py-3 rounded-xl transition-all cursor-pointer text-center text-sm"
-                    >
-                      返回員工頁面
-                    </button>
-                    <button
-                      type="submit"
-                      className="flex-1 bg-[#795548] hover:bg-[#5D4037] text-white font-semibold px-4 py-3 rounded-xl transition-all shadow-lg shadow-[#795548]/15 cursor-pointer text-center text-sm"
-                    >
-                      進入系統
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </div>
+            <ManagerLogin
+              passcodeInput={passcodeInput}
+              setPasscodeInput={setPasscodeInput}
+              loginError={loginError}
+              onLogin={handleLogin}
+            />
           ) : (
             <div className="space-y-6">
+              <ManagerHeader
+                currentMonthStart={currentMonthStart}
+                managerViewMode={managerViewMode}
+                setManagerViewMode={setManagerViewMode}
+                handleGoToToday={handleGoToToday}
+                handlePrevMonth={handlePrevMonth}
+                handleNextMonth={handleNextMonth}
+                totalShifts={totalShifts}
+                totalHours={totalHours}
+                totalEmployees={totalEmployees}
+              />
 
-              {/* Calendar Toolbar */}
-              <section className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3 bg-white/70 p-4 rounded-xl border border-[#DAC0A3]/50 shadow-sm">
-                {/* Left: Month Nav */}
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={handleGoToToday}
-                    className="px-3.5 py-1.5 rounded-lg bg-white hover:bg-[#FAF7F2] text-[#5D4037] border border-[#DAC0A3]/60 hover:border-[#8D6E63] text-xs font-semibold transition-all cursor-pointer"
-                  >
-                    今天
-                  </button>
-                  <div className="flex items-center rounded-lg border border-[#DAC0A3]/60 bg-white overflow-hidden">
-                    <button
-                      onClick={handlePrevMonth}
-                      className="p-1.5 hover:bg-[#FAF7F2] text-[#6D4C41] border-r border-[#DAC0A3]/60 transition-colors cursor-pointer"
-                      title="前一個月"
-                    >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" />
-                      </svg>
-                    </button>
-                    <button
-                      onClick={handleNextMonth}
-                      className="p-1.5 hover:bg-[#FAF7F2] text-[#6D4C41] transition-colors cursor-pointer"
-                      title="後一個月"
-                    >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
-                      </svg>
-                    </button>
-                  </div>
-
-                  {/* Displaying current Month/Year */}
-                  <h2 className="text-base md:text-lg font-bold text-[#3E2723] ml-2">
-                    {currentMonthStart.getFullYear()}年 {currentMonthStart.getMonth() + 1}月
-                  </h2>
-
-                  {/* View Switcher Toggle */}
-                  <div className="flex items-center gap-1 bg-[#FAF7F2] border border-[#DAC0A3]/60 p-1 rounded-xl ml-2 overflow-x-auto max-w-[calc(100vw-24px)] md:max-w-none scrollbar-none shrink-0">
-                    <button
-                      onClick={() => setManagerViewMode('calendar')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${managerViewMode === 'calendar'
-                        ? 'bg-[#795548] text-white shadow-sm'
-                        : 'text-[#8D6E63] hover:text-[#3E2723]'
-                        }`}
-                    >
-                      日曆檢視
-                    </button>
-                    <button
-                      onClick={() => setManagerViewMode('grid')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${managerViewMode === 'grid'
-                        ? 'bg-[#795548] text-white shadow-sm'
-                        : 'text-[#8D6E63] hover:text-[#3E2723]'
-                        }`}
-                    >
-                      網格總覽
-                    </button>
-                    <button
-                      onClick={() => setManagerViewMode('employees')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${managerViewMode === 'employees'
-                        ? 'bg-[#795548] text-white shadow-sm'
-                        : 'text-[#8D6E63] hover:text-[#3E2723]'
-                        }`}
-                    >
-                      員工管理
-                    </button>
-                    <button
-                      onClick={() => setManagerViewMode('analysis')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${managerViewMode === 'analysis'
-                        ? 'bg-[#795548] text-white shadow-sm'
-                        : 'text-[#8D6E63] hover:text-[#3E2723]'
-                        }`}
-                    >
-                      排班分析圖表
-                    </button>
-                    <button
-                      onClick={() => setManagerViewMode('calculation')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${managerViewMode === 'calculation'
-                        ? 'bg-[#795548] text-white shadow-sm'
-                        : 'text-[#8D6E63] hover:text-[#3E2723]'
-                        }`}
-                    >
-                      營業額計算
-                    </button>
-                    <button
-                      onClick={() => setManagerViewMode('system')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${managerViewMode === 'system'
-                        ? 'bg-[#795548] text-white shadow-sm'
-                        : 'text-[#8D6E63] hover:text-[#3E2723]'
-                        }`}
-                    >
-                      系統管理
-                    </button>
-                  </div>
-                </div>
-
-                {/* Right: Quick monthly stats info */}
-                <div className="flex items-center flex-wrap gap-3">
-                  <div className="flex items-center gap-4 text-[11px] md:text-xs text-[#6D4C41] bg-white/85 px-3 md:px-4 py-2 rounded-lg border border-[#DAC0A3]/55 shadow-sm">
-                    <div>本月班次：<span className="font-semibold text-[#3E2723] font-mono">{totalShifts}</span> 次</div>
-                    <div className="w-px h-3 bg-[#DAC0A3]/45"></div>
-                    <div>本月工時：<span className="font-semibold text-[#795548] font-mono">{Math.round(totalHours * 10) / 10}</span> 小時</div>
-                    <div className="w-px h-3 bg-[#DAC0A3]/45"></div>
-                    <div>排班人數：<span className="font-semibold text-[#E65100] font-mono">{totalEmployees}</span> 人</div>
-                  </div>
-                </div>
-              </section>
-
-              {/* Conditional Main Grid View */}
               {managerViewMode === 'employees' ? (
-                /* Employee CRUD Panel */
-                <div className="space-y-6 animate-fade-in">
-                  {/* Employee Management Header Card */}
-                  <div className="glass-panel p-6 rounded-2xl border border-[#DAC0A3]/50 flex flex-col sm:flex-row items-center gap-4 justify-between shadow-sm">
-                    <div className="space-y-1 text-center sm:text-left">
-                      <h2 className="text-lg font-bold text-[#3E2723] flex items-center justify-center sm:justify-start gap-2">
-                        <span className="w-2.5 h-2.5 rounded-full bg-[#795548]"></span>
-                        員工清單管理
-                      </h2>
-                      <p className="text-xs text-[#6D4C41]">
-                        在此管理店內夥伴的培訓進度與在職狀態。培訓完成餐吧、POS機、後吧、收班、開早後將自動晉升為正式夥伴。
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => handleOpenEmployeeModal()}
-                      className="w-full sm:w-auto bg-[#795548] hover:bg-[#6D4C41] text-white font-bold px-5 py-2.5 rounded-xl transition-all shadow-md shadow-[#795548]/10 hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center gap-1.5 cursor-pointer text-sm"
-                    >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
-                      </svg>
-                      新增員工資料
-                    </button>
-                  </div>
-
-                  {/* Filters Row */}
-                  <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between bg-white/50 p-4 rounded-xl border border-[#DAC0A3]/40 shadow-xs">
-                    {/* Search */}
-                    <div className="relative flex-1">
-                      <input
-                        type="text"
-                        placeholder="搜尋員工姓名..."
-                        value={empSearch}
-                        onChange={(e) => setEmpSearch(e.target.value)}
-                        className="w-full glass-input pl-10 pr-4 py-2 rounded-xl text-sm"
-                      />
-                      <svg className="w-4 h-4 text-[#8D6E63] absolute left-3 top-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                      </svg>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      {/* Active Status filter */}
-                      <div className="flex items-center gap-1 bg-[#FAF7F2] border border-[#DAC0A3]/50 p-1 rounded-xl">
-                        <button
-                          onClick={() => setEmpActiveFilter('all')}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${empActiveFilter === 'all'
-                            ? 'bg-[#795548] text-white shadow-xs'
-                            : 'text-[#8D6E63] hover:text-[#3E2723]'
-                            }`}
-                        >
-                          全部 ({employees.length})
-                        </button>
-                        <button
-                          onClick={() => setEmpActiveFilter('active')}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${empActiveFilter === 'active'
-                            ? 'bg-[#795548] text-white shadow-xs'
-                            : 'text-[#8D6E63] hover:text-[#3E2723]'
-                            }`}
-                        >
-                          在職 ({employees.filter(e => e.active !== false).length})
-                        </button>
-                        <button
-                          onClick={() => setEmpActiveFilter('inactive')}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${empActiveFilter === 'inactive'
-                            ? 'bg-[#795548] text-white shadow-xs'
-                            : 'text-[#8D6E63] hover:text-[#3E2723]'
-                            }`}
-                        >
-                          離職 ({employees.filter(e => e.active === false).length})
-                        </button>
-                      </div>
-
-                      {/* Employment Status filter */}
-                      <div className="flex items-center gap-1 bg-[#FAF7F2] border border-[#DAC0A3]/50 p-1 rounded-xl">
-                        <button
-                          onClick={() => setEmpStatusFilter('all')}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${empStatusFilter === 'all'
-                            ? 'bg-[#795548] text-white shadow-xs'
-                            : 'text-[#8D6E63] hover:text-[#3E2723]'
-                            }`}
-                        >
-                          身分: 全部
-                        </button>
-                        <button
-                          onClick={() => setEmpStatusFilter('正式夥伴')}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${empStatusFilter === '正式夥伴'
-                            ? 'bg-[#795548] text-white shadow-xs'
-                            : 'text-[#8D6E63] hover:text-[#3E2723]'
-                            }`}
-                        >
-                          正式夥伴
-                        </button>
-                        <button
-                          onClick={() => setEmpStatusFilter('兼職夥伴')}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${empStatusFilter === '兼職夥伴'
-                            ? 'bg-[#795548] text-white shadow-xs'
-                            : 'text-[#8D6E63] hover:text-[#3E2723]'
-                            }`}
-                        >
-                          兼職夥伴
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Employees Grid */}
-                  {employees.filter(e => {
-                    const matchesSearch = e.name.toLowerCase().includes(empSearch.toLowerCase());
-                    const matchesStatus = empStatusFilter === 'all' || e.status === empStatusFilter;
-                    const matchesActive = empActiveFilter === 'all' ||
-                      (empActiveFilter === 'active' && e.active !== false) ||
-                      (empActiveFilter === 'inactive' && e.active === false);
-                    return matchesSearch && matchesStatus && matchesActive;
-                  }).length === 0 ? (
-                    <div className="py-16 text-center border-2 border-dashed border-[#DAC0A3]/45 rounded-2xl bg-white/40">
-                      <p className="text-sm text-[#6D4C41] font-semibold">沒有符合條件的員工紀錄</p>
-                      <p className="text-xs text-[#8D6E63] mt-1">請點擊「新增員工資料」按鈕來建立夥伴名單。</p>
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {employees
-                        .filter(e => {
-                          const matchesSearch = e.name.toLowerCase().includes(empSearch.toLowerCase());
-                          const matchesStatus = empStatusFilter === 'all' || e.status === empStatusFilter;
-                          const matchesActive = empActiveFilter === 'all' ||
-                            (empActiveFilter === 'active' && e.active !== false) ||
-                            (empActiveFilter === 'inactive' && e.active === false);
-                          return matchesSearch && matchesStatus && matchesActive;
-                        })
-                        .map(emp => {
-                          const isTraining = emp.trainingPosition || (emp.trainedPositions && emp.trainedPositions.length < 3);
-                          const trainedCount = emp.trainedPositions ? emp.trainedPositions.length : 0;
-                          const progressPercent = Math.round((trainedCount / 3) * 100);
-
-                          return (
-                            <div
-                              key={emp.id}
-                              className={`glass-panel p-5 rounded-2xl border border-[#DAC0A3]/50 hover:border-[#8D6E63]/80 hover:shadow-md transition-all flex flex-col justify-between gap-4 relative overflow-hidden group/card ${emp.active === false ? 'opacity-65 bg-gray-50/20 grayscale-[20%]' : ''}`}
-                            >
-                              <div className="space-y-3">
-                                {/* Header */}
-                                <div className="flex items-start justify-between">
-                                  <div className="space-y-1">
-                                    <h3 className="text-base font-extrabold text-[#3E2723] flex items-center gap-1.5">
-                                      👤 {emp.name}
-                                    </h3>
-                                    <div className="flex flex-wrap gap-1.5 items-center">
-                                      <span className={`inline-flex items-center gap-1 text-[10px] px-2.5 py-0.5 rounded-full font-bold border ${emp.status === '正式夥伴'
-                                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                        : 'bg-indigo-50 text-indigo-700 border-indigo-200'
-                                        }`}>
-                                        <span className={`w-1.5 h-1.5 rounded-full ${emp.status === '正式夥伴' ? 'bg-emerald-500' : 'bg-indigo-500'}`}></span>
-                                        {emp.status}
-                                      </span>
-                                      {emp.isNewcomer === true && (
-                                        <span className="inline-flex items-center gap-1 text-[10px] px-2.5 py-0.5 rounded-full font-bold border bg-pink-50 text-pink-700 border-pink-200">
-                                          <span className="w-1.5 h-1.5 rounded-full bg-pink-500"></span>
-                                          新進人員
-                                        </span>
-                                      )}
-                                      {emp.active === false && (
-                                        <span className="inline-flex items-center gap-1 text-[10px] px-2.5 py-0.5 rounded-full font-bold border bg-red-50 text-red-700 border-red-200">
-                                          <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
-                                          已離職
-                                        </span>
-                                      )}
-                                    </div>
-                                    <div className="text-[11px] text-[#6D4C41] font-semibold flex items-center gap-1 mt-1.5">
-                                      <span className="opacity-80">📞</span>
-                                      <span className="font-mono">{emp.phone || '無電話資料'}</span>
-                                    </div>
-                                  </div>
-
-                                  <div className="flex items-center gap-1 opacity-60 group-hover/card:opacity-100 transition-opacity">
-                                    <button
-                                      onClick={() => handleOpenEmployeeModal(emp)}
-                                      className="p-1.5 rounded-lg bg-white hover:bg-[#FAF7F2] border border-[#DAC0A3]/50 text-[#6D4C41] hover:text-[#3E2723] transition-colors cursor-pointer"
-                                      title="編輯資料"
-                                    >
-                                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                                      </svg>
-                                    </button>
-                                    <button
-                                      onClick={() => handleDeleteEmployee(emp.id)}
-                                      className="p-1.5 rounded-lg bg-white hover:bg-red-50 border border-[#DAC0A3]/50 text-[#6D4C41] hover:text-red-650 transition-colors cursor-pointer"
-                                      title="刪除夥伴"
-                                    >
-                                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                      </svg>
-                                    </button>
-                                  </div>
-                                </div>
-
-                                {/* Progress bar */}
-                                {isTraining && (
-                                  <div className="space-y-1">
-                                    <div className="flex justify-between items-center text-[10px] font-bold text-[#6D4C41]">
-                                      <span>合格進度</span>
-                                      <span>{trainedCount}/3 ({progressPercent}%)</span>
-                                    </div>
-                                    <div className="w-full bg-[#EADBC8]/40 h-2 rounded-full overflow-hidden">
-                                      <div
-                                        className="bg-gradient-to-r from-amber-400 to-[#795548] h-full rounded-full transition-all duration-500"
-                                        style={{ width: `${progressPercent}%` }}
-                                      ></div>
-                                    </div>
-                                  </div>
-                                )}
-
-                                {/* Position details */}
-                                <div className="space-y-2 pt-1 border-t border-[#DAC0A3]/25">
-                                  {isTraining && emp.trainingPosition && (
-                                    <div>
-                                      <span className="text-[10px] font-bold text-[#8D6E63] block uppercase tracking-wider mb-1">正在培訓崗位</span>
-                                      <span className="inline-block text-xs font-extrabold px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20 text-[#B7791F]">
-                                        📖 {emp.trainingPosition}
-                                      </span>
-                                    </div>
-                                  )}
-
-                                  <div>
-                                    <span className="text-[10px] font-bold text-[#8D6E63] block uppercase tracking-wider mb-1">已受訓合格崗位</span>
-                                    {emp.trainedPositions && emp.trainedPositions.length > 0 ? (
-                                      <div className="flex flex-wrap gap-1">
-                                        {emp.trainedPositions.map(pos => (
-                                          <span key={pos} className="inline-block text-xs font-extrabold px-2.5 py-0.5 rounded-lg bg-emerald-600/10 border border-emerald-600/20 text-[#2E7D32]">
-                                            ✅ {pos}
-                                          </span>
-                                        ))}
-                                      </div>
-                                    ) : (
-                                      <span className="text-xs text-[#6D4C41]/60 italic font-medium">尚未受訓合格任何崗位</span>
-                                    )}
-                                  </div>
-
-                                  {emp.certificates && emp.certificates.length > 0 && (
-                                    <div className="pt-2 border-t border-[#DAC0A3]/25">
-                                      <span className="text-[10px] font-bold text-[#8D6E63] block uppercase tracking-wider mb-1">持有證照</span>
-                                      <div className="flex flex-wrap gap-1">
-                                        {emp.certificates.map(cert => {
-                                          const isFbi = cert === 'FBI';
-                                          return (
-                                            <span
-                                              key={cert}
-                                              className={`inline-block text-[11px] font-extrabold px-2.5 py-0.5 rounded-lg border ${isFbi
-                                                ? 'bg-blue-50 text-blue-750 border-blue-200'
-                                                : 'bg-amber-50 text-amber-850 border-amber-200'
-                                                }`}
-                                            >
-                                              {isFbi ? '🛡️ FBI' : '☕ 黃金吧檯手'}
-                                            </span>
-                                          );
-                                        })}
-                                      </div>
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                    </div>
-                  )}
-                </div>
+                <ManagerEmployeeView
+                  employees={employees}
+                  empSearch={empSearch}
+                  setEmpSearch={setEmpSearch}
+                  empActiveFilter={empActiveFilter}
+                  setEmpActiveFilter={setEmpActiveFilter}
+                  empStatusFilter={empStatusFilter}
+                  setEmpStatusFilter={setEmpStatusFilter}
+                  handleOpenEmployeeModal={handleOpenEmployeeModal}
+                  handleDeleteEmployee={handleDeleteEmployee}
+                />
               ) : managerViewMode === 'calculation' ? (
-                /* Revenue-Based Staffing Calculation Panel */
-                <div className="space-y-6 animate-fade-in bg-white/40 p-6 rounded-2xl border border-[#DAC0A3]/50">
-                  {/* Header & Rules Reference Card */}
-                  <div className="flex flex-col md:flex-row gap-6 justify-between items-start">
-                    <div className="space-y-2 flex-1">
-                      <h2 className="text-lg font-bold text-[#3E2723] flex items-center gap-2">
-                        <span className="w-2.5 h-2.5 rounded-full bg-[#795548]"></span>
-                        營業額排班需求計算與設定
-                      </h2>
-                      <p className="text-xs text-[#6D4C41]">
-                        依據各時段的月營業額數據，自動估算日平均營業額及對應的建議排班人數。此人數將可作為一鍵套用至 <strong>db-global.json 預設排班目標人數</strong>（無日期限制的基礎人數需求）的參考基準。
-                      </p>
-
-                      {/* Rules display for reference */}
-                      <div className="mt-4 p-4 rounded-xl border border-[#DAC0A3]/45 bg-[#FAF7F2] space-y-1.5 shadow-xs">
-                        <h4 className="text-xs font-extrabold text-[#5D4037] uppercase tracking-wider mb-1">📋 營業額排班人數對照規則：</h4>
-                        <ul className="text-[11px] text-[#6D4C41] space-y-1 font-medium list-disc pl-4.5">
-                          <li>日平均營業額 <strong>{revenueStaffRules.tier1Limit.toLocaleString()} 元以下</strong>：配置 <span className="font-extrabold text-[#3E2723]">{revenueStaffRules.tier1Staff} 名</span> 員工</li>
-                          <li>日平均營業額 <strong>{(revenueStaffRules.tier1Limit + 1).toLocaleString()} - {revenueStaffRules.tier2Limit.toLocaleString()} 元</strong>：配置 <span className="font-extrabold text-[#3E2723]">{revenueStaffRules.tier2Staff} 名</span> 員工</li>
-                          <li>日平均營業額 <strong>{(revenueStaffRules.tier2Limit + 1).toLocaleString()} - {revenueStaffRules.tier3Limit.toLocaleString()} 元</strong>：配置 <span className="font-extrabold text-[#3E2723]">{revenueStaffRules.tier3Staff} 名</span> 員工</li>
-                          <li>日平均營業額 <strong>{revenueStaffRules.tier3Limit.toLocaleString()} 元以上</strong>：配置 <span className="font-extrabold text-[#3E2723]">{revenueStaffRules.tier4Staff} 名</span> 員工 (每增加 {revenueStaffRules.incrementAmount.toLocaleString()} 元再追加 1 人，上限為 {revenueStaffRules.maxStaff} 人)</li>
-                        </ul>
-                      </div>
-                    </div>
-
-                    {/* Action Buttons */}
-                    <div className="flex flex-col gap-2 w-full md:w-auto shrink-0 md:pt-4">
-                      <button
-                        onClick={handleApplyRevenuesToGlobalTargets}
-                        className="w-full md:w-56 bg-[#795548] hover:bg-[#6D4C41] text-white font-bold px-5 py-3 rounded-xl transition-all shadow-md shadow-[#795548]/10 hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center gap-1.5 cursor-pointer text-xs"
-                      >
-                        💾 套用至預設排班目標 (db-global)
-                      </button>
-                      <button
-                        onClick={handleResetRevenues}
-                        className="w-full md:w-56 bg-white hover:bg-red-50 border border-[#E5DCD5] text-[#5D4037] hover:text-red-650 font-bold px-5 py-2.5 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer text-xs"
-                      >
-                        🔄 重設營業額數據
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Hourly spreadsheet table */}
-                  <div className="glass-panel p-5 rounded-2xl border border-[#DAC0A3]/50 shadow-sm bg-white/70 overflow-hidden">
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left border-collapse">
-                        <thead>
-                          <tr className="border-b border-[#DAC0A3]/50 text-xs font-bold text-[#6D4C41]/80">
-                            <th className="pb-3 pl-2 w-1/4">時段</th>
-                            <th className="pb-3 w-1/4">月營業額輸入 (NTD)</th>
-                            <th className="pb-3 w-1/6">日平均營業額 (/30)</th>
-                            <th className="pb-3 w-1/6">建議配置人數</th>
-                            <th className="pb-3 pr-2 w-1/6">目前預設人數 (db-global)</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-[#DAC0A3]/25 text-sm text-[#3E2723]">
-                          {Array.from({ length: 14 }, (_, i) => i + 6).map(hour => {
-                            const monthlyVal = monthlyRevenues[hour] || 0;
-                            const dailyAvg = Number((monthlyVal / 30).toFixed(1));
-
-                            // Recommended staff count based on average income
-                            const recommendedStaff = getRecommendedStaff(dailyAvg, revenueStaffRules);
-
-                            // Current default target count in global database (no specific date)
-                            const currentDefaultTarget = staffingTargets.find(t => t.hour === hour && !t.date)?.targetCount ?? 2;
-
-                            return (
-                              <tr key={hour} className="hover:bg-[#FAF7F2]/30 transition-colors">
-                                <td className="py-3.5 pl-2 font-mono font-bold text-xs text-[#6D4C41]">
-                                  ⏰ {hour.toString().padStart(2, '0')}:00 - {(hour + 1).toString().padStart(2, '0')}:00
-                                </td>
-                                <td className="py-2">
-                                  <div className="relative w-44">
-                                    <span className="absolute left-3.5 top-2 text-xs text-[#8D6E63] font-mono">$</span>
-                                    <input
-                                      type="number"
-                                      min="0"
-                                      placeholder="請輸入月營業額"
-                                      value={monthlyVal || ''}
-                                      onChange={(e) => {
-                                        const val = Math.max(0, parseInt(e.target.value) || 0);
-                                        const next = { ...monthlyRevenues, [hour]: val };
-                                        setMonthlyRevenues(next);
-                                        updateMonthlyRevenues(next);
-                                      }}
-                                      className="w-full glass-input pl-7 pr-3 py-1.5 rounded-xl text-xs font-mono text-left focus:border-[#795548]"
-                                    />
-                                  </div>
-                                </td>
-                                <td className="py-3.5 font-mono text-xs font-extrabold text-[#795548]">
-                                  ${dailyAvg.toLocaleString()}
-                                </td>
-                                <td className="py-2.5">
-                                  <span className={`inline-flex items-center gap-1.5 text-xs font-extrabold px-3 py-1 rounded-full border ${recommendedStaff === 2
-                                    ? 'bg-blue-50 text-blue-750 border-blue-200'
-                                    : recommendedStaff === 3
-                                      ? 'bg-amber-50 text-amber-850 border-amber-200'
-                                      : 'bg-emerald-50 text-emerald-750 border-emerald-200'
-                                    }`}>
-                                    👥 {recommendedStaff} 人
-                                  </span>
-                                </td>
-                                <td className="py-3.5 pr-2 font-mono text-xs font-extrabold text-[#8D6E63]/75 pl-3">
-                                  {currentDefaultTarget} 人
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                </div>
+                <ManagerCalculationView
+                  revenueStaffRules={revenueStaffRules}
+                  monthlyRevenues={monthlyRevenues}
+                  setMonthlyRevenues={setMonthlyRevenues}
+                  staffingTargets={staffingTargets}
+                  analysisHoursRange={analysisHoursRange}
+                  handleApplyRevenuesToGlobalTargets={handleApplyRevenuesToGlobalTargets}
+                  handleResetRevenues={handleResetRevenues}
+                  getRecommendedStaff={getRecommendedStaff}
+                  updateMonthlyRevenues={updateMonthlyRevenues}
+                />
               ) : managerViewMode === 'analysis' ? (
-                /* Monthly Analysis Chart Panel */
-                <div className="space-y-6 animate-fade-in bg-white/40 p-6 rounded-2xl border border-[#DAC0A3]/50">
-                  <div className="space-y-2">
-                    <h2 className="text-lg font-bold text-[#3E2723] flex items-center gap-2">
-                      <span className="w-2.5 h-2.5 rounded-full bg-[#795548]"></span>
-                      每小時排班人數分析圖表
-                    </h2>
-                    <p className="text-xs text-[#6D4C41]">
-                      此圖表顯示 {currentMonthStart.getFullYear()}年 {currentMonthStart.getMonth() + 1}月 每日各時段（以小時為單位）已確認排班的總人數。
-                    </p>
-                  </div>
-
-                  {/* Main Grid Card */}
-                  <div className="glass-panel p-6 rounded-2xl border border-[#DAC0A3]/50 shadow-sm bg-white/70">
-                    <div className="overflow-x-auto max-w-full">
-                      {/* Heatmap Grid */}
-                      <div className="min-w-[950px] select-none pb-4">
-                        {/* Header Row: Days of Month */}
-                        <div className="flex border-b border-[#DAC0A3]/30 pb-2.5">
-                          {/* Hour slot empty corner */}
-                          <div className="w-36 shrink-0 text-xs font-extrabold text-[#6D4C41] flex items-center pl-2">
-                            時段 \ 日期
-                          </div>
-
-                          {/* Days loop */}
-                          <div className="flex flex-1 justify-around">
-                            {getDaysInMonth(currentMonthStart).map((dateObj) => {
-                              const dNum = dateObj.getDate();
-                              const dayName = DAYS_OF_WEEK[dateObj.getDay() === 0 ? 6 : dateObj.getDay() - 1].name.substring(1);
-                              const isWeekend = dateObj.getDay() === 0 || dateObj.getDay() === 6;
-                              return (
-                                <div key={dNum} className={`flex-1 text-center flex flex-col items-center min-w-[22px] ${isWeekend ? 'text-red-650 font-bold' : 'text-[#6D4C41]'}`}>
-                                  <span className="text-[13px] font-mono font-bold leading-none">{dNum}</span>
-                                  <span className="text-[11px] font-extrabold mt-0.5 opacity-90">{dayName}</span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-
-                        {/* Hour Rows */}
-                        <div className="divide-y divide-[#DAC0A3]/20 mt-1">
-                          {analysisHoursRange.map(hour => {
-                            const hourStr = `${hour.toString().padStart(2, '0')}:00 - ${(hour + 1).toString().padStart(2, '0')}:00`;
-                            return (
-                              <div key={hour} className="flex py-1.5 items-center hover:bg-[#FAF7F2]/45 transition-colors">
-                                {/* Row Label */}
-                                <div className="w-36 shrink-0 text-[11px] font-mono font-bold text-[#6D4C41] flex items-center pl-2">
-                                  ⏰ {hourStr}
-                                </div>
-
-                                {/* Columns Loop */}
-                                <div className="flex flex-1 justify-around">
-                                  {getDaysInMonth(currentMonthStart).map((dateObj, dIdx, arr) => {
-                                    const dateStr = formatDateString(dateObj);
-                                    const daySchedules = schedules.filter(s => s.date === dateStr);
-                                    const workers = daySchedules.filter(s => isShiftActiveAtHour(s.startTime, s.endTime, hour));
-                                    const count = workers.length;
-                                    const target = getStaffingTargetForHour(hour, dateStr);
-                                    const isUnder = target > 0 && count < target;
-                                    const workerNames = workers.map(w => w.employeeName);
-
-                                    // Style selection based on count
-                                    let bgStyle = 'bg-white border-[#DAC0A3]/45 text-[#3E2723]/50';
-                                    if (count === 2) {
-                                      bgStyle = 'bg-emerald-500 border-emerald-600 text-white font-bold';
-                                    } else if (count === 3) {
-                                      bgStyle = 'bg-blue-500 border-blue-600 text-white font-bold';
-                                    } else if (count === 4) {
-                                      bgStyle = 'bg-yellow-400 border-yellow-500 text-yellow-950 font-bold';
-                                    } else if (count === 5) {
-                                      bgStyle = 'bg-red-500 border-red-600 text-white font-bold';
-                                    } else if (count >= 6) {
-                                      bgStyle = 'bg-purple-600 border-purple-700 text-white font-bold';
-                                    }
-
-                                    const tooltipAlignClass = getTooltipAlignment(dIdx, arr.length);
-                                    const tooltipArrowAlignClass = getTooltipArrowAlignment(dIdx, arr.length);
-
-                                    return (
-                                      <div
-                                        key={dateStr}
-                                        className={`flex-1 min-w-[22px] mx-0.5 aspect-square rounded flex items-center justify-center text-[10px] border relative group transition-all duration-200 hover:scale-105 ${bgStyle} ${isUnder ? 'ring-1.5 ring-red-500 ring-offset-0.5' : ''
-                                          }`}
-                                      >
-                                        {count > 0 ? count : '-'}
-
-                                        {/* CSS Tooltip */}
-                                        <div className={`absolute bottom-full mb-2 w-52 hidden group-hover:block bg-[#3E2723] text-white text-[11px] p-2.5 rounded-lg shadow-lg z-30 pointer-events-none text-left leading-normal font-sans border border-[#FAF7F2]/10 ${tooltipAlignClass}`}>
-                                          <div className="font-extrabold border-b border-[#FAF7F2]/20 pb-1.5 mb-1.5 flex items-center justify-between">
-                                            <span>📅 {dateObj.getMonth() + 1}月{dateObj.getDate()}日 ({DAYS_OF_WEEK[dateObj.getDay() === 0 ? 6 : dateObj.getDay() - 1].name})</span>
-                                            <span className="font-mono text-[9px] bg-[#795548] px-1 rounded text-[#FAF7F2]">{hourStr}</span>
-                                          </div>
-                                          <div className="space-y-1">
-                                            <div>👥 確認人數: <span className="font-bold text-[#EADBC8] font-mono text-xs">{count}</span> 人</div>
-                                            {target > 0 && (
-                                              <div>🎯 目標人數: <span className="font-bold font-mono text-xs">{target}</span> 人 {isUnder && <span className="text-red-400 font-extrabold ml-1">(不足!)</span>}</div>
-                                            )}
-                                            {count > 0 && (
-                                              <div className="mt-1.5 pt-1.5 border-t border-[#FAF7F2]/10 text-white/95">
-                                                <div className="font-semibold text-white/70 mb-0.5">名單：</div>
-                                                <div className="flex flex-wrap gap-1">
-                                                  {workerNames.map((name, wIdx) => {
-                                                    const emp = employees.find(e => e.name === name);
-                                                    const isFt = emp?.status === '正式夥伴';
-                                                    return (
-                                                      <span key={wIdx} className={`px-1 py-0.2 rounded text-[10px] ${isFt ? 'bg-[#795548] text-white' : 'bg-[#FAF7F2]/15 text-[#EADBC8]'
-                                                        }`}>
-                                                        {name}
-                                                      </span>
-                                                    );
-                                                  })}
-                                                </div>
-                                              </div>
-                                            )}
-                                          </div>
-                                          {/* Tooltip Arrow */}
-                                          <div className={`absolute top-full border-4 border-transparent border-t-[#3E2723] ${tooltipArrowAlignClass}`}></div>
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Chart Legend */}
-                    <div className="flex flex-wrap items-center justify-between border-t border-[#DAC0A3]/25 pt-4.5 mt-2 gap-4">
-                      <div className="flex flex-wrap items-center gap-3 text-xs text-[#6D4C41]">
-                        <span className="font-extrabold text-[#3E2723]">顏色圖例 (人數):</span>
-                        <div className="flex items-center gap-1">
-                          <span className="w-3.5 h-3.5 rounded border border-[#DAC0A3]/45 bg-white"></span>
-                          <span>0-1 人</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <span className="w-3.5 h-3.5 rounded border border-emerald-600 bg-emerald-500"></span>
-                          <span>2 人</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <span className="w-3.5 h-3.5 rounded border border-blue-600 bg-blue-500"></span>
-                          <span>3 人</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <span className="w-3.5 h-3.5 rounded border border-yellow-500 bg-yellow-400"></span>
-                          <span>4 人</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <span className="w-3.5 h-3.5 rounded border border-red-600 bg-red-500"></span>
-                          <span>5 人</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <span className="w-3.5 h-3.5 rounded border border-purple-700 bg-purple-600"></span>
-                          <span>6+ 人</span>
-                        </div>
-                        <div className="flex items-center gap-1.5 ml-4">
-                          <span className="w-3.5 h-3.5 rounded border border-[#DAC0A3]/45 bg-white ring-1.5 ring-red-500 ring-offset-0.5"></span>
-                          <span className="text-red-650 font-bold">紅框表示人數未達目標 (不足)</span>
-                        </div>
-                      </div>
-
-                      <div className="text-[11px] text-[#8D6E63] italic">
-                        💡 將滑鼠游標移至格子上可預覽當小時班表同仁名單與目標。
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Summary statistics card */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 animate-fade-in">
-                    {/* Stat 1 */}
-                    <div className="glass-panel p-4.5 rounded-xl border border-[#DAC0A3]/50 bg-white/70 shadow-sm flex flex-col justify-between">
-                      <div className="text-[11px] font-bold text-[#8D6E63] uppercase tracking-wider">本月總工時</div>
-                      <div className="mt-1 flex items-baseline gap-1.5">
-                        <span className="text-2xl font-extrabold text-[#3E2723] font-mono">{Math.round(totalHours * 10) / 10}</span>
-                        <span className="text-xs text-[#6D4C41]">小時</span>
-                      </div>
-                      <p className="text-[10px] text-[#8D6E63] mt-1.5 leading-normal">
-                        所有夥伴本月已排定確認的有效工時總計（扣除休息時間）。
-                      </p>
-                    </div>
-
-                    {/* Stat 2 */}
-                    <div className="glass-panel p-4.5 rounded-xl border border-[#DAC0A3]/50 bg-white/70 shadow-sm flex flex-col justify-between">
-                      <div className="text-[11px] font-bold text-[#8D6E63] uppercase tracking-wider">單日平均人數</div>
-                      <div className="mt-1 flex items-baseline gap-1.5">
-                        <span className="text-2xl font-extrabold text-[#3E2723] font-mono">
-                          {(() => {
-                            const days = getDaysInMonth(currentMonthStart);
-                            if (days.length === 0) return 0;
-                            let totalWorkersCount = 0;
-                            days.forEach(dateObj => {
-                              const dateStr = formatDateString(dateObj);
-                              totalWorkersCount += schedules.filter(s => s.date === dateStr).length;
-                            });
-                            return (totalWorkersCount / days.length).toFixed(1);
-                          })()}
-                        </span>
-                        <span className="text-xs text-[#6D4C41]">人/天</span>
-                      </div>
-                      <p className="text-[10px] text-[#8D6E63] mt-1.5 leading-normal">
-                        本月日平均確認上班人次（不重複人次）。
-                      </p>
-                    </div>
-
-                    {/* Stat 3 */}
-                    <div className="glass-panel p-4.5 rounded-xl border border-[#DAC0A3]/50 bg-white/70 shadow-sm flex flex-col justify-between">
-                      <div className="text-[11px] font-bold text-[#8D6E63] uppercase tracking-wider">最高覆蓋時段</div>
-                      <div className="mt-1 flex items-baseline gap-1.5">
-                        <span className="text-lg font-extrabold text-[#3E2723] font-mono">
-                          {(() => {
-                            let maxCount = -1;
-                            let bestHour = -1;
-                            analysisHoursRange.forEach(hour => {
-                              let countForHour = 0;
-                              getDaysInMonth(currentMonthStart).forEach(dateObj => {
-                                const dateStr = formatDateString(dateObj);
-                                countForHour += schedules.filter(s => s.date === dateStr && isShiftActiveAtHour(s.startTime, s.endTime, hour)).length;
-                              });
-                              if (countForHour > maxCount) {
-                                maxCount = countForHour;
-                                bestHour = hour;
-                              }
-                            });
-                            if (bestHour === -1) return '無資料';
-                            return `${bestHour.toString().padStart(2, '0')}:00 - ${(bestHour + 1).toString().padStart(2, '0')}:00`;
-                          })()}
-                        </span>
-                      </div>
-                      <p className="text-[10px] text-[#8D6E63] mt-1.5 leading-normal">
-                        本月平均配置人數最多的營運時段。
-                      </p>
-                    </div>
-
-                    {/* Stat 4 */}
-                    <div className="glass-panel p-4.5 rounded-xl border border-[#DAC0A3]/50 bg-white/70 shadow-sm flex flex-col justify-between">
-                      <div className="text-[11px] font-bold text-[#8D6E63] uppercase tracking-wider">目標達成率</div>
-                      <div className="mt-1 flex items-baseline gap-1.5">
-                        <span className="text-2xl font-extrabold text-emerald-700 font-mono">
-                          {(() => {
-                            let totalTargetCells = 0;
-                            let metTargetCells = 0;
-                            getDaysInMonth(currentMonthStart).forEach(dateObj => {
-                              const dateStr = formatDateString(dateObj);
-                              const daySchedules = schedules.filter(s => s.date === dateStr);
-                              analysisHoursRange.forEach(hour => {
-                                const target = getStaffingTargetForHour(hour, dateStr);
-                                if (target > 0) {
-                                  totalTargetCells++;
-                                  const count = daySchedules.filter(s => isShiftActiveAtHour(s.startTime, s.endTime, hour)).length;
-                                  if (count >= target) {
-                                    metTargetCells++;
-                                  }
-                                }
-                              });
-                            });
-                            if (totalTargetCells === 0) return '100%';
-                            return `${Math.round((metTargetCells / totalTargetCells) * 100)}%`;
-                          })()}
-                        </span>
-                      </div>
-                      <p className="text-[10px] text-[#8D6E63] mt-1.5 leading-normal">
-                        在所有設定了人力目標的時段中，實排人數達標的比率。
-                      </p>
-                    </div>
-                  </div>
-                </div>
+                <ManagerAnalysisView
+                  currentMonthStart={currentMonthStart}
+                  schedules={schedules}
+                  employees={employees}
+                  analysisHoursRange={analysisHoursRange}
+                  totalHours={totalHours}
+                  getStaffingTargetForHour={getStaffingTargetForHour}
+                />
               ) : managerViewMode === 'system' ? (
-                /* System Management Panel */
-                <div className="space-y-6 animate-fade-in bg-white/40 p-6 rounded-2xl border border-[#DAC0A3]/50">
-                  <div className="space-y-2">
-                    <h2 className="text-lg font-bold text-[#3E2723] flex items-center gap-2">
-                      <span className="w-2.5 h-2.5 rounded-full bg-[#795548]"></span>
-                      系統管理設定
-                    </h2>
-                    <p className="text-xs text-[#6D4C41]">
-                      在此管理系統的全域規則與設定參數。
-                    </p>
-                  </div>
-
-                  <div className="glass-panel p-6 rounded-2xl border border-[#DAC0A3]/50 shadow-sm bg-white/70 space-y-6 max-w-xl">
-                    <div>
-                      <h3 className="text-sm font-bold text-[#3E2723] flex items-center gap-2">
-                        <span>⚙️</span> 門市營業時間與排班限制設定
-                      </h3>
-                      <p className="text-xs text-[#6D4C41] mt-1.5 leading-relaxed">
-                        在此管理門市營運時間區間，以及每個月夥伴線上填寫排班登記的起訖日期限制。
-                      </p>
-                    </div>
-
-                    <div className="space-y-4">
-                      {/* Section 1: Operating Hours */}
-                      <div className="border-t border-[#E5DCD5]/60 pt-4 space-y-3">
-                        <h4 className="text-xs font-bold text-[#3E2723] flex items-center gap-1.5">
-                          <span className="w-1.5 h-1.5 rounded-full bg-[#795548]"></span>
-                          門市營業/排班時間區間
-                        </h4>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-[11px] font-semibold text-[#6D4C41] mb-1.5">營業開始時間</label>
-                            <select
-                              value={operatingStartTime}
-                              onChange={(e) => setOperatingStartTime(e.target.value)}
-                              className="w-full glass-input px-3 py-2 rounded-xl text-xs cursor-pointer"
-                            >
-                              {ALL_TIME_CHOICES.map(choice => (
-                                <option key={choice} value={choice} className="bg-white text-[#3E2723]">
-                                  {choice}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                          <div>
-                            <label className="block text-[11px] font-semibold text-[#6D4C41] mb-1.5">營業結束時間</label>
-                            <select
-                              value={operatingEndTime}
-                              onChange={(e) => setOperatingEndTime(e.target.value)}
-                              className="w-full glass-input px-3 py-2 rounded-xl text-xs cursor-pointer"
-                            >
-                              {ALL_TIME_CHOICES.map(choice => (
-                                <option key={choice} value={choice} className="bg-white text-[#3E2723]">
-                                  {choice}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Section 2: Shift Presets Settings */}
-                      <div className="border-t border-[#E5DCD5]/60 pt-4 space-y-4">
-                        <div className="flex items-center justify-between">
-                          <h4 className="text-xs font-bold text-[#3E2723] flex items-center gap-1.5">
-                            <span className="w-1.5 h-1.5 rounded-full bg-[#795548]"></span>
-                            常用班次設定
-                          </h4>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const newName = prompt('請輸入新班次名稱（例如：中班）：');
-                              if (!newName) return;
-                              if (shiftPresets.some(p => p.name === newName)) {
-                                alert('班次名稱已存在！');
-                                return;
-                              }
-                              const updated = [
-                                ...shiftPresets,
-                                { name: newName, startTime: '08:00', endTime: '17:00' }
-                              ];
-                              setShiftPresets(updated);
-                            }}
-                            className="text-[10px] bg-[#FAF7F2] border border-[#DAC0A3] hover:border-[#8D6E63] text-[#8D6E63] font-bold px-2 py-1 rounded-lg transition-all cursor-pointer flex items-center gap-1"
-                          >
-                            <span>➕</span> 新增班次
-                          </button>
-                        </div>
-
-                        <div className="space-y-3">
-                          {shiftPresets.map((preset, pIdx) => (
-                            <div key={preset.name} className="flex items-center gap-3 bg-[#FAF7F2]/50 p-3 rounded-xl border border-[#EADBC8]/40">
-                              <span className="text-xs font-bold text-[#3E2723] w-16 truncate">{preset.name}</span>
-                              <div className="flex items-center gap-1.5 flex-1">
-                                <select
-                                  value={preset.startTime}
-                                  onChange={(e) => {
-                                    const updated = [...shiftPresets];
-                                    updated[pIdx].startTime = e.target.value;
-                                    setShiftPresets(updated);
-                                  }}
-                                  className="w-full glass-input px-2.5 py-1.5 rounded-xl text-xs cursor-pointer"
-                                >
-                                  {ALL_TIME_CHOICES.map(choice => (
-                                    <option key={choice} value={choice} className="bg-white text-[#3E2723]">
-                                      {choice}
-                                    </option>
-                                  ))}
-                                </select>
-                                <span className="text-[#8D6E63] text-xs font-bold">~</span>
-                                <select
-                                  value={preset.endTime}
-                                  onChange={(e) => {
-                                    const updated = [...shiftPresets];
-                                    updated[pIdx].endTime = e.target.value;
-                                    setShiftPresets(updated);
-                                  }}
-                                  className="w-full glass-input px-2.5 py-1.5 rounded-xl text-xs cursor-pointer"
-                                >
-                                  {ALL_TIME_CHOICES.map(choice => (
-                                    <option key={choice} value={choice} className="bg-white text-[#3E2723]">
-                                      {choice}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (shiftPresets.length <= 1) {
-                                    alert('必須保留至少一個常用班次！');
-                                    return;
-                                  }
-                                  if (safeConfirm(`確定要刪除「${preset.name}」班次嗎？`)) {
-                                    const updated = shiftPresets.filter((_, idx) => idx !== pIdx);
-                                    setShiftPresets(updated);
-                                  }
-                                }}
-                                className="p-1.5 text-red-500 hover:bg-red-50 active:bg-red-100 rounded-lg transition-colors cursor-pointer"
-                                title="刪除此班次"
-                              >
-                                ❌
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Section 3: Registration Limits */}
-                      <div className="border-t border-[#E5DCD5]/60 pt-4 space-y-3">
-                        <h4 className="text-xs font-bold text-[#3E2723] flex items-center gap-1.5">
-                          <span className="w-1.5 h-1.5 rounded-full bg-[#795548]"></span>
-                          夥伴登記時間限制
-                        </h4>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-[11px] font-semibold text-[#6D4C41] mb-1.5">開放登記日期：每月的第</label>
-                            <div className="flex items-center gap-1">
-                              <input
-                                type="number"
-                                min="1"
-                                max="31"
-                                value={startDay}
-                                onChange={(e) => {
-                                  const val = parseInt(e.target.value, 10);
-                                  if (!isNaN(val) && val >= 1 && val <= 31) {
-                                    setStartDay(val);
-                                  }
-                                }}
-                                className="w-full glass-input px-3 py-2 rounded-xl text-center font-mono text-xs"
-                              />
-                              <span className="text-[10px] font-semibold text-[#6D4C41] shrink-0">號</span>
-                            </div>
-                          </div>
-
-                          <div>
-                            <label className="block text-[11px] font-semibold text-[#6D4C41] mb-1.5">截止登記日期：每月的第</label>
-                            <div className="flex items-center gap-1">
-                              <input
-                                type="number"
-                                min="1"
-                                max="31"
-                                value={deadlineDay}
-                                onChange={(e) => {
-                                  const val = parseInt(e.target.value, 10);
-                                  if (!isNaN(val) && val >= 1 && val <= 31) {
-                                    setDeadlineDay(val);
-                                  }
-                                }}
-                                className="w-full glass-input px-3 py-2 rounded-xl text-center font-mono text-xs"
-                              />
-                              <span className="text-[10px] font-semibold text-[#6D4C41] shrink-0">號</span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Section 4: Revenue Staffing Rules */}
-                      <div className="border-t border-[#E5DCD5]/60 pt-4 space-y-3">
-                        <h4 className="text-xs font-bold text-[#3E2723] flex items-center gap-1.5">
-                          <span className="w-1.5 h-1.5 rounded-full bg-[#795548]"></span>
-                          營業額建議排班人數對照規則設定
-                        </h4>
-
-                        <div className="space-y-4">
-                          <div className="grid grid-cols-2 gap-4">
-                            <div>
-                              <label className="block text-[10px] font-semibold text-[#6D4C41] mb-1">第一階段營業額 (元以下)</label>
-                              <input
-                                type="number"
-                                min="0"
-                                value={tempRules.tier1Limit}
-                                onChange={(e) => setTempRules({ ...tempRules, tier1Limit: Math.max(0, parseInt(e.target.value) || 0) })}
-                                className="w-full glass-input px-3 py-1.5 rounded-xl font-mono text-xs text-center"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-[10px] font-semibold text-[#6D4C41] mb-1">第一階段建議人數 (人)</label>
-                              <input
-                                type="number"
-                                min="1"
-                                value={tempRules.tier1Staff}
-                                onChange={(e) => setTempRules({ ...tempRules, tier1Staff: Math.max(1, parseInt(e.target.value) || 1) })}
-                                className="w-full glass-input px-3 py-1.5 rounded-xl font-mono text-xs text-center"
-                              />
-                            </div>
-                          </div>
-
-                          <div className="grid grid-cols-2 gap-4">
-                            <div>
-                              <label className="block text-[10px] font-semibold text-[#6D4C41] mb-1">第二階段營業額 (元以下)</label>
-                              <input
-                                type="number"
-                                min="0"
-                                value={tempRules.tier2Limit}
-                                onChange={(e) => setTempRules({ ...tempRules, tier2Limit: Math.max(0, parseInt(e.target.value) || 0) })}
-                                className="w-full glass-input px-3 py-1.5 rounded-xl font-mono text-xs text-center"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-[10px] font-semibold text-[#6D4C41] mb-1">第二階段建議人數 (人)</label>
-                              <input
-                                type="number"
-                                min="1"
-                                value={tempRules.tier2Staff}
-                                onChange={(e) => setTempRules({ ...tempRules, tier2Staff: Math.max(1, parseInt(e.target.value) || 1) })}
-                                className="w-full glass-input px-3 py-1.5 rounded-xl font-mono text-xs text-center"
-                              />
-                            </div>
-                          </div>
-
-                          <div className="grid grid-cols-2 gap-4">
-                            <div>
-                              <label className="block text-[10px] font-semibold text-[#6D4C41] mb-1">第三階段營業額 (元以下)</label>
-                              <input
-                                type="number"
-                                min="0"
-                                value={tempRules.tier3Limit}
-                                onChange={(e) => setTempRules({ ...tempRules, tier3Limit: Math.max(0, parseInt(e.target.value) || 0) })}
-                                className="w-full glass-input px-3 py-1.5 rounded-xl font-mono text-xs text-center"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-[10px] font-semibold text-[#6D4C41] mb-1">第三階段建議人數 (人)</label>
-                              <input
-                                type="number"
-                                min="1"
-                                value={tempRules.tier3Staff}
-                                onChange={(e) => setTempRules({ ...tempRules, tier3Staff: Math.max(1, parseInt(e.target.value) || 1) })}
-                                className="w-full glass-input px-3 py-1.5 rounded-xl font-mono text-xs text-center"
-                              />
-                            </div>
-                          </div>
-
-                          <div className="grid grid-cols-3 gap-3">
-                            <div>
-                              <label className="block text-[10px] font-semibold text-[#6D4C41] mb-1">第四階段基準人數 (人)</label>
-                              <input
-                                type="number"
-                                min="1"
-                                value={tempRules.tier4Staff}
-                                onChange={(e) => setTempRules({ ...tempRules, tier4Staff: Math.max(1, parseInt(e.target.value) || 1) })}
-                                className="w-full glass-input px-3 py-1.5 rounded-xl font-mono text-xs text-center"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-[10px] font-semibold text-[#6D4C41] mb-1">每增加營業額額度 (元)</label>
-                              <input
-                                type="number"
-                                min="1"
-                                value={tempRules.incrementAmount}
-                                onChange={(e) => setTempRules({ ...tempRules, incrementAmount: Math.max(1, parseInt(e.target.value) || 1) })}
-                                className="w-full glass-input px-3 py-1.5 rounded-xl font-mono text-xs text-center"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-[10px] font-semibold text-[#6D4C41] mb-1">建議人數上限 (人)</label>
-                              <input
-                                type="number"
-                                min="1"
-                                value={tempRules.maxStaff}
-                                onChange={(e) => setTempRules({ ...tempRules, maxStaff: Math.max(1, parseInt(e.target.value) || 1) })}
-                                className="w-full glass-input px-3 py-1.5 rounded-xl font-mono text-xs text-center"
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Action buttons */}
-                      <div className="flex border-t border-[#E5DCD5] pt-4">
-                        <button
-                          onClick={async () => {
-                            try {
-                              if (startDay > deadlineDay) {
-                                alert("警告：開放日期不可晚於截止日期！");
-                                return;
-                              }
-                              await updateOperatingStartTime(operatingStartTime);
-                              await updateOperatingEndTime(operatingEndTime);
-                              await updateShiftMorningStart(shiftMorningStart);
-                              await updateShiftMorningEnd(shiftMorningEnd);
-                              await updateShiftEveningStart(shiftEveningStart);
-                              await updateShiftEveningEnd(shiftEveningEnd);
-                              await updateShiftPresets(shiftPresets);
-                              await updateStartDay(startDay);
-                              await updateDeadlineDay(deadlineDay);
-                              await updateRevenueStaffRules(tempRules);
-                              alert("已成功更新門市營業時間與排班限制設定！");
-                            } catch (err) {
-                              console.error("Failed to update settings:", err);
-                              alert("更新失敗，請稍後再試。");
-                            }
-                          }}
-                          className="ml-auto bg-[#795548] hover:bg-[#6D4C41] text-white font-bold px-5 py-2.5 rounded-xl transition-all shadow-md text-xs cursor-pointer"
-                        >
-                          儲存設定
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                <ManagerSystemView
+                  operatingStartTime={operatingStartTime}
+                  setOperatingStartTime={setOperatingStartTime}
+                  operatingEndTime={operatingEndTime}
+                  setOperatingEndTime={setOperatingEndTime}
+                  startDay={startDay}
+                  setStartDay={setStartDay}
+                  deadlineDay={deadlineDay}
+                  setDeadlineDay={setDeadlineDay}
+                  shiftPresets={shiftPresets}
+                  setShiftPresets={setShiftPresets}
+                  tempRules={tempRules}
+                  setTempRules={setTempRules}
+                  setRevenueStaffRules={setRevenueStaffRules}
+                />
               ) : (
                 <>
                   {/* Export Panel */}
@@ -4320,2126 +1973,194 @@ function App() {
                     </div>
                   </div>
 
-                  {/* Color Code Legend */}
-                  <div className="glass-panel p-4 rounded-xl border border-[#DAC0A3]/50 bg-white/40 mb-6 shadow-xs animate-fade-in">
-                    <div className="flex items-center gap-1.5 text-xs text-[#5D4037] font-extrabold mb-3">
-                      <svg className="w-4.5 h-4.5 text-[#795548]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                      </svg>
-                      <span>班表與登記狀態圖例 (Color Legend)</span>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                      {/* Available */}
-                      <div className="flex items-center gap-3 bg-white/30 p-2.5 rounded-xl border border-[#DAC0A3]/20">
-                        <div className="w-20 py-1.5 text-[10px] text-center font-bold border border-dashed border-emerald-600/30 bg-[#E8F5E9]/50 text-[#2E7D32] rounded-md font-mono shrink-0">
-                          08:30-17:30
-                        </div>
-                        <div className="flex flex-col">
-                          <span className="text-xs font-extrabold text-[#3E2723]">可用時間登記</span>
-                          <span className="text-[10px] text-[#6D4C41]">兼職夥伴登記時段，點擊可直接排班</span>
-                        </div>
-                      </div>
-
-                      {/* Confirmed */}
-                      <div className="flex items-center gap-3 bg-white/30 p-2.5 rounded-xl border border-[#DAC0A3]/20">
-                        <div className="w-20 py-1.5 text-[10px] text-center font-bold border border-[#4E342E]/25 bg-[#5D4037]/8 text-[#3E2723] rounded-md font-mono shrink-0">
-                          08:30-17:30
-                        </div>
-                        <div className="flex flex-col">
-                          <span className="text-xs font-extrabold text-[#3E2723]">已確認排班</span>
-                          <span className="text-[10px] text-[#6D4C41]">已排定之標準班表</span>
-                        </div>
-                      </div>
-
-                      {/* Modified */}
-                      <div className="flex items-center gap-3 bg-white/30 p-2.5 rounded-xl border border-[#DAC0A3]/20">
-                        <div className="w-20 py-1.5 text-[10px] text-center font-bold border border-[#bae6fd] bg-[#E0F2FE] text-[#0369a1] rounded-md font-mono shrink-0">
-                          08:30-17:30
-                        </div>
-                        <div className="flex flex-col">
-                          <span className="text-xs font-extrabold text-[#3E2723]">已修改班表</span>
-                          <span className="text-[10px] text-[#6D4C41]">排班時間已被修改，與原登記可用時間不符</span>
-                        </div>
-                      </div>
-
-                      {/* Leave */}
-                      <div className="flex items-center gap-3 bg-white/30 p-2.5 rounded-xl border border-[#DAC0A3]/20">
-                        <div className="w-20 py-1.5 text-[10px] text-center font-bold border border-red-200 bg-red-50 text-red-700 rounded-md shrink-0">
-                          ❌ 休假
-                        </div>
-                        <div className="flex flex-col">
-                          <span className="text-xs font-extrabold text-[#3E2723]">不克排班 (休假)</span>
-                          <span className="text-[10px] text-[#6D4C41]">夥伴該日請假或休假，防錯機制將自動限制</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
                   {managerViewMode === 'calendar' ? (
-                    /* Month View Calendar Layout */
-                    <main className="glass-panel rounded-2xl overflow-hidden border border-[#DAC0A3]/50 shadow-sm animate-fade-in">
-
-                      {/* Weekday columns labels */}
-                      <div className="grid grid-cols-7 border-b border-[#DAC0A3]/50 bg-[#F5EBE6]/60">
-                        {DAYS_OF_WEEK.map(day => (
-                          <div key={day.value} className="py-2 text-center text-xs font-bold text-[#6D4C41]">
-                            {day.name}
-                          </div>
-                        ))}
-                      </div>
-
-                      {/* Monthly dates grid (42 cells) */}
-                      <div className="grid grid-cols-7 gap-px bg-[#EADBC8]/60">
-                        {monthGridDates.map((dateObj) => {
-                          const dateStr = formatDateString(dateObj);
-                          const isToday = dateStr === todayStr;
-                          const isCurrentMonth = dateObj.getMonth() === currentMonthStart.getMonth();
-                          const isSelected = dateStr === selectedDateStr;
-
-                          const daySchedules = getSchedulesForDate(dateStr);
-                          const totalDayHours = getDateTotalHours(dateStr);
-                          const dateAvails = getAvailabilitiesForDate(dateStr);
-                          const isUnderstaffed = getIsDayUnderstaffed(dateStr);
-
-                          const isFirstOfMonth = dateObj.getDate() === 1;
-                          const dateLabel = isFirstOfMonth ? `${dateObj.getMonth() + 1}/1` : dateObj.getDate().toString();
-
-                          return (
-                            <div
-                              key={dateStr}
-                              onClick={() => setSelectedDateStr(dateStr)}
-                              className={`min-h-[75px] md:min-h-[110px] p-1.5 flex flex-col justify-between transition-colors cursor-pointer select-none relative group ${isSelected
-                                ? 'bg-[#8D6E63]/10'
-                                : isToday
-                                  ? 'bg-[#FAF7F2]'
-                                  : isCurrentMonth
-                                    ? 'bg-white/90 hover:bg-[#FAF7F2]'
-                                    : 'bg-[#FAF7F2]/50 text-[#8D6E63]/40 opacity-50 hover:bg-[#FAF7F2]'
-                                }`}
-                            >
-                              {/* Date cell header */}
-                              <div className="flex items-center justify-between mb-1">
-                                <span
-                                  className={`text-xs font-bold font-mono px-1.5 py-0.5 rounded-full flex items-center justify-center ${isToday
-                                    ? 'bg-[#795548] text-white shadow-sm shadow-[#795548]/20'
-                                    : isSelected
-                                      ? 'text-[#5D4037] bg-[#8D6E63]/10'
-                                      : isCurrentMonth
-                                        ? 'text-[#3E2723] font-extrabold'
-                                        : 'text-[#8D6E63]/60'
-                                    }`}
-                                >
-                                  {dateLabel}
-                                </span>
-
-                                {/* Availability Count Badge */}
-                                {(() => {
-                                  const actualAvailCount = dateAvails.filter(a => !(a.startTime === '00:00' && a.endTime === '00:00')).length;
-                                  const offCount = dateAvails.filter(a => a.startTime === '00:00' && a.endTime === '00:00').length;
-                                  return (
-                                    <div className="flex flex-col gap-0.5 items-end">
-                                      {actualAvailCount > 0 && (
-                                        <span className="text-[9px] px-1 py-0.2 rounded bg-emerald-600/10 border border-emerald-600/20 text-[#2E7D32] font-bold flex items-center gap-0.5" title={`${actualAvailCount} 位人員今日可用`}>
-                                          🙋{actualAvailCount}
-                                        </span>
-                                      )}
-                                      {offCount > 0 && (
-                                        <span className="text-[9px] px-1 py-0.2 rounded bg-red-50 text-red-700 border border-red-200 font-bold flex items-center gap-0.5" title={`${offCount} 位人員今日請假`}>
-                                          ❌{offCount}
-                                        </span>
-                                      )}
-                                    </div>
-                                  );
-                                })()}
-
-                                {/* Total Daily Hours badge (desktop only) */}
-                                {totalDayHours > 0 && (
-                                  <span className="hidden md:inline-block text-[9px] px-1 py-0.2 rounded bg-white/80 text-[#6D4C41] border border-[#DAC0A3]/50 font-mono flex items-center gap-1">
-                                    {totalDayHours}h
-                                    {isUnderstaffed && (
-                                      <span className="w-1 h-1 rounded-full bg-[#E65100] animate-pulse" title="排班未達目標人數"></span>
-                                    )}
-                                  </span>
-                                )}
-
-                                {/* Plus Icon to quick add shift (desktop hover only) */}
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleOpenAddModal(dateStr);
-                                  }}
-                                  className="hidden md:group-hover:flex items-center justify-center p-0.5 rounded hover:bg-[#FAF7F2] text-[#8D6E63] hover:text-[#5D4037] border border-transparent hover:border-[#DAC0A3]/50 transition-all"
-                                  title="在此日新增排班"
-                                >
-                                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M12 4v16m8-8H4" />
-                                  </svg>
-                                </button>
-                              </div>
-
-                              {/* Shifts contents */}
-                              <div className="flex-1 space-y-1 overflow-y-auto">
-                                {/* Desktop View: lists the shift pills */}
-                                <div className="hidden md:block space-y-1">
-                                  {daySchedules.slice(0, 3).map(schedule => {
-                                    const theme = getScheduleTheme(schedule);
-                                    return (
-                                      <div
-                                        key={schedule.id}
-                                        onClick={(e) => handleOpenEditModal(schedule, e)}
-                                        className={`group/item text-[10px] py-1 px-1.5 rounded truncate select-none border font-semibold flex items-center justify-between ${theme.bg} ${theme.border} ${theme.hover}`}
-                                        title={`👤 ${schedule.employeeName} (${schedule.startTime} - ${schedule.endTime})${schedule.workplace ? ` | 📍 ${schedule.workplace}` : ''}`}
-                                      >
-                                        <span className="truncate">
-                                          {schedule.employeeName}{schedule.workplace ? ` (${schedule.workplace.substring(0, 2)})` : ''} {schedule.startTime}-{schedule.endTime}
-                                        </span>
-                                      </div>
-                                    );
-                                  })}
-                                  {daySchedules.length > 3 && (
-                                    <div className="text-[9px] text-[#6D4C41] font-bold text-center pl-1">
-                                      還有 {daySchedules.length - 3} 個班...
-                                    </div>
-                                  )}
-                                </div>
-
-                                {/* Mobile View: displays small colored indicator dots */}
-                                <div className="md:hidden flex flex-wrap gap-0.5 justify-center mt-1">
-                                  {daySchedules.map(schedule => {
-                                    const theme = getScheduleTheme(schedule);
-                                    return (
-                                      <span
-                                        key={schedule.id}
-                                        className={`w-1.5 h-1.5 rounded-full ${theme.dot}`}
-                                      />
-                                    );
-                                  })}
-                                </div>
-                              </div>
-
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </main>
+                    <ManagerCalendarView
+                      monthGridDates={monthGridDates}
+                      todayStr={formatDateString(new Date())}
+                      selectedDateStr={selectedDateStr}
+                      setSelectedDateStr={setSelectedDateStr}
+                      currentMonthStart={currentMonthStart}
+                      getSchedulesForDate={getSchedulesForDate}
+                      getDateTotalHours={getDateTotalHours}
+                      getAvailabilitiesForDate={getAvailabilitiesForDate}
+                      getIsDayUnderstaffed={getIsDayUnderstaffed}
+                      getScheduleTheme={getScheduleTheme}
+                      handleOpenAddModal={handleOpenAddModal}
+                      handleOpenEditModal={handleOpenEditModal}
+                    />
                   ) : (
-                    /* Excel Grid Layout */
-                    <main className="glass-panel rounded-2xl overflow-hidden border border-[#DAC0A3]/50 shadow-sm animate-scale-in">
-                      <div ref={gridContainerRef} className="overflow-x-auto max-w-full">
-                        <table className="w-full border-collapse text-left select-none table-fixed">
-                          <thead>
-                            <tr className="border-b border-[#DAC0A3]/50 bg-[#F5EBE6]/60">
-                              {/* Sticky Employee Row Header */}
-                              <th rowSpan={3} className="sticky left-0 z-20 bg-[#F5EBE6] px-4 py-4 text-xs font-black text-[#3E2723] border-r border-b border-[#DAC0A3]/50 w-[145px] shadow-[4px_0_8px_-4px_rgba(100,70,50,0.15)]">
-                                人員姓名
-                              </th>
-                              {/* Date headers */}
-                              {gridDates.map(dateObj => {
-                                const dateStr = formatDateString(dateObj);
-                                const isToday = dateStr === todayStr;
-                                const isSelected = dateStr === selectedDateStr;
-                                const dayOfWeekIndex = dateObj.getDay();
-                                const mappedDayIndex = dayOfWeekIndex === 0 ? 7 : dayOfWeekIndex;
-                                const dayInfo = DAYS_OF_WEEK.find(d => d.value === mappedDayIndex) || DAYS_OF_WEEK[0];
-
-                                const totalDayHours = getDateTotalHours(dateStr);
-                                const isUnderstaffed = getIsDayUnderstaffed(dateStr);
-
-                                return (
-                                  <th
-                                    key={dateStr}
-                                    onClick={() => setSelectedDateStr(dateStr)}
-                                    className={`px-2 py-2 text-center text-xs font-bold border-r border-b border-[#DAC0A3]/50 w-[100px] cursor-pointer transition-colors ${isSelected
-                                      ? 'bg-[#8D6E63]/15 text-[#3E2723]'
-                                      : isToday
-                                        ? 'bg-[#F5EBE6] text-[#3E2723] font-black'
-                                        : 'hover:bg-[#FAF7F2]/75 text-[#6D4C41]'
-                                      }`}
-                                  >
-                                    <div className="font-mono text-sm font-extrabold">{dateObj.getDate()}</div>
-                                    <div className="text-xs font-bold opacity-90">{dayInfo.name}</div>
-                                    {/* Hourly coverage indicator under the header */}
-                                    <div className="mt-1 flex items-center justify-center gap-1">
-                                      {totalDayHours > 0 && (
-                                        <span className={`text-[8px] font-black px-1.5 py-0.2 rounded-md ${isUnderstaffed
-                                          ? 'bg-[#E65100]/10 text-[#BF360C] border border-[#E65100]/20'
-                                          : 'bg-emerald-600/10 text-[#2E7D32] border border-emerald-600/20'
-                                          }`}>
-                                          {totalDayHours}h
-                                        </span>
-                                      )}
-                                    </div>
-                                  </th>
-                                );
-                              })}
-                            </tr>
-                            <tr className="border-b border-[#DAC0A3]/50 bg-[#F5EBE6]/60">
-                              {/* ERP labels row */}
-                              {gridDates.map(dateObj => {
-                                const dateStr = formatDateString(dateObj);
-                                const isToday = dateStr === todayStr;
-                                const isSelected = dateStr === selectedDateStr;
-                                const dayOfWeekIndex = dateObj.getDay();
-                                const mappedDayIndex = dayOfWeekIndex === 0 ? 7 : dayOfWeekIndex;
-                                const isERP = mappedDayIndex === 1 || mappedDayIndex === 3 || mappedDayIndex === 5;
-
-                                return (
-                                  <th
-                                    key={dateStr + '-erp'}
-                                    onClick={() => setSelectedDateStr(dateStr)}
-                                    className={`px-2 py-1 text-center border-r border-b border-[#DAC0A3]/50 w-[100px] cursor-pointer transition-colors ${isSelected
-                                      ? 'bg-[#8D6E63]/15 text-[#3E2723]'
-                                      : isToday
-                                        ? 'bg-[#F5EBE6] text-[#3E2723] font-black'
-                                        : 'hover:bg-[#FAF7F2]/75'
-                                      }`}
-                                  >
-                                    {isERP ? (
-                                      <span className="inline-block px-1.5 py-0.5 text-[9px] font-black bg-indigo-600/10 text-indigo-750 border border-indigo-600/20 rounded-md">
-                                        ERP
-                                      </span>
-                                    ) : (
-                                      <span className="inline-block h-[15px]"></span>
-                                    )}
-                                  </th>
-                                );
-                              })}
-                            </tr>
-                            <tr className="border-b border-[#DAC0A3]/50 bg-[#F5EBE6]/40">
-                              {/* Custom notes row */}
-                              {gridDates.map(dateObj => {
-                                const dateStr = formatDateString(dateObj);
-                                const isToday = dateStr === todayStr;
-                                const isSelected = dateStr === selectedDateStr;
-                                const note = getDayNote(dateStr);
-
-                                return (
-                                  <th
-                                    key={dateStr + '-note'}
-                                    className={`px-1 py-1.5 text-center border-r border-b border-[#DAC0A3]/50 w-[100px] transition-colors relative group/note ${isSelected
-                                      ? 'bg-[#8D6E63]/10 text-[#3E2723]'
-                                      : isToday
-                                        ? 'bg-[#FAF7F2]'
-                                        : 'bg-white/50 hover:bg-[#FAF7F2]/80'
-                                      }`}
-                                  >
-                                    <div className="flex flex-col items-center justify-between min-h-[36px] gap-1">
-                                      {note ? (
-                                        <span
-                                          className="text-[9px] font-bold text-[#5D4037] break-words line-clamp-2 px-1 max-w-[92px] leading-tight select-text"
-                                          title={note}
-                                        >
-                                          {note}
-                                        </span>
-                                      ) : (
-                                        <span className="text-[9px] text-[#6D4C41]/30 font-medium italic select-none">
-                                          無日備註
-                                        </span>
-                                      )}
-
-                                      <button
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          const newNote = window.prompt(`編輯 ${dateStr} 的日備註：`, note);
-                                          if (newNote !== null) {
-                                            handleUpdateDayNote(dateStr, newNote.trim());
-                                          }
-                                        }}
-                                        className="text-[9px] text-[#8D6E63] hover:text-[#5D4037] hover:underline flex items-center justify-center gap-0.5 cursor-pointer mt-0.5 opacity-65 hover:opacity-100 transition-opacity"
-                                      >
-                                        備註 📝
-                                      </button>
-                                    </div>
-                                  </th>
-                                );
-                              })}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {allEmployees.length === 0 ? (
-                              <tr>
-                                <td colSpan={gridDates.length + 1} className="py-16 text-center text-xs text-[#6D4C41] font-medium bg-[#FAF7F2]/40">
-                                  目前尚無人員排班或登記資料
-                                </td>
-                              </tr>
-                            ) : (
-                              allEmployees.map(empName => {
-                                const matchingEmp = employees.find(
-                                  e => e.name.trim().toLowerCase() === empName.trim().toLowerCase()
-                                );
-                                const isNewcomer = matchingEmp ? !!matchingEmp.isNewcomer : false;
-
-                                return (
-                                  <tr key={empName} className="border-b border-dotted border-[#DAC0A3]/70 hover:bg-[#FAF7F2]/30 transition-colors group">
-                                    {/* Sticky Left Column Employee Initials */}
-                                    <td className={`sticky left-0 z-10 backdrop-blur-sm px-3.5 py-1 text-sm font-extrabold border-r-2 border-solid border-b border-dotted border-[#DAC0A3]/90 shadow-[4px_0_8px_-4px_rgba(100,70,50,0.1)] w-[145px] h-[48px] align-middle transition-colors ${isNewcomer
-                                        ? 'bg-pink-100/85 group-hover:bg-pink-200/90 text-pink-700'
-                                        : 'bg-[#FAF7F2]/95 group-hover:bg-[#F5EBE6] text-[#3E2723]'
-                                      }`}>
-                                      <div className="flex items-center gap-2 h-full select-none">
-                                        {activeRole === 'manager' && (
-                                          <div className="flex flex-col gap-1 shrink-0">
-                                            {/* Up Button */}
-                                            <button
-                                              onClick={() => handleMoveEmployeeUp(empName)}
-                                              disabled={allEmployees.indexOf(empName) === 0}
-                                              className="p-1 rounded text-[#8D6E63] hover:bg-[#8D6E63]/10 active:bg-[#8D6E63]/20 disabled:opacity-20 disabled:pointer-events-none transition-colors"
-                                              title="上移"
-                                            >
-                                              <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
-                                                <path d="M12 4l-8 8h16l-8-8z" />
-                                              </svg>
-                                            </button>
-                                            {/* Down Button */}
-                                            <button
-                                              onClick={() => handleMoveEmployeeDown(empName)}
-                                              disabled={allEmployees.indexOf(empName) === allEmployees.length - 1}
-                                              className="p-1 rounded text-[#8D6E63] hover:bg-[#8D6E63]/10 active:bg-[#8D6E63]/20 disabled:opacity-20 disabled:pointer-events-none transition-colors"
-                                              title="下移"
-                                            >
-                                              <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
-                                                <path d="M12 20l8-8H4l8 8z" />
-                                              </svg>
-                                            </button>
-                                          </div>
-                                        )}
-                                        <div className="flex flex-col gap-1 justify-center truncate min-w-0">
-                                          <span className="truncate" title={empName}>👤 {empName}</span>
-                                          <div className="flex flex-wrap gap-1">
-                                            {matchingEmp && matchingEmp.isNewcomer && (
-                                              <span className="text-[9px] text-pink-700 bg-pink-50 border border-pink-200 rounded-md px-1.5 py-0.5 w-fit font-bold select-none leading-none truncate animate-pulse">
-                                                新進
-                                              </span>
-                                            )}
-                                            {matchingEmp && matchingEmp.trainingPosition && (
-                                              <span className="text-[10px] text-amber-700 bg-amber-500/10 border border-amber-500/20 rounded px-1.5 py-0.5 w-fit font-bold select-none leading-none truncate">
-                                                📖 {matchingEmp.trainingPosition}
-                                              </span>
-                                            )}
-                                          </div>
-                                        </div>
-                                      </div>
-                                    </td>
-
-                                    {/* Column cell details */}
-                                    {gridDates.map(dateObj => {
-                                      const dateStr = formatDateString(dateObj);
-                                      const isSelected = dateStr === selectedDateStr;
-
-                                      // Shift scheduled
-                                      const empSchedules = schedules.filter(
-                                        s => s.employeeName.trim().toLowerCase() === empName.toLowerCase() && s.date === dateStr
-                                      ).sort((a, b) => compareTimeStrings(a.startTime, b.startTime));
-
-                                      // Worker Availability
-                                      const empAvails = availabilities.filter(
-                                        a => a.employeeName.trim().toLowerCase() === empName.toLowerCase() && a.date === dateStr && a.confirmed !== true
-                                      ).sort((a, b) => compareTimeStrings(a.startTime, b.startTime));
-
-                                       const cellKey = `${empName.trim().toLowerCase()}|${dateStr}`;
-                                       const isCellMarkedBlue = !!markedEmptyCells[cellKey];
-
-                                       return (
-                                         <td
-                                           key={dateStr}
-                                           onClick={() => setSelectedDateStr(dateStr)}
-                                           onContextMenu={(e) => {
-                                             if (e.target === e.currentTarget || empSchedules.length === 0) {
-                                               e.preventDefault();
-                                               e.stopPropagation();
-                                               setContextMenu({ x: e.clientX, y: e.clientY, emptyCell: { employeeName: empName, dateStr } });
-                                             }
-                                           }}
-                                           className={`p-0.5 pt-1 pb-1 border-r border-solid border-b border-dotted border-[#DAC0A3]/40 text-center w-[100px] h-[48px] relative align-middle transition-colors ${isSelected ? 'bg-[#8D6E63]/5' : ''} ${isCellMarkedBlue ? '!bg-[#93C5FD]/40' : ''}`}
-                                         >
-                                          {empSchedules.length > 0 || empAvails.length > 0 ? (
-                                            // Scheduled shifts + remaining availabilities (both shown together)
-                                            <div className="space-y-0.5">
-                                              {/* 1. Scheduled shifts */}
-                                              {empSchedules.map(sched => {
-                                                const theme = getScheduleTheme(sched);
-                                                const managerNote = sched.managerNotes !== undefined ? sched.managerNotes : getManagerNote(sched);
-                                                const originalAvail = availabilities.find(a => a.id === sched.availabilityId);
-                                                const registerNotes = originalAvail?.notes ? getCleanNote(originalAvail.notes) : '';
-                                                return (
-                                                   <div
-                                                     key={sched.id}
-                                                     onClick={(e) => handleOpenEditModal(sched, e)}
-                                                     onContextMenu={(e) => {
-                                                       e.preventDefault();
-                                                       e.stopPropagation();
-                                                       setContextMenu({ x: e.clientX, y: e.clientY, schedule: sched });
-                                                     }}
-                                                     className={`text-xs py-0.5 px-1.5 rounded-md border font-semibold truncate cursor-pointer transition-all hover:scale-[1.02] ${theme.bg} ${theme.border} ${theme.text}`}
-                                                     title={`👤 ${sched.employeeName} (${sched.startTime}-${sched.endTime})${registerNotes ? ` | 備註: ${registerNotes}` : ''}${managerNote ? ` | 📝 主管備註: ${managerNote}` : ''}`}
-                                                   >
-                                                     {sched.markedBlue && <span className="mr-0.5">🔵</span>}
-                                                     {sched.startTime}-{sched.endTime}
-                                                    {managerNote && (
-                                                      <div className="text-[10px] opacity-90 truncate mt-0.5 leading-normal font-medium" title={managerNote}>
-                                                        ({managerNote})
-                                                      </div>
-                                                    )}
-                                                  </div>
-                                                );
-                                              })}
-                                              {/* 2. Remaining unconfirmed availabilities (always shown, even when schedules exist) */}
-                                              {empAvails.map(avail => {
-                                                const cleanNote = getCleanNote(avail.notes);
-                                                const isOffDay = avail.startTime === '00:00' && avail.endTime === '00:00';
-
-                                                if (isOffDay) {
-                                                  return (
-                                                    <div
-                                                      key={avail.id}
-                                                      className="text-xs py-0.5 px-1 border border-red-200 bg-red-50 text-red-700 font-bold rounded-md relative flex flex-col justify-center items-center min-h-[32px] h-auto"
-                                                      title={`不克排班 (休假)${cleanNote ? ` | 📝 ${cleanNote}` : ''}`}
-                                                    >
-                                                      <div className="text-[10px] font-bold leading-none">❌ 休假/請假</div>
-                                                      <div className="text-[9px] opacity-75 mt-1 leading-none truncate w-full">不排班</div>
-                                                      {cleanNote && (
-                                                        <div className="text-[9.5px] opacity-85 mt-1 leading-none truncate w-full">
-                                                          ({cleanNote})
-                                                        </div>
-                                                      )}
-                                                    </div>
-                                                  );
-                                                }
-
-                                                return (
-                                                  <div
-                                                    key={avail.id}
-                                                    className="text-xs py-0.5 px-0.5 border border-dashed border-emerald-600/30 bg-[#E8F5E9]/50 text-[#2E7D32] font-black rounded-md relative group/btn flex flex-col justify-center items-center min-h-[32px] h-auto"
-                                                    title={`可用時段: ${avail.startTime}-${avail.endTime}${avail.workplace ? ` @ 📍 ${avail.workplace}` : ''}${cleanNote ? ` | 📝 ${cleanNote}` : ''}`}
-                                                  >
-                                                    <div className="text-[10px] font-mono leading-none font-bold">{avail.startTime}-{avail.endTime}</div>
-                                                    {cleanNote && (
-                                                      <div className="text-[9.5px] opacity-85 mt-1 leading-none truncate w-full">
-                                                        ({cleanNote})
-                                                      </div>
-                                                    )}
-                                                    {/* Hover Instant Schedule Button */}
-                                                    <button
-                                                      onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        handleInstantAssign(avail);
-                                                      }}
-                                                      className="absolute inset-0 bg-[#2E7D32]/95 text-white rounded-md flex items-center justify-center gap-0.5 opacity-0 group-hover/btn:opacity-100 transition-opacity text-xs font-extrabold cursor-pointer"
-                                                    >
-                                                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                                                      </svg>
-                                                      直接排
-                                                    </button>
-                                                  </div>
-                                                );
-                                              })}
-                                            </div>
-                                          ) : (
-                                            // 3. Empty cell (Click to quick assign)
-                                            <button
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                                setModalMode('create');
-                                                setEditingId(null);
-                                                setEmployeeName(empName);
-                                                setWorkplace(workplaces[0]?.name || '');
-                                                setStartTime('09:00');
-                                                setEndTime('17:00');
-                                                setNotes('');
-                                                setSelectedDates([dateStr]);
-                                                setFormOriginalStartTime(null);
-                                                setFormOriginalEndTime(null);
-                                                setIsModalOpen(true);
-                                              }}
-                                              className="w-full h-full min-h-[32px] rounded-lg border border-transparent hover:border-[#8D6E63]/40 hover:bg-[#FAF7F2] transition-all flex items-center justify-center text-[#E5D3C3] hover:text-[#795548] cursor-pointer"
-                                              title="在此日排班"
-                                            >
-                                              <svg className="w-4 h-4 opacity-0 hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
-                                              </svg>
-                                            </button>
-                                          )}
-                                        </td>
-                                      );
-                                    })}
-                                  </tr>
-                                )
-                              })
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-                    </main>
+                    <ManagerGridView
+                      gridContainerRef={gridContainerRef}
+                      gridDates={gridDates}
+                      todayStr={formatDateString(new Date())}
+                      selectedDateStr={selectedDateStr}
+                      setSelectedDateStr={setSelectedDateStr}
+                      allEmployees={allEmployees}
+                      employees={employees}
+                      schedules={schedules}
+                      availabilities={availabilities}
+                      markedEmptyCells={markedEmptyCells}
+                      activeRole={activeRole}
+                      setContextMenu={setContextMenu}
+                      getDateTotalHours={getDateTotalHours}
+                      getIsDayUnderstaffed={getIsDayUnderstaffed}
+                      getDayNote={getDayNote}
+                      handleUpdateDayNote={handleUpdateDayNote}
+                      handleMoveEmployeeUp={handleMoveEmployeeUp}
+                      handleMoveEmployeeDown={handleMoveEmployeeDown}
+                      getScheduleTheme={getScheduleTheme}
+                      getManagerNote={getManagerNote}
+                      handleOpenEditModal={handleOpenEditModal}
+                      handleInstantAssign={handleInstantAssign}
+                      setModalMode={setModalMode}
+                      setEditingId={setEditingId}
+                      setEmployeeName={setEmployeeName}
+                      setWorkplace={setWorkplace}
+                      setStartTime={setStartTime}
+                      setEndTime={setEndTime}
+                      setNotes={setNotes}
+                      setSelectedDates={setSelectedDates}
+                      setFormOriginalStartTime={setFormOriginalStartTime}
+                      setFormOriginalEndTime={setFormOriginalEndTime}
+                      setIsModalOpen={setIsModalOpen}
+                    />
                   )}
 
-                  {/* Selected Date Detail Block (Today's scheduled shifts) */}
-                  <section className="glass-panel p-5 rounded-2xl border border-[#DAC0A3]/50 shadow-sm space-y-4">
-                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-[#DAC0A3]/35 pb-3">
-                      <div>
-                        <h3 className="text-base font-bold text-[#3E2723] flex items-center gap-2">
-                          <span className="w-2.5 h-2.5 rounded-full bg-[#795548]"></span>
-                          今日班證明細：{selectedDateObject.getFullYear()}年 {formatMMDD(selectedDateObject)} ({selectedDayInfo.name})
-                        </h3>
-                        <p className="text-xs text-[#6D4C41] mt-0.5 font-medium">
-                          此日共排定 {selectedDateShifts.length} 個班次，合計 {selectedDateTotalHours} 小時。
-                        </p>
-                      </div>
-
-                      <button
-                        onClick={() => handleOpenAddModal(selectedDateStr)}
-                        className="px-4 py-2 bg-[#8D6E63]/10 hover:bg-[#8D6E63]/20 border border-[#8D6E63]/30 hover:border-[#8D6E63] text-[#5D4037] font-semibold rounded-xl text-xs transition-all cursor-pointer"
-                      >
-                        ＋ 在此日新增排班
-                      </button>
-                    </div>
-
-                    {selectedDateShifts.length === 0 ? (
-                      <div className="py-8 text-center border-2 border-dashed border-[#DAC0A3]/45 rounded-xl">
-                        <p className="text-xs text-[#6D4C41]/80 font-medium">此日尚無排班班次紀錄</p>
-                      </div>
-                    ) : (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                        {selectedDateShifts.map(schedule => {
-                          const theme = getScheduleTheme(schedule);
-                          const duration = calculateDuration(schedule.startTime, schedule.endTime);
-
-                          return (
-                            <div
-                              key={schedule.id}
-                              onClick={(e) => handleOpenEditModal(schedule, e)}
-                              className={`group glass-card p-3 rounded-xl border border-[#DAC0A3]/40 relative cursor-pointer flex flex-col justify-between gap-3 ${theme.bg} ${theme.border} ${theme.hover}`}
-                            >
-                              <div className="space-y-1.5">
-                                <div className="flex items-center justify-between gap-1">
-                                  <span className={`text-[10px] font-bold flex items-center gap-1 ${theme.text} font-mono`}>
-                                    <span className={`w-1.5 h-1.5 rounded-full ${theme.dot}`}></span>
-                                    {schedule.startTime} - {schedule.endTime}
-                                  </span>
-                                  <div className="flex items-center gap-1">
-                                    {schedule.workplace && (
-                                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-white/80 text-[#5D4037] border border-[#DAC0A3]/40 font-semibold flex items-center gap-0.5">
-                                        📍{schedule.workplace}
-                                      </span>
-                                    )}
-                                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-white/80 text-[#6D4C41] border border-[#DAC0A3]/40 font-mono font-bold">
-                                      {duration}h
-                                    </span>
-                                  </div>
-                                </div>
-
-                                <h4 className="font-extrabold text-[#3E2723] text-sm flex items-center gap-1.5 leading-tight group-hover:text-[#4E342E] transition-colors">
-                                  👤 {schedule.employeeName}
-                                </h4>
-                              </div>
-
-                              {schedule.notes && (
-                                <div className="text-[10px] text-[#6D4C41] bg-white/50 px-2 py-1 rounded border border-dashed border-[#DAC0A3]/40 text-left truncate">
-                                  📝 {schedule.notes}
-                                </div>
-                              )}
-
-                              <div className="flex items-center justify-end gap-1.5 border-t border-[#DAC0A3]/30 pt-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button
-                                  onClick={(e) => handleOpenEditModal(schedule, e)}
-                                  className="p-1 rounded bg-white hover:bg-[#FAF7F2] border border-[#DAC0A3]/50 text-[#6D4C41] hover:text-[#3E2723] transition-colors cursor-pointer"
-                                  title="編輯"
-                                >
-                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                                  </svg>
-                                </button>
-                                <button
-                                  onClick={(e) => handleDelete(schedule.id, e)}
-                                  className="p-1 rounded bg-white hover:bg-red-50 border border-[#DAC0A3]/50 text-[#6D4C41] hover:text-red-605 transition-colors cursor-pointer"
-                                  title="刪除"
-                                >
-                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                  </svg>
-                                </button>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </section>
-
-                  {/* Today's Available Workers Panel */}
-                  <section className="glass-panel p-5 rounded-2xl border border-[#DAC0A3]/50 shadow-sm space-y-4">
-                    <div>
-                      <h3 className="text-base font-bold text-[#3E2723] flex items-center gap-2">
-                        <span className="w-2.5 h-2.5 rounded-full bg-[#8D6E63]"></span>
-                        今日可用人員 ({formatMMDD(selectedDateObject)})
-                      </h3>
-                      <p className="text-xs text-[#6D4C41] mt-0.5 font-medium">
-                        以下為此日登記可配合上班的同仁。點擊「直接排班」可一鍵排入，或點擊「調整」自訂排程細節。
-                      </p>
-                    </div>
-
-                    {(() => {
-                      const availableWorkers = dayAvailabilities.filter(a => !(a.startTime === '00:00' && a.endTime === '00:00'));
-                      const legacyOffWorkers = dayAvailabilities.filter(a => a.startTime === '00:00' && a.endTime === '00:00');
-
-                      const monthStr = selectedDateStr.substring(0, 7);
-                      const ftEmployees = employees.filter(e => e.status === '正式夥伴' && e.active !== false);
-
-                      const implicitOffWorkers = ftEmployees.filter(emp => {
-                        const empName = emp.name.trim();
-                        const hasRegisteredInMonth = availabilities.some(
-                          a => a.employeeName.trim().toLowerCase() === empName.toLowerCase() &&
-                            a.date.startsWith(monthStr)
-                        );
-                        if (!hasRegisteredInMonth) return false;
-
-                        const hasAvailToday = availabilities.some(
-                          a => a.employeeName.trim().toLowerCase() === empName.toLowerCase() && a.date === selectedDateStr
-                        );
-                        return !hasAvailToday;
-                      }).map(emp => {
-                        const monthNotes = availabilities.find(
-                          a => a.employeeName.trim().toLowerCase() === emp.name.trim().toLowerCase() &&
-                            a.date.startsWith(monthStr) &&
-                            a.notes &&
-                            a.notes.trim()
-                        )?.notes || '休假';
-
-                        return {
-                          id: `virtual-off-${emp.name}-${selectedDateStr}`,
-                          employeeName: emp.name,
-                          date: selectedDateStr,
-                          workplace: '不克排班',
-                          startTime: '00:00',
-                          endTime: '00:00',
-                          notes: monthNotes,
-                          isVirtual: true
-                        };
-                      });
-
-                      const offWorkers = [...legacyOffWorkers, ...implicitOffWorkers];
-
-                      return (
-                        <>
-                          {availableWorkers.length === 0 ? (
-                            <div className="py-8 text-center border-2 border-dashed border-[#DAC0A3]/45 rounded-xl">
-                              <p className="text-xs text-[#6D4C41]/80 font-medium">今日尚無同仁填寫可用時間</p>
-                            </div>
-                          ) : (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                              {availableWorkers.map(avail => {
-                                const theme = COLOR_THEMES[getColorFromName(avail.employeeName)] || COLOR_THEMES.indigo;
-                                return (
-                                  <div
-                                    key={avail.id}
-                                    className={`glass-card p-3.5 rounded-xl border flex flex-col justify-between gap-3 ${theme.bg} ${theme.border}`}
-                                  >
-                                    <div className="space-y-1.5">
-                                      <div className="flex items-center justify-between">
-                                        <span className={`text-[10px] font-bold flex items-center gap-1 ${theme.text} font-mono`}>
-                                          <span className={`w-1.5 h-1.5 rounded-full ${theme.dot}`}></span>
-                                          登記：{avail.startTime} - {avail.endTime}
-                                        </span>
-                                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-white/80 text-[#5D4037] border border-[#DAC0A3]/40 font-bold">
-                                          📍 {avail.workplace}
-                                        </span>
-                                      </div>
-                                      <h4 className="font-extrabold text-[#3E2723] text-sm">
-                                        👤 {avail.employeeName}
-                                      </h4>
-                                      {avail.notes && (
-                                        <p className="text-[10px] text-[#5D4037] bg-white/60 p-1.5 rounded border border-[#DAC0A3]/40 border-dashed truncate">
-                                          📝 {avail.notes}
-                                        </p>
-                                      )}
-                                    </div>
-
-                                    <div className="flex gap-2 mt-1">
-                                      <button
-                                        onClick={() => handleInstantAssign(avail)}
-                                        className="flex-1 py-2 bg-[#2E7D32] hover:bg-[#1B5E20] text-white font-bold rounded-lg text-xs transition-all flex items-center justify-center gap-1 cursor-pointer shadow-sm hover:shadow-[#2E7D32]/10"
-                                      >
-                                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                                        </svg>
-                                        直接排班
-                                      </button>
-                                      <button
-                                        onClick={() => {
-                                          setModalMode('create');
-                                          setEditingId(null);
-                                          setEmployeeName(avail.employeeName);
-                                          setWorkplace(avail.workplace);
-                                          setStartTime(avail.startTime);
-                                          setEndTime(avail.endTime);
-                                          setNotes(avail.notes || '');
-                                          setSelectedDates([selectedDateStr]);
-                                          setFormOriginalStartTime(avail.startTime);
-                                          setFormOriginalEndTime(avail.endTime);
-                                          setIsModalOpen(true);
-                                        }}
-                                        className="px-3 py-2 bg-white hover:bg-[#FAF7F2] border border-[#DAC0A3]/60 hover:border-[#8D6E63] text-[#5D4037] font-bold rounded-lg text-xs transition-all flex items-center justify-center gap-1 cursor-pointer"
-                                        title="調整排班細節"
-                                      >
-                                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
-                                        </svg>
-                                        調整
-                                      </button>
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
-
-                          {offWorkers.length > 0 && (
-                            <div className="mt-4 pt-4 border-t border-[#DAC0A3]/30 space-y-2">
-                              <h4 className="text-xs font-bold text-red-700 flex items-center gap-1.5">
-                                <span className="w-1.5 h-1.5 rounded-full bg-red-655 animate-pulse"></span>
-                                今日請假/休假同仁 ({offWorkers.length}人)
-                              </h4>
-                              <div className="flex flex-wrap gap-2">
-                                {offWorkers.map(avail => (
-                                  <div
-                                    key={avail.id}
-                                    className="text-xs py-1.5 px-3 bg-red-50 border border-red-200 rounded-xl text-red-700 font-bold flex items-center gap-1.5 shadow-xs"
-                                    title={avail.notes ? `備註: ${getCleanNote(avail.notes)}` : undefined}
-                                  >
-                                    <span>👤 {avail.employeeName}</span>
-                                    <span className="text-[10px] px-1 bg-red-100 text-red-800 rounded font-normal scale-90">休假</span>
-                                    {avail.notes && <span className="opacity-75 font-normal">({getCleanNote(avail.notes)})</span>}
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </>
-                      );
-                    })()}
-                  </section>
-
-                  {/* Daily Staffing Coverage Timeline */}
-                  <section className="glass-panel p-5 rounded-2xl border border-[#DAC0A3]/50 shadow-sm space-y-4">
-                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                      <div>
-                        <h3 className="text-base font-bold text-[#3E2723] flex flex-wrap items-center gap-2">
-                          <span className="w-2.5 h-2.5 rounded-full bg-[#2E7D32] animate-pulse"></span>
-                          當日工時人力覆蓋率
-                          <div className="inline-flex items-center gap-1.5 ml-2 bg-[#F5EBE6] border border-[#DAC0A3]/65 p-0.5 rounded-xl">
-                            <button
-                              type="button"
-                              onClick={() => handleAdjustSelectedDate(-1)}
-                              className="p-1 hover:bg-white text-[#6D4C41] rounded-lg transition-colors cursor-pointer"
-                              title="前一天"
-                            >
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" />
-                              </svg>
-                            </button>
-                            <span className="text-xs px-1.5 font-mono text-[#795548] font-extrabold select-none">
-                              {selectedDateStr} ({selectedDayInfo.name})
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => handleAdjustSelectedDate(1)}
-                              className="p-1 hover:bg-white text-[#6D4C41] rounded-lg transition-colors cursor-pointer"
-                              title="後一天"
-                            >
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
-                              </svg>
-                            </button>
-                          </div>
-                        </h3>
-                        <p className="text-xs text-[#6D4C41] mt-1 font-medium">
-                          檢視各小時時段排班人數是否達標。點擊 +/- 調整，或在輸入框內直接修改目標人數需求。
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3">
-                      {Array.from({ length: 14 }, (_, i) => i + 6).map(hour => {
-                        // Calculate scheduled workers during this hour
-                        const scheduledWorkersInHour = selectedDateShifts.filter(shift =>
-                          isShiftActiveAtHour(shift.startTime, shift.endTime, hour)
-                        );
-                        const currentCount = scheduledWorkersInHour.length;
-                        const targetCount = getStaffingTargetForHour(hour, selectedDateStr);
-
-                        let status: 'under' | 'optimal' | 'over' = 'optimal';
-                        if (currentCount < targetCount) {
-                          status = 'under';
-                        } else if (currentCount > targetCount) {
-                          status = 'over';
-                        }
-
-                        const statusColors = {
-                          under: {
-                            bg: 'bg-[#E65100]/5 hover:bg-[#E65100]/8',
-                            border: 'border-[#E65100]/20 hover:border-[#E65100]/35',
-                            text: 'text-[#BF360C]',
-                            badge: 'bg-[#E65100]/10 text-[#BF360C] border border-[#E65100]/20',
-                            label: '不足'
-                          },
-                          optimal: {
-                            bg: 'bg-[#2E7D32]/5 hover:bg-[#2E7D32]/8',
-                            border: 'border-[#2E7D32]/20 hover:border-[#2E7D32]/35',
-                            text: 'text-[#1B5E20]',
-                            badge: 'bg-[#2E7D32]/10 text-[#1B5E20] border border-[#2E7D32]/20',
-                            label: '達標'
-                          },
-                          over: {
-                            bg: 'bg-[#5D4037]/5 hover:bg-[#5D4037]/8',
-                            border: 'border-[#5D4037]/20 hover:border-[#5D4037]/35',
-                            text: 'text-[#3E2723]',
-                            badge: 'bg-[#5D4037]/10 text-[#3E2723] border border-[#5D4037]/20',
-                            label: '超出'
-                          }
-                        };
-
-                        const colors = statusColors[status];
-                        const hourStr = `${hour.toString().padStart(2, '0')}:00`;
-                        const hourEndStr = `${(hour + 1).toString().padStart(2, '0')}:00`;
-
-                        return (
-                          <div
-                            key={hour}
-                            className={`glass-card p-3 rounded-xl border flex flex-col justify-between items-center transition-all ${colors.bg} ${colors.border}`}
-                          >
-                            <span className="text-[10px] text-[#6D4C41] font-bold font-mono">
-                              {hourStr} - {hourEndStr}
-                            </span>
-
-                            <div className="my-2.5 text-center">
-                              <div className="text-2xl font-black font-mono tracking-tight text-[#3E2723] flex items-center justify-center">
-                                <span>{currentCount}</span>
-                                <span className="text-lg text-[#6D4C41]/35 font-normal mx-1">/</span>
-                                <span className="text-2xl text-[#795548]">{targetCount}</span>
-                                <span className="text-[10px] text-[#6D4C41]/60 font-bold font-sans ml-0.5">人</span>
-                              </div>
-                              <div className="mt-1">
-                                <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${colors.badge}`}>
-                                  {colors.label}
-                                </span>
-                              </div>
-                            </div>
-
-                            {/* Target adjustment controls */}
-                            <div className="flex items-center gap-1 mt-1 bg-[#FAF7F2] p-0.5 rounded-lg border border-[#DAC0A3]/50">
-                              <button
-                                type="button"
-                                onClick={() => handleUpdateTarget(hour, -1)}
-                                className="w-5 h-5 rounded bg-white hover:bg-[#FAF7F2] border border-[#DAC0A3]/50 text-[#6D4C41] hover:text-[#3E2723] transition-all flex items-center justify-center cursor-pointer text-xs font-bold font-mono"
-                                title="減少目標人數"
-                              >
-                                -
-                              </button>
-                              <input
-                                type="number"
-                                min="0"
-                                max="20"
-                                value={targetCount}
-                                onChange={(e) => {
-                                  const val = parseInt(e.target.value);
-                                  if (!isNaN(val) && val >= 0) {
-                                    updateStaffingTarget(hour, val, selectedDateStr);
-                                  }
-                                }}
-                                className="w-8 text-center bg-transparent border-0 text-[10px] font-black font-mono text-[#795548] py-0.5 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                title="直接輸入修改目標人數"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => handleUpdateTarget(hour, 1)}
-                                className="w-5 h-5 rounded bg-white hover:bg-[#FAF7F2] border border-[#DAC0A3]/50 text-[#6D4C41] hover:text-[#3E2723] transition-all flex items-center justify-center cursor-pointer text-xs font-bold font-mono"
-                                title="增加目標人數"
-                              >
-                                +
-                              </button>
-                            </div>
-
-                            {/* Scheduled employees tooltip/details */}
-                            <div className="mt-2 w-full pt-1.5 border-t border-[#DAC0A3]/30 text-[9px] text-center truncate min-h-[18px]">
-                              {scheduledWorkersInHour.length > 0 ? (
-                                <span className="text-[#6D4C41] font-semibold" title={scheduledWorkersInHour.map(w => w.employeeName).join(', ')}>
-                                  {scheduledWorkersInHour.map(w => w.employeeName).join(', ')}
-                                </span>
-                              ) : (
-                                <span className="text-[#6D4C41]/35 font-medium select-none">
-                                  (無排班)
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </section>
+                  <ManagerSelectedDateDetail
+                    selectedDateStr={selectedDateStr}
+                    setSelectedDateStr={setSelectedDateStr}
+                    schedules={schedules}
+                    availabilities={availabilities}
+                    employees={employees}
+                    analysisHoursRange={analysisHoursRange}
+                    getScheduleTheme={getScheduleTheme}
+                    getManagerNote={getManagerNote}
+                    handleOpenEditModal={handleOpenEditModal}
+                    handleDelete={handleDelete}
+                    handleInstantAssign={handleInstantAssign}
+                    setModalMode={setModalMode}
+                    setEditingId={setEditingId}
+                    setEmployeeName={setEmployeeName}
+                    setWorkplace={setWorkplace}
+                    setStartTime={setStartTime}
+                    setEndTime={setEndTime}
+                    setNotes={setNotes}
+                    setSelectedDates={setSelectedDates}
+                    setFormOriginalStartTime={setFormOriginalStartTime}
+                    setFormOriginalEndTime={setFormOriginalEndTime}
+                    setIsModalOpen={setIsModalOpen}
+                    getStaffingTargetForHour={getStaffingTargetForHour}
+                    updateStaffingTarget={updateStaffingTarget}
+                  />
                 </>
               )}
             </div>
           )
         )}
-
       </div>
 
-      {/* Part-Time Worker Availability Config Modal */}
-      {isWorkerAvailModalOpen && (
-        <div className="fixed inset-0 bg-[#3E2723]/40 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center sm:p-4 animate-fade-in">
-          {/* Sheet on mobile, centred card on desktop */}
-          <div className="glass-panel w-full sm:max-w-2xl shadow-2xl border border-[#DAC0A3]/50 flex flex-col
-                          rounded-t-3xl sm:rounded-2xl
-                          max-h-[92vh] sm:max-h-[90vh]">
-
-            {/* Drag handle (mobile only) */}
-            <div className="flex justify-center pt-3 pb-1 sm:hidden shrink-0">
-              <div className="w-10 h-1 rounded-full bg-[#DAC0A3]/70"></div>
-            </div>
-
-            {/* Modal Header */}
-            <div className="px-5 py-4 border-b border-[#DAC0A3]/35 flex items-center justify-between shrink-0">
-              <div>
-                <h3 className="text-base font-bold text-[#3E2723] flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-[#795548]"></span>
-                  設定可用時段
-                </h3>
-                <p className="text-xs text-[#6D4C41] mt-0.5">請為每個已選日期設定可配合的時間與地點</p>
-              </div>
-              <button
-                onClick={() => setIsWorkerAvailModalOpen(false)}
-                className="text-[#6D4C41] hover:text-[#3E2723] p-2 rounded-xl hover:bg-[#FAF7F2] transition-colors cursor-pointer"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            {/* Sync All Button */}
-            {availConfigs.length > 1 && (
-              <div className="px-4 pt-3 shrink-0">
-                <button
-                  type="button"
-                  onClick={handleSyncAllAvailConfigs}
-                  className="w-full py-2.5 text-xs font-bold text-[#5D4037] bg-[#8D6E63]/10 active:bg-[#8D6E63]/25 hover:bg-[#8D6E63]/20 border border-[#8D6E63]/30 rounded-xl transition-all cursor-pointer"
-                >
-                  📋 一鍵同步所有日期時間與地點（套用第一筆設定）
-                </button>
-              </div>
-            )}
-
-            {/* Scrollable date cards */}
-            <div className="overflow-y-auto px-4 py-3 space-y-4 flex-1">
-              {availConfigs.map((config, index) => {
-                const dateObj = new Date(config.date);
-                const dayNames = ['日', '一', '二', '三', '四', '五', '六'];
-                const dayName = dayNames[dateObj.getDay()];
-                const startTime = timeSlots[config.startIdx];
-                const endTime = timeSlots[config.endIdx];
-                const duration = calculateDuration(startTime, endTime);
-                const overEight = isOverEightHours(startTime, endTime);
-                const minStartIdx = 0;
-                const maxEndIdx = timeSlots.length - 1;
-
-                // Determine mode and divider position
-                let currentMode: 'until' | 'from' = 'until';
-                let dividerIdx = config.endIdx;
-
-                if (config.startIdx > minStartIdx && config.endIdx === maxEndIdx) {
-                  currentMode = 'from';
-                  dividerIdx = config.startIdx;
-                } else if (config.startIdx === minStartIdx && config.endIdx < maxEndIdx) {
-                  currentMode = 'until';
-                  dividerIdx = config.endIdx;
-                } else if (config.startIdx === minStartIdx && config.endIdx === maxEndIdx) {
-                  currentMode = 'until';
-                  dividerIdx = maxEndIdx;
-                } else {
-                  // Legacy fallback
-                  const distToStart = config.startIdx - minStartIdx;
-                  const distToEnd = maxEndIdx - config.endIdx;
-                  if (distToStart > distToEnd) {
-                    currentMode = 'from';
-                    dividerIdx = config.startIdx;
-                  } else {
-                    currentMode = 'until';
-                    dividerIdx = config.endIdx;
-                  }
-                }
-
-                // Calculate percentage relative to minStartIdx and maxEndIdx
-                const pct = maxEndIdx > minStartIdx ? ((dividerIdx - minStartIdx) / (maxEndIdx - minStartIdx)) * 100 : 0;
-
-                const handleCommit = (nextDividerIdx: number, nextMode: 'until' | 'from') => {
-                  let start = nextMode === 'until' ? minStartIdx : nextDividerIdx;
-                  let end = nextMode === 'until' ? nextDividerIdx : maxEndIdx;
-
-                  if (nextMode === 'until') {
-                    if (end < minStartIdx + 1) end = minStartIdx + 1; // enforce minimum 30 min duration (1 slot)
-                  } else {
-                    if (start > maxEndIdx - 1) start = maxEndIdx - 1; // enforce minimum 30 min duration (1 slot)
-                  }
-
-                  updateAvailConfig(index, { startIdx: start, endIdx: end });
-                };
-
-                const posToIdx = (clientX: number, rect: DOMRect) => {
-                  const pct = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
-                  const rawIdx = minStartIdx + pct * (maxEndIdx - minStartIdx);
-                  return Math.round(rawIdx);
-                };
-
-                const onHandleDown = (e: React.PointerEvent<HTMLDivElement>) => {
-                  e.preventDefault();
-                  const track = e.currentTarget.parentElement;
-                  if (!track) return;
-                  const rect = track.getBoundingClientRect();
-
-                  const onMove = (ev: PointerEvent) => {
-                    const nextIdx = posToIdx(ev.clientX, rect);
-                    handleCommit(nextIdx, currentMode);
-                  };
-
-                  const onUp = () => {
-                    window.removeEventListener('pointermove', onMove);
-                    window.removeEventListener('pointerup', onUp);
-                  };
-
-                  window.addEventListener('pointermove', onMove);
-                  window.addEventListener('pointerup', onUp);
-                };
-
-                return (
-                  <div key={config.date} className="bg-white/60 border border-[#DAC0A3]/50 rounded-2xl p-4 space-y-4 shadow-sm">
-
-                    {/* Date header — stacked on mobile */}
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex flex-col gap-1">
-                        <div className="flex items-center gap-2">
-                          <span className="w-2 h-2 rounded-full bg-[#795548] shrink-0"></span>
-                          <span className="text-sm font-bold text-[#3E2723]">{config.date}</span>
-                          <span className="text-xs text-[#6D4C41] bg-[#8D6E63]/10 px-2 py-0.5 rounded font-medium">週{dayName}</span>
-                        </div>
-                        {/* Time + duration below the date on mobile */}
-                        <div className="flex flex-wrap items-center gap-1.5 pl-4">
-                          <span className="text-sm font-mono font-bold text-[#795548]">{startTime} – {endTime}</span>
-                          <span className="text-[11px] text-[#8D6E63]">({Math.round((duration - 1) * 10) / 10} 有效工時)</span>
-                          {overEight && (
-                            <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded font-bold">⚠️ 超過8小時</span>
-                          )}
-                        </div>
-                      </div>
-                      {/* Delete button — larger touch target */}
-                      <button
-                        type="button"
-                        onClick={() => removeAvailConfig(index)}
-                        className="p-2 text-[#8D6E63] hover:text-red-500 active:text-red-600 hover:bg-red-50 active:bg-red-100 rounded-xl transition-colors cursor-pointer shrink-0"
-                        title="移除此日期"
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                      </button>
-                    </div>
-
-                    {/* Single divider range slider */}
-                    <div className="space-y-4 pt-1">
-                      <div className="relative h-8 mx-2 select-none">
-                        {/* Track background */}
-                        <div className="absolute top-2.5 left-0 right-0 h-3 bg-[#EADBC8] rounded-full" />
-
-                        {/* Selected Active segment */}
-                        <div
-                          onClick={() => handleCommit(dividerIdx, currentMode === 'until' ? 'from' : 'until')}
-                          className="absolute top-2.5 h-3 rounded-full cursor-pointer transition-all"
-                          style={{
-                            left: currentMode === 'until' ? '0%' : `${pct}%`,
-                            width: currentMode === 'until' ? `${pct}%` : `${100 - pct}%`,
-                            backgroundColor: '#8D6E63',
-                          }}
-                        />
-
-                        {/* Left segment (click to set until) */}
-                        <div
-                          onClick={() => handleCommit(dividerIdx, 'until')}
-                          className="absolute top-2.5 left-0 h-3 cursor-pointer"
-                          style={{ width: `${pct}%` }}
-                        />
-
-                        {/* Right segment (click to set from) */}
-                        <div
-                          onClick={() => handleCommit(dividerIdx, 'from')}
-                          className="absolute top-2.5 right-0 h-3 cursor-pointer"
-                          style={{ width: `${100 - pct}%` }}
-                        />
-
-                        {/* Movable Divider Handle */}
-                        <div
-                          onPointerDown={onHandleDown}
-                          className="absolute top-1.5 w-5 h-5 rounded-full bg-white border-2 shadow-md cursor-grab active:cursor-grabbing flex items-center justify-center"
-                          style={{
-                            left: `${pct}%`,
-                            borderColor: '#795548',
-                            transform: 'translateX(-50%)',
-                            touchAction: 'none'
-                          }}
-                        >
-                          <div className="w-1.5 h-1.5 rounded-full bg-[#795548]" />
-                        </div>
-                      </div>
-
-                      {/* Ruler tick labels */}
-                      <div className="relative h-5 mx-2 text-[9px] text-[#8D6E63]/60 font-mono select-none">
-                        {(() => {
-                          const ticks = [];
-                          const len = timeSlots.length;
-                          if (len > 0) {
-                            ticks.push({ label: timeSlots[0], idx: 0 });
-                            const step = len <= 10 ? 1 : len <= 20 ? 2 : len <= 40 ? 4 : 6;
-                            for (let i = step; i < len - 1; i += step) {
-                              if (len - 1 - i >= step / 2) {
-                                ticks.push({ label: timeSlots[i], idx: i });
-                              }
-                            }
-                            if (len > 1) {
-                              ticks.push({ label: timeSlots[len - 1], idx: len - 1 });
-                            }
-                          }
-                          return ticks.map((tick) => {
-                            const tickPct = maxEndIdx > minStartIdx ? ((tick.idx - minStartIdx) / (maxEndIdx - minStartIdx)) * 100 : 0;
-                            const isCurrent = tick.idx === dividerIdx;
-                            return (
-                              <span
-                                key={`${tick.label}-${tick.idx}`}
-                                className={`absolute transition-all duration-150 ${isCurrent ? 'text-[#3E2723] font-black text-[10px]' : ''
-                                  }`}
-                                style={{
-                                  left: `${tickPct}%`,
-                                  transform: 'translateX(-50%)',
-                                }}
-                              >
-                                {tick.label}
-                              </span>
-                            );
-                          });
-                        })()}
-                      </div>
-
-                      {/* Mode selection buttons */}
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => handleCommit(dividerIdx, 'until')}
-                          className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer ${currentMode === 'until'
-                            ? 'bg-[#795548] text-white border-[#795548] shadow-sm'
-                            : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:bg-[#FAF7F2]'
-                            }`}
-                        >
-                          工作至此時間
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleCommit(dividerIdx, 'from')}
-                          className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer ${currentMode === 'from'
-                            ? 'bg-[#795548] text-white border-[#795548] shadow-sm'
-                            : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:bg-[#FAF7F2]'
-                            }`}
-                        >
-                          自此時間開始
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Other registered colleagues for this date */}
-                    {(() => {
-                      const dayAvails = availabilities.filter(
-                        a => a.date === config.date &&
-                          a.employeeName.trim().toLowerCase() !== workerName.trim().toLowerCase() &&
-                          !(a.startTime === '00:00' && a.endTime === '00:00') &&
-                          a.confirmed !== true
-                      );
-                      if (dayAvails.length === 0) return null;
-                      return (
-                        <div className="bg-[#FAF7F2]/60 border border-[#DAC0A3]/45 rounded-xl p-2.5 space-y-1.5">
-                          <div className="text-[10px] font-bold text-[#6D4C41] flex items-center gap-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-[#8D6E63]"></span>
-                            同日已登記之同仁：
-                          </div>
-                          <div className="flex flex-wrap gap-1.5">
-                            {dayAvails.map(a => (
-                              <span
-                                key={a.id}
-                                className="text-[10px] bg-white border border-[#DAC0A3]/40 text-[#5D4037] px-2 py-0.5 rounded-md font-bold"
-                                title={`備註: ${a.notes || '無'}`}
-                              >
-                                {a.employeeName} ({a.startTime}-{a.endTime} @ {a.workplace})
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    })()}
-
-                    {/* Workplace + Notes — stacked on mobile, side-by-side on sm+ */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-1.5">地點</label>
-                        <select
-                          value={config.workplace}
-                          onChange={(e) => updateAvailConfig(index, { workplace: e.target.value })}
-                          className="w-full glass-input px-3 py-2.5 rounded-xl text-sm cursor-pointer"
-                        >
-                          {workplaces.map(loc => (
-                            <option key={loc.id} value={loc.name} className="bg-white text-[#3E2723]">
-                              {loc.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-1.5">備註 (選填)</label>
-                        <input
-                          type="text"
-                          value={config.notes}
-                          onChange={(e) => updateAvailConfig(index, { notes: e.target.value })}
-                          placeholder="例如：只能上早班..."
-                          className="w-full glass-input px-3 py-2.5 rounded-xl text-sm"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-
-              {availConfigs.length === 0 && (
-                <div className="py-16 text-center text-sm text-[#8D6E63]">沒有已選日期，請先在日曆上選擇日期。</div>
-              )}
-            </div>
-
-            {/* Modal Footer — full-width tall buttons for easy tapping */}
-            <div className="px-4 py-4 border-t border-[#DAC0A3]/35 flex gap-3 shrink-0 pb-safe">
-              <button
-                type="button"
-                onClick={() => setIsWorkerAvailModalOpen(false)}
-                className="flex-1 py-3.5 text-sm font-semibold text-[#6D4C41] bg-white/70 active:bg-[#FAF7F2] hover:bg-[#FAF7F2] border border-[#DAC0A3]/60 rounded-xl transition-colors cursor-pointer"
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                onClick={handleWorkerAvailModalSubmit}
-                className="flex-[2] py-3.5 text-sm font-bold text-white bg-[#795548] active:bg-[#5D4037] hover:bg-[#6D4C41] rounded-xl transition-colors cursor-pointer shadow-lg shadow-[#795548]/15"
-              >
-                送出可用時間 ✓
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Full-Time Direct Assignment Shift Picker Modal */}
-
-      {isFTAssignModalOpen && pendingAssignAvail && (
-        <div className="fixed inset-0 bg-[#3E2723]/30 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
-          <div className="glass-panel rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl border border-[#DAC0A3]/50 flex flex-col p-6 space-y-4">
-            <div>
-              <h3 className="text-base font-bold text-[#3E2723] flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-[#795548]"></span>
-                指派正式夥伴班次
-              </h3>
-              <p className="text-xs text-[#6D4C41] mt-1 font-medium">
-                同仁：{pendingAssignAvail.employeeName}<br />
-                日期：{pendingAssignAvail.date}
-              </p>
-              <p className="text-[11px] text-[#8D6E63] mt-1.5 leading-normal">
-                請選擇要指派的班次時間（此指派將設定為該班次的原始時間，因此不會觸變工時調整標記的顏色）：
-              </p>
-            </div>
-
-            <div className="flex flex-col gap-2.5 pt-2">
-              {shiftPresets.map((preset) => {
-                const isAvailable = timeSlots.includes(preset.startTime) && timeSlots.includes(preset.endTime);
-                if (!isAvailable) return null;
-                return (
-                  <button
-                    key={preset.name}
-                    type="button"
-                    onClick={() => executeFTAssign(pendingAssignAvail, preset.name, preset.startTime, preset.endTime)}
-                    className="w-full py-3 bg-[#795548] hover:bg-[#5D4037] text-white font-bold rounded-xl text-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-md hover:shadow-[#795548]/10"
-                  >
-                    ☀️ {preset.name} ({preset.startTime} - {preset.endTime})
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="border-t border-[#E5DCD5]/60 pt-3 mt-1.5 flex justify-end">
-              <button
-                type="button"
-                onClick={() => {
-                  setIsFTAssignModalOpen(false);
-                  setPendingAssignAvail(null);
-                }}
-                className="px-4 py-2 bg-[#FAF7F2] hover:bg-[#FAF7F2]/80 text-[#6D4C41] font-semibold rounded-lg text-xs transition-colors cursor-pointer border border-[#DAC0A3]/40"
-              >
-                取消
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Add/Edit Modal */}
-      {isModalOpen && (
-        <div className="fixed inset-0 bg-[#3E2723]/30 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
-          <div className="glass-panel rounded-2xl w-full max-w-md overflow-hidden shadow-2xl border border-[#DAC0A3]/50 flex flex-col">
-
-            {/* Modal Header */}
-            <div className="p-6 border-b border-[#DAC0A3]/35 flex items-center justify-between">
-              <h3 className="text-base font-bold text-[#3E2723] flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-[#795548]"></span>
-                {modalMode === 'create' ? '新增排班時段 (可複選日期)' : '編輯排班時段'}
-              </h3>
-              <button
-                onClick={() => setIsModalOpen(false)}
-                className="text-[#6D4C41] hover:text-[#3E2723] p-1.5 rounded-lg hover:bg-[#FAF7F2] transition-colors cursor-pointer"
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            {/* Modal Form */}
-            <form onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto max-h-[80vh]">
-
-              {/* Quick Autofill Helper in Add Modal */}
-              {modalMode === 'create' && selectedDates.length === 1 && (() => {
-                const availableWorkers = getAvailabilitiesForDate(selectedDates[0]).filter(
-                  avail => !(avail.startTime === '00:00' && avail.endTime === '00:00')
-                );
-
-                return (
-                  <div className="space-y-2">
-                    <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider">
-                      從今日登記可用人員中快速填入
-                    </label>
-                    {availableWorkers.length === 0 ? (
-                      <div className="text-[10px] text-[#6D4C41] py-2 px-3 bg-[#FAF7F2] rounded-xl border border-[#DAC0A3]/40 text-center">
-                        此日無夥伴登記可用時間
-                      </div>
-                    ) : (
-                      <div className="flex flex-col gap-2 p-2 bg-[#FAF7F2] rounded-xl border border-[#DAC0A3]/40">
-                        <div className="flex flex-wrap gap-1.5">
-                          {availableWorkers.map(avail => {
-                            const isCurrentlySelected = employeeName === avail.employeeName &&
-                              workplace === avail.workplace &&
-                              startTime === avail.startTime &&
-                              endTime === avail.endTime;
-                            return (
-                              <button
-                                key={avail.id}
-                                type="button"
-                                onClick={() => {
-                                  setEmployeeName(avail.employeeName);
-                                  setWorkplace(avail.workplace);
-                                  setStartTime(avail.startTime);
-                                  setEndTime(avail.endTime);
-                                  setNotes(avail.notes || '');
-                                  setFormOriginalStartTime(avail.startTime);
-                                  setFormOriginalEndTime(avail.endTime);
-                                }}
-                                className={`text-[10px] px-2.5 py-1.5 rounded-xl border transition-all cursor-pointer font-bold flex items-center gap-1 ${isCurrentlySelected
-                                  ? 'bg-[#795548] border-[#795548] text-white shadow-sm shadow-[#795548]/15'
-                                  : 'bg-white border border-[#DAC0A3]/55 hover:border-[#8D6E63] text-[#5D4037] hover:text-[#3E2723]'
-                                  }`}
-                              >
-                                <span>👤 {avail.employeeName}</span>
-                                <span className="opacity-60 text-[9px] font-mono">({avail.startTime}-{avail.endTime} @ {avail.workplace})</span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-
-              {/* Employee Name */}
-              <div>
-                <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">排班人員姓名</label>
-                <select
-                  required
-                  value={employeeName}
-                  onChange={(e) => handleEmployeeNameChange(e.target.value)}
-                  className="w-full glass-input px-4 py-2.5 rounded-xl text-sm cursor-pointer"
-                >
-                  <option value="" className="bg-white text-[#3E2723]">請選擇排班夥伴...</option>
-                  {employees.filter(emp => emp.active !== false).map(emp => (
-                    <option key={emp.id} value={emp.name} className="bg-white text-[#3E2723]">
-                      {emp.name} ({emp.status}{emp.trainingPosition ? ` - 訓練中：${emp.trainingPosition}` : ''}{emp.trainedPositions && emp.trainedPositions.length > 0 ? ` - 已合格：${emp.trainedPositions.join(', ')}` : ''}{emp.certificates && emp.certificates.length > 0 ? ` - 證照：${emp.certificates.join(', ')}` : ''})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Workplace Selection */}
-              <div>
-                <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">工作地點</label>
-                <select
-                  value={workplace}
-                  onChange={(e) => setWorkplace(e.target.value)}
-                  className="w-full glass-input px-4 py-2.5 rounded-xl text-sm cursor-pointer"
-                >
-                  {workplaces.map(loc => (
-                    <option key={loc.id} value={loc.name} className="bg-white text-[#3E2723]">
-                      {loc.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Date Selection */}
-              {modalMode === 'create' ? (
-                <div>
-                  <div className="flex justify-between items-center mb-2">
-                    <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider">選擇排班日期 (可複選)</label>
-                    <span className="text-[10px] text-[#8D6E63] font-bold bg-[#8D6E63]/10 px-2 py-0.5 rounded font-mono">
-                      已選 {selectedDates.length} 天
-                    </span>
-                  </div>
-
-                  {/* Quick select shortcuts */}
-                  <div className="flex flex-wrap gap-1.5 mb-2.5">
-                    <button
-                      type="button"
-                      onClick={handleSelectMonWedFri}
-                      className="text-[10px] px-2 py-1 rounded bg-[#FAF7F2] border border-[#E5DCD5] text-[#5D4037] hover:border-[#8D6E63] hover:text-[#3E2723] cursor-pointer font-bold transition-all"
-                    >
-                      一/三/五
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleSelectTueThu}
-                      className="text-[10px] px-2 py-1 rounded bg-[#FAF7F2] border border-[#E5DCD5] text-[#5D4037] hover:border-[#8D6E63] hover:text-[#3E2723] cursor-pointer font-bold transition-all"
-                    >
-                      二/四
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleSelectAllDays}
-                      className="text-[10px] px-2 py-1 rounded bg-[#FAF7F2] border border-[#E5DCD5] text-[#5D4037] hover:border-[#8D6E63] hover:text-[#3E2723] cursor-pointer font-bold transition-all"
-                    >
-                      全選 (四週)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleClearAllSelected}
-                      className="text-[10px] px-2 py-1 rounded bg-[#FAF7F2] border border-[#E5DCD5] text-[#8D6E63] hover:border-[#8D6E63] hover:text-[#3E2723] cursor-pointer font-bold transition-all"
-                    >
-                      清除
-                    </button>
-                  </div>
-
-                  {/* 4-Week Grid (4 rows of 7 columns matching Mon-Sun) */}
-                  <div className="p-2 border border-[#E5DCD5] rounded-xl bg-[#FAF7F2]/50">
-                    {/* Weekday names */}
-                    <div className="grid grid-cols-7 gap-1 text-center text-[10px] text-[#8D6E63] font-bold mb-1">
-                      <div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div><div>日</div>
-                    </div>
-                    {/* Date buttons grid */}
-                    <div className="grid grid-cols-7 gap-1">
-                      {pickerDates.map(dateObj => {
-                        const dateStr = formatDateString(dateObj);
-                        const isSelected = selectedDates.includes(dateStr);
-                        const isToday = dateStr === todayStr;
-                        const isCurrentMonth = dateObj.getMonth() === currentMonthStart.getMonth();
-
-                        return (
-                          <button
-                            key={dateStr}
-                            type="button"
-                            onClick={() => toggleDateSelection(dateStr)}
-                            className={`relative py-1.5 px-0.5 rounded-lg border text-center transition-all cursor-pointer text-[10px] font-mono font-bold flex flex-col items-center justify-center ${isSelected
-                              ? 'bg-[#795548]/15 border-[#795548] text-[#3E2723] shadow-xs'
-                              : isCurrentMonth
-                                ? 'bg-white border-[#E5DCD5] text-[#8D6E63] hover:border-[#8D6E63] hover:bg-[#FAF7F2]'
-                                : 'bg-[#FAF7F2]/50 border-dashed border-[#E5DCD5]/55 text-[#8D6E63]/40 opacity-40 hover:bg-[#FAF7F2]'
-                              } ${isToday ? 'ring-1 ring-[#795548]/40' : ''}`}
-                            title={formatDateString(dateObj)}
-                          >
-                            <span>{formatMMDD(dateObj)}</span>
-                            {isToday && (
-                              <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-[#795548]"></span>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                // Edit mode: single date selection (HTML5 date input)
-                <div>
-                  <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">排班日期</label>
-                  <input
-                    type="date"
-                    required
-                    value={singleDate}
-                    onChange={(e) => setSingleDate(e.target.value)}
-                    className="w-full glass-input px-4 py-2.5 rounded-xl text-sm"
-                  />
-                </div>
-              )}
-
-              {/* Time inputs */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">開始時間</label>
-                  <select
-                    value={startTime}
-                    onChange={(e) => setStartTime(e.target.value)}
-                    className="w-full glass-input px-4 py-2.5 rounded-xl text-sm cursor-pointer"
-                  >
-                    {timeSlots.map(slot => (
-                      <option key={slot} value={slot} className="bg-white text-[#3E2723] font-mono">
-                        {slot}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">結束時間</label>
-                  <select
-                    value={endTime}
-                    onChange={(e) => setEndTime(e.target.value)}
-                    className="w-full glass-input px-4 py-2.5 rounded-xl text-sm cursor-pointer"
-                  >
-                    {timeSlots.map(slot => (
-                      <option key={slot} value={slot} className="bg-white text-[#3E2723] font-mono">
-                        {slot}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* Quick Shift Presets inside scheduling modal */}
-              {shiftPresets.some(preset => timeSlots.includes(preset.startTime) && timeSlots.includes(preset.endTime)) && (
-                <div className="space-y-2">
-                  <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider">常用班次快捷鍵</label>
-                  <div className="flex flex-wrap gap-2">
-                    {shiftPresets.map((preset) => {
-                      const isAvailable = timeSlots.includes(preset.startTime) && timeSlots.includes(preset.endTime);
-                      if (!isAvailable) return null;
-                      return (
-                        <button
-                          key={preset.name}
-                          type="button"
-                          onClick={() => {
-                            setStartTime(preset.startTime);
-                            setEndTime(preset.endTime);
-                          }}
-                          className={`flex-1 min-w-[120px] py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${startTime === preset.startTime && endTime === preset.endTime
-                            ? 'bg-[#795548] text-white border-[#795548]'
-                            : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:border-[#8D6E63] hover:bg-[#FAF7F2]'
-                            }`}
-                        >
-                          {preset.name} ({preset.startTime} - {preset.endTime})
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* Auto calculated hours warning/info */}
-              {startTime && endTime && (
-                <div className={`px-4 py-2.5 rounded-xl border flex items-center justify-between ${isOverEightHours(startTime, endTime)
-                  ? 'bg-amber-50 border-amber-200'
-                  : 'bg-[#FAF7F2] border-[#E5DCD5]'
-                  }`}>
-                  <span className="text-xs text-[#6D4C41]">預估單次工時：</span>
-                  <div className="flex items-center gap-2">
-                    <span className={`text-sm font-bold font-mono ${isOverEightHours(startTime, endTime) ? 'text-amber-700' : 'text-[#795548]'
-                      }`}>
-                      {calculateDuration(startTime, endTime)} 小時（含休息）
-                    </span>
-                    {isOverEightHours(startTime, endTime) && (
-                      <span className="text-[10px] font-bold text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded">⚠️ 超過 8 小時</span>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Consecutive 7 days warning in manager modal */}
-              {(() => {
-                if (!employeeName.trim()) return null;
-                const targetName = employeeName.trim();
-                let datesToCheck: string[] = [];
-                if (modalMode === 'create' && selectedDates.length > 0) {
-                  const existingDates = schedules
-                    .filter(s => s.employeeName.trim().toLowerCase() === targetName.toLowerCase())
-                    .map(s => s.date);
-                  datesToCheck = Array.from(new Set([...existingDates, ...selectedDates]));
-                } else if (modalMode === 'edit' && singleDate) {
-                  const existingDates = schedules
-                    .filter(s => s.employeeName.trim().toLowerCase() === targetName.toLowerCase() && s.id !== editingId)
-                    .map(s => s.date);
-                  datesToCheck = Array.from(new Set([...existingDates, singleDate]));
-                }
-                if (!hasSevenConsecutiveDays(datesToCheck)) return null;
-                return (
-                  <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-red-50 border border-red-200">
-                    <span className="text-base leading-none mt-0.5">🚫</span>
-                    <div className="space-y-0.5">
-                      <p className="text-xs font-bold text-red-700">不可連續排班 7 天</p>
-                      <p className="text-[11px] text-red-600 leading-snug">
-                        此排班將使「{targetName}」出現連續 7 天或以上的班次，違反勞工法規。請調整日期。
-                      </p>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* Off-day conflict warning */}
-              {(() => {
-                if (!employeeName.trim()) return null;
-                const targetName = employeeName.trim().toLowerCase();
-                const checkDates = modalMode === 'create' ? selectedDates : [singleDate];
-
-                const conflictingDates = checkDates.filter(d => {
-                  const monthStr = d.substring(0, 7);
-                  // Find all availability records for this employee in this month
-                  const monthAvails = availabilities.filter(
-                    a => a.employeeName.trim().toLowerCase() === targetName &&
-                      a.date.startsWith(monthStr)
-                  );
-                  // If they haven't registered any availability for this month yet, no conflict
-                  if (monthAvails.length === 0) return false;
-
-                  // They have registered availability. They are available on date d ONLY if
-                  // they have a record on date d and it is not a legacy/explicit off-day.
-                  const isAvailable = monthAvails.some(
-                    a => a.date === d && !(a.startTime === '00:00' && a.endTime === '00:00')
-                  ) || schedules.some(
-                    s => s.employeeName.trim().toLowerCase() === targetName && s.date === d
-                  );
-                  return !isAvailable;
-                });
-
-                if (conflictingDates.length === 0) return null;
-                return (
-                  <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-amber-50 border border-amber-200">
-                    <span className="text-base leading-none mt-0.5">⚠️</span>
-                    <div className="space-y-0.5">
-                      <p className="text-xs font-bold text-amber-700">休假/非配合工作日衝突</p>
-                      <p className="text-[11px] text-amber-600 leading-snug">
-                        「{employeeName.trim()}」在 {conflictingDates.join(', ')} 並無登記配合排班（即休息日或未登記）。確定仍要安排班次嗎？
-                      </p>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* Notes */}
-              <div className="space-y-4">
-                {modalMode === 'edit' && registerTime && (
-                  <div className="p-3 rounded-xl bg-[#E8F5E9]/70 border border-emerald-200">
-                    <span className="block text-xs font-bold text-[#2E7D32] mb-1">🕒 同仁登記可用時間</span>
-                    <p className="text-xs text-[#1B5E20] font-bold font-mono">{registerTime}</p>
-                  </div>
-                )}
-                {modalMode === 'edit' && workerNotes && (
-                  <div className="p-3 rounded-xl bg-indigo-50 border border-indigo-200">
-                    <span className="block text-xs font-bold text-indigo-850 mb-1">💬 同仁登記備註</span>
-                    <p className="text-xs text-indigo-900 break-words whitespace-pre-wrap">{workerNotes}</p>
-                  </div>
-                )}
-                <div>
-                  <label className="block text-xs font-semibold text-[#6D4C41] uppercase tracking-wider mb-2">
-                    {modalMode === 'edit' && workerNotes ? '主管備註項目 (選填)' : '備註項目 (選填)'}
-                  </label>
-                  <textarea
-                    placeholder="主管注意事項、特別交辦事項..."
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    className="w-full glass-input px-4 py-2.5 rounded-xl text-sm min-h-[70px] resize-none placeholder-[#8D6E63]/50"
-                  />
-                </div>
-              </div>
-
-              {/* Actions */}
-              <div className="flex gap-3 border-t border-[#E5DCD5] pt-4 mt-6">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="flex-1 bg-white hover:bg-[#FAF7F2] border border-[#E5DCD5] text-[#5D4037] font-semibold px-4 py-3 rounded-xl transition-all cursor-pointer text-center text-sm"
-                >
-                  取消
-                </button>
-                {modalMode === 'edit' && (
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      if (editingId && safeConfirm('確定要刪除此排程紀錄嗎？')) {
-                        try {
-                          const scheduleToDelete = schedules.find(s => s.id === editingId);
-                          await deleteSchedule(editingId);
-                          if (scheduleToDelete?.availabilityId) {
-                            await updateAvailability(scheduleToDelete.availabilityId, { confirmed: false });
-                          }
-                          setIsModalOpen(false);
-                        } catch (error) {
-                          console.error("Error deleting schedule from modal: ", error);
-                          alert('刪除排程失敗，請稍後再試。');
-                        }
-                      }
-                    }}
-                    className="flex-1 bg-red-50 hover:bg-red-100 border border-red-200 text-red-650 hover:text-red-700 font-semibold px-4 py-3 rounded-xl transition-all cursor-pointer text-center text-sm"
-                  >
-                    刪除
-                  </button>
-                )}
-                <button
-                  type="submit"
-                  className="flex-1 bg-[#795548] hover:bg-[#5D4037] text-white font-semibold px-4 py-3 rounded-xl transition-all shadow-lg shadow-[#795548]/10 cursor-pointer text-center text-sm"
-                >
-                  儲存
-                </button>
-              </div>
-
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Employee Add/Edit Modal */}
-      {isEmployeeModalOpen && (
-        <div className="fixed inset-0 bg-[#3E2723]/30 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
-          <div className="glass-panel rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl border border-[#DAC0A3]/50 flex flex-col">
-
-            {/* Modal Header */}
-            <div className="p-6 border-b border-[#DAC0A3]/35 flex items-center justify-between">
-              <h3 className="text-base font-bold text-[#3E2723] flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-[#795548]"></span>
-                {employeeFormMode === 'create' ? '新增員工資料' : '編輯員工資料'}
-              </h3>
-              <button
-                onClick={() => setIsEmployeeModalOpen(false)}
-                className="text-[#6D4C41] hover:text-[#3E2723] p-1.5 rounded-lg hover:bg-[#FAF7F2] transition-colors cursor-pointer"
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            {/* Modal Form */}
-            <form onSubmit={handleEmployeeSubmit} className="p-6 space-y-5 overflow-y-auto max-h-[85vh]">
-
-              {/* Employee Name */}
-              <div>
-                <label className="block text-xs font-bold text-[#6D4C41] uppercase tracking-wider mb-2">員工姓名</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="輸入真實姓名 (例如：王大明)"
-                  value={empName}
-                  onChange={(e) => setEmpName(e.target.value)}
-                  className="w-full glass-input px-4 py-2.5 rounded-xl text-sm"
-                />
-              </div>
-
-              {/* Employee Phone */}
-              <div>
-                <label className="block text-xs font-bold text-[#6D4C41] uppercase tracking-wider mb-2">聯絡電話</label>
-                <input
-                  type="tel"
-                  required
-                  placeholder="輸入聯絡電話 (例如：0912345678)"
-                  value={empPhone}
-                  onChange={(e) => setEmpPhone(e.target.value)}
-                  className="w-full glass-input px-4 py-2.5 rounded-xl text-sm"
-                />
-              </div>
-
-              {/* Status Selector */}
-              <div>
-                <label className="block text-xs font-bold text-[#6D4C41] uppercase tracking-wider mb-2">身分狀態</label>
-                <div className="grid grid-cols-2 gap-2 bg-[#FAF7F2] p-1.5 rounded-2xl border border-[#DAC0A3]/45">
-                  <button
-                    type="button"
-                    onClick={() => handleStatusChange('兼職夥伴')}
-                    className={`py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${empStatus === '兼職夥伴'
-                      ? 'bg-white text-indigo-700 shadow-sm border border-indigo-200'
-                      : 'text-[#8D6E63] hover:text-[#3E2723]'
-                      }`}
-                  >
-                    兼職夥伴 (Part-time)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleStatusChange('正式夥伴')}
-                    className={`py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${empStatus === '正式夥伴'
-                      ? 'bg-white text-emerald-700 shadow-sm border border-emerald-200'
-                      : 'text-[#8D6E63] hover:text-[#3E2723]'
-                      }`}
-                  >
-                    正式夥伴 (Full-time)
-                  </button>
-                </div>
-              </div>
-
-              {/* Active Status Selector */}
-              <div>
-                <label className="block text-xs font-bold text-[#6D4C41] uppercase tracking-wider mb-2">在職狀態</label>
-                <div className="grid grid-cols-2 gap-2 bg-[#FAF7F2] p-1.5 rounded-2xl border border-[#DAC0A3]/45">
-                  <button
-                    type="button"
-                    onClick={() => setEmpActive(true)}
-                    className={`py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${empActive === true
-                      ? 'bg-white text-emerald-700 shadow-sm border border-emerald-200'
-                      : 'text-[#8D6E63] hover:text-[#3E2723]'
-                      }`}
-                  >
-                    在職 (Active)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setEmpActive(false)}
-                    className={`py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${empActive === false
-                      ? 'bg-white text-red-700 shadow-sm border border-red-200'
-                      : 'text-[#8D6E63] hover:text-[#3E2723]'
-                      }`}
-                  >
-                    離職 (Resigned)
-                  </button>
-                </div>
-              </div>
-
-              {/* Newcomer Status Selector */}
-              <div>
-                <label className="block text-xs font-bold text-[#6D4C41] uppercase tracking-wider mb-2">是否為新進人員</label>
-                <div className="grid grid-cols-2 gap-2 bg-[#FAF7F2] p-1.5 rounded-2xl border border-[#DAC0A3]/45">
-                  <button
-                    type="button"
-                    onClick={() => setEmpIsNewcomer(true)}
-                    className={`py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${empIsNewcomer === true
-                      ? 'bg-white text-amber-700 shadow-sm border border-amber-200'
-                      : 'text-[#8D6E63] hover:text-[#3E2723]'
-                      }`}
-                  >
-                    新進人員 (Newcomer)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setEmpIsNewcomer(false)}
-                    className={`py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${empIsNewcomer === false
-                      ? 'bg-white text-[#8D6E63] shadow-sm border border-[#DAC0A3]/30'
-                      : 'text-[#8D6E63] hover:text-[#3E2723]'
-                      }`}
-                  >
-                    一般員工 (Regular)
-                  </button>
-                </div>
-              </div>
-
-              {/* Rotation tag board */}
-              <div className="space-y-3 pt-2">
-                <div className="flex flex-col gap-0.5">
-                  <label className="block text-xs font-bold text-[#6D4C41] uppercase tracking-wider">
-                    崗位訓練輪替板
-                  </label>
-                  <span className="text-[10px] text-[#8D6E63] font-medium leading-normal">
-                    三項崗位皆合格後會自動轉為「正式夥伴」。可以點擊標籤或拖曳標籤以移動位置。
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  {/* Column 1: Available */}
-                  <div
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={handleDropToAvailable}
-                    className="flex flex-col gap-2 p-3 rounded-xl border border-dashed border-[#DAC0A3]/50 bg-[#FAF7F2]/30 min-h-[140px] transition-colors"
-                  >
-                    <span className="text-[10px] font-extrabold text-[#8D6E63] text-center border-b border-[#DAC0A3]/25 pb-1">
-                      尚未開始 (Available)
-                    </span>
-                    <div className="flex flex-wrap gap-1.5 justify-center items-center flex-1">
-                      {ALL_POSITIONS
-                        .filter(pos => empTrainingPos !== pos && !empTrainedPoss.includes(pos))
-                        .map(pos => (
-                          <div
-                            key={pos}
-                            draggable
-                            onDragStart={(e) => handleDragStart(e, pos)}
-                            onClick={() => handleTagClick(pos)}
-                            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white border border-[#DAC0A3]/65 text-[#5D4037] hover:border-[#8D6E63] shadow-xs cursor-pointer select-none transition-all active:scale-95"
-                          >
-                            {pos}
-                          </div>
-                        ))}
-                      {ALL_POSITIONS
-                        .filter(pos => empTrainingPos !== pos && !empTrainedPoss.includes(pos))
-                        .length === 0 && (
-                          <span className="text-[9px] text-[#8D6E63]/40 italic text-center select-none">無崗位</span>
-                        )}
-                    </div>
-                  </div>
-
-                  {/* Column 2: Currently Training */}
-                  <div
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={handleDropToTraining}
-                    className="flex flex-col gap-2 p-3 rounded-xl border border-[#F3E5F5] bg-purple-50/10 min-h-[140px] transition-colors relative"
-                  >
-                    <span className="text-[10px] font-extrabold text-[#7B1FA2] text-center border-b border-[#F3E5F5] pb-1">
-                      📖 正在培訓中 (max 1)
-                    </span>
-                    <div className="flex flex-wrap gap-1.5 justify-center items-center flex-1">
-                      {empTrainingPos ? (
-                        <div
-                          draggable
-                          onDragStart={(e) => handleDragStart(e, empTrainingPos)}
-                          onClick={() => handleTagClick(empTrainingPos)}
-                          className="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-50 border border-amber-300 text-amber-700 hover:border-amber-400 shadow-xs cursor-pointer select-none transition-all active:scale-95 animate-pulse"
-                        >
-                          {empTrainingPos}
-                        </div>
-                      ) : (
-                        <span className="text-[9px] text-[#7B1FA2]/40 text-center select-none p-2 leading-normal">
-                          拖入或點擊標籤開始培訓
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Column 3: Trained */}
-                  <div
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={handleDropToTrained}
-                    className="flex flex-col gap-2 p-3 rounded-xl border border-emerald-100 bg-emerald-50/10 min-h-[140px] transition-colors"
-                  >
-                    <span className="text-[10px] font-extrabold text-[#2E7D32] text-center border-b border-emerald-100 pb-1">
-                      ✅ 已考試合格 (Qualified)
-                    </span>
-                    <div className="flex flex-wrap gap-1.5 justify-center items-center flex-1">
-                      {empTrainedPoss && empTrainedPoss.length > 0 ? (
-                        empTrainedPoss.map(pos => (
-                          <div
-                            key={pos}
-                            draggable
-                            onDragStart={(e) => handleDragStart(e, pos)}
-                            onClick={() => handleTagClick(pos)}
-                            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-50 border border-emerald-250 text-emerald-700 hover:border-emerald-350 shadow-xs cursor-pointer select-none transition-all active:scale-95"
-                          >
-                            {pos}
-                          </div>
-                        ))
-                      ) : (
-                        <span className="text-[9px] text-[#2E7D32]/40 text-center select-none p-2 leading-normal">
-                          尚未有合格項目
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Certificates Selector */}
-              <div>
-                <label className="block text-xs font-bold text-[#6D4C41] uppercase tracking-wider mb-2">持有證照</label>
-                <div className="flex flex-wrap gap-2">
-                  {(['FBI', '黃金吧檯手'] as const).map(cert => {
-                    const hasCert = empCertificates.includes(cert);
-                    return (
-                      <button
-                        key={cert}
-                        type="button"
-                        onClick={() => {
-                          setEmpCertificates(prev =>
-                            prev.includes(cert)
-                              ? prev.filter(c => c !== cert)
-                              : [...prev, cert]
-                          );
-                        }}
-                        className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer border ${hasCert
-                          ? 'bg-[#795548] text-white border-[#795548] shadow-xs'
-                          : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:border-[#8D6E63]'
-                          }`}
-                      >
-                        {cert === 'FBI' ? '🛡️ FBI' : '☕ 黃金吧檯手'}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Actions */}
-              <div className="flex gap-3 border-t border-[#E5DCD5] pt-4 mt-6">
-                <button
-                  type="button"
-                  onClick={() => setIsEmployeeModalOpen(false)}
-                  className="flex-1 bg-white hover:bg-[#FAF7F2] border border-[#E5DCD5] text-[#5D4037] font-semibold px-4 py-3 rounded-xl transition-all cursor-pointer text-center text-sm"
-                >
-                  取消
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 bg-[#795548] hover:bg-[#5D4037] text-white font-semibold px-4 py-3 rounded-xl transition-all shadow-lg shadow-[#795548]/10 cursor-pointer text-center text-sm"
-                >
-                  儲存員工
-                </button>
-              </div>
-
-            </form>
-          </div>
-        </div>
-      )}
-      {/* Right-click Context Menu */}
-      {contextMenu && (
-        <>
-          <div
-            className="fixed inset-0 z-[200]"
-            onClick={() => setContextMenu(null)}
-            onContextMenu={(e) => { e.preventDefault(); setContextMenu(null); }}
-          />
-          <div
-            className="fixed z-[201] bg-white rounded-xl shadow-xl border border-[#DAC0A3]/50 py-1.5 min-w-[180px]"
-            style={{ left: contextMenu.x, top: contextMenu.y }}
-          >
-            <div className="px-3 py-1.5 text-[10px] font-bold text-[#8D6E63] uppercase tracking-wider border-b border-[#DAC0A3]/30 mb-1">
-              {contextMenu.schedule ? contextMenu.schedule.employeeName : contextMenu.emptyCell?.employeeName} ({contextMenu.emptyCell ? contextMenu.emptyCell.dateStr : contextMenu.schedule?.date})
-            </div>
-            {contextMenu.schedule ? (
-              <button
-                onClick={() => handleToggleMarkBlue(contextMenu.schedule!)}
-                className="w-full text-left px-3 py-2 text-xs font-semibold text-[#1e40af] hover:bg-blue-50 transition-colors flex items-center gap-2 cursor-pointer"
-              >
-                {contextMenu.schedule.markedBlue ? (
-                  <><span className="text-base">⬜</span><span>取消藍色標記</span></>
-                ) : (
-                  <><span className="text-base">🔵</span><span>藍色標記此班次</span></>
-                )}
-              </button>
-            ) : contextMenu.emptyCell ? (
-              <button
-                onClick={() => handleToggleMarkEmptyCellBlue(contextMenu.emptyCell!.employeeName, contextMenu.emptyCell!.dateStr)}
-                className="w-full text-left px-3 py-2 text-xs font-semibold text-[#1e40af] hover:bg-blue-50 transition-colors flex items-center gap-2 cursor-pointer"
-              >
-                {markedEmptyCells[`${contextMenu.emptyCell.employeeName.trim().toLowerCase()}|${contextMenu.emptyCell.dateStr}`] ? (
-                  <><span className="text-base">⬜</span><span>取消日期藍色標記</span></>
-                ) : (
-                  <><span className="text-base">🔵</span><span>藍色標記此日期</span></>
-                )}
-              </button>
-            ) : null}
-          </div>
-        </>
-      )}
+      {/* Shared Modals */}
+      <WorkerAvailModal
+        isWorkerAvailModalOpen={isWorkerAvailModalOpen}
+        setIsWorkerAvailModalOpen={setIsWorkerAvailModalOpen}
+        availConfigs={availConfigs}
+        workerName={workerName}
+        timeSlots={timeSlots}
+        availabilities={availabilities}
+        handleSyncAllAvailConfigs={handleSyncAllAvailConfigs}
+        updateAvailConfig={updateAvailConfig}
+        removeAvailConfig={removeAvailConfig}
+        handleWorkerAvailModalSubmit={handleWorkerAvailModalSubmit}
+      />
+
+      <FTAssignModal
+        isFTAssignModalOpen={isFTAssignModalOpen}
+        pendingAssignAvail={pendingAssignAvail}
+        shiftPresets={shiftPresets}
+        timeSlots={timeSlots}
+        onClose={() => {
+          setIsFTAssignModalOpen(false);
+          setPendingAssignAvail(null);
+        }}
+        onExecuteFTAssign={executeFTAssign}
+      />
+
+      <ShiftModal
+        isOpen={isModalOpen}
+        mode={modalMode}
+        editingId={editingId}
+        employeeName={employeeName}
+        setEmployeeName={setEmployeeName}
+        workplace={workplace}
+        setWorkplace={setWorkplace}
+        startTime={startTime}
+        setStartTime={setStartTime}
+        endTime={endTime}
+        setEndTime={setEndTime}
+        notes={notes}
+        setNotes={setNotes}
+        workerNotes={workerNotes}
+        registerTime={registerTime}
+        selectedDates={selectedDates}
+        setSelectedDates={setSelectedDates}
+        singleDate={singleDate}
+        setSingleDate={setSingleDate}
+        pickerDates={pickerDates}
+        timeSlots={timeSlots}
+        shiftPresets={shiftPresets}
+        employees={employees}
+        schedules={schedules}
+        availabilities={availabilities}
+        currentMonthStart={currentMonthStart}
+        onClose={() => setIsModalOpen(false)}
+        onSubmit={handleSubmit}
+        onDelete={handleDelete}
+        handleEmployeeNameChange={handleEmployeeNameChange}
+        getAvailabilitiesForDate={getAvailabilitiesForDate}
+        toggleDateSelection={toggleDateSelection}
+        handleSelectAllDays={handleSelectAllDays}
+        handleSelectMonWedFri={handleSelectMonWedFri}
+        handleSelectTueThu={handleSelectTueThu}
+        handleClearAllSelected={handleClearAllSelected}
+        setFormOriginalStartTime={setFormOriginalStartTime}
+        setFormOriginalEndTime={setFormOriginalEndTime}
+      />
+
+      <EmployeeModal
+        isOpen={isEmployeeModalOpen}
+        mode={employeeFormMode}
+        empName={empName}
+        setEmpName={setEmpName}
+        empPhone={empPhone}
+        setEmpPhone={setEmpPhone}
+        empStatus={empStatus}
+        setEmpStatus={setEmpStatus}
+        empActive={empActive}
+        setEmpActive={setEmpActive}
+        empIsNewcomer={empIsNewcomer}
+        setEmpIsNewcomer={setEmpIsNewcomer}
+        empTrainingPos={empTrainingPos}
+        setEmpTrainingPos={setEmpTrainingPos}
+        empTrainedPoss={empTrainedPoss}
+        setEmpTrainedPoss={setEmpTrainedPoss}
+        empCertificates={empCertificates}
+        setEmpCertificates={setEmpCertificates}
+        onClose={() => setIsEmployeeModalOpen(false)}
+        onSubmit={handleEmployeeSubmit}
+        handleTagClick={handleTagClick}
+        handleDragStart={handleDragStart}
+        handleDropToAvailable={handleDropToAvailable}
+        handleDropToTraining={handleDropToTraining}
+        handleDropToTrained={handleDropToTrained}
+      />
+
+      <ContextMenu
+        contextMenu={contextMenu}
+        markedEmptyCells={markedEmptyCells}
+        onClose={() => setContextMenu(null)}
+        onToggleMarkBlue={handleToggleMarkBlue}
+        onToggleMarkEmptyCellBlue={handleToggleMarkEmptyCellBlue}
+      />
     </div>
   );
 }
