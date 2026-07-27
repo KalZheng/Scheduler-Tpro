@@ -16,7 +16,7 @@ function localDbPlugin() {
         console.log("Migrating legacy db.json to monthly partition files...");
         const raw = fs.readFileSync(legacyPath, 'utf-8');
         const legacyData = JSON.parse(raw);
-        
+
         // Group schedules by month
         const schedulesByMonth: Record<string, any[]> = {};
         (legacyData.schedules || []).forEach((s: any) => {
@@ -114,7 +114,7 @@ function localDbPlugin() {
         if (req.url && req.url.startsWith('/api/db')) {
           const urlObj = new URL(req.url, 'http://localhost');
           const month = urlObj.searchParams.get('month') || new Date().toISOString().substring(0, 7);
-          
+
           if (!/^\d{4}-\d{2}$/.test(month)) {
             res.statusCode = 400;
             res.end(JSON.stringify({ error: 'Invalid month format, expected YYYY-MM' }));
@@ -255,11 +255,11 @@ function localDbPlugin() {
             req.on('end', () => {
               try {
                 const parsed = JSON.parse(body);
-                
+
                 // Separate targets: global (no date) vs month-specific (with date matching YYYY-MM)
                 const monthTargets: any[] = [];
                 const globalTargets: any[] = [];
-                
+
                 (parsed.staffingTargets || []).forEach((t: any) => {
                   if (t.date) {
                     if (t.date.startsWith(month)) {
@@ -280,12 +280,12 @@ function localDbPlugin() {
                   availabilities: parsed.availabilities || [],
                   staffingTargets: monthTargets
                 };
-                
+
                 fs.writeFileSync(monthPath, JSON.stringify(monthData, null, 2), 'utf-8');
 
                 // Write global file
                 const globalPath = path.resolve(dataDir, 'db-global.json');
-                fs.writeFileSync(globalPath, JSON.stringify({ 
+                fs.writeFileSync(globalPath, JSON.stringify({
                   staffingTargets: globalTargets,
                   deadlineDay: parsed.deadlineDay !== undefined ? parsed.deadlineDay : 20,
                   startDay: parsed.startDay !== undefined ? parsed.startDay : 15,
@@ -341,6 +341,8 @@ export default defineConfig({
   base: '/Scheduler-Tpro/',
   plugins: [react(), tailwindcss(), localDbPlugin()],
   server: {
+    host: '127.0.0.1',
+    port: 8080,
     watch: {
       ignored: ['**/data/**']
     }

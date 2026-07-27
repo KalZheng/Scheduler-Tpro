@@ -71,10 +71,10 @@
       "targetCount": 1
     }
   ],
-  "deadlineDay": 20,
+  "deadlineDay": 27,
   "startDay": 13,
   "operatingStartTime": "05:00",
-  "operatingEndTime": "17:00",
+  "operatingEndTime": "20:00",
   "shiftMorningStart": "06:30",
   "shiftMorningEnd": "15:30",
   "shiftEveningStart": "08:30",
@@ -105,7 +105,7 @@
     "tier1Limit": 1500,
     "tier2Limit": 2500,
     "tier3Limit": 3500,
-    "tier1Staff": 1,
+    "tier1Staff": 2,
     "tier2Staff": 3,
     "tier3Staff": 4,
     "tier4Staff": 5,
