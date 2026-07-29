@@ -29,8 +29,11 @@ import {
   updateMonthlyRevenues,
   subscribeToRevenueStaffRules,
   subscribeToMarkedEmptyCells,
-  updateMarkedEmptyCells
+  updateMarkedEmptyCells,
+  subscribeToErpDays,
+  subscribeToPtAvailMode
 } from './services/scheduler';
+import type { PtAvailMode } from './services/scheduler';
 import type { WorkSchedule, WorkerAvailability, StaffingTarget, Employee, ShiftPreset, RevenueStaffRules } from './services/scheduler';
 import { isValidConfig } from './firebase';
 import workplaces from './config/workplaces.json';
@@ -143,6 +146,23 @@ function App() {
   const [shiftMorningEnd, setShiftMorningEnd] = useState<string>('15:30');
   const [shiftPresets, setShiftPresets] = useState<ShiftPreset[]>([]);
   const [employeeOrder, setEmployeeOrder] = useState<string[]>([]);
+  const [erpDays, setErpDays] = useState<number[]>([1, 3, 5]);
+  const [ptAvailMode, setPtAvailMode] = useState<PtAvailMode>('static');
+
+  const defaultShiftStart = useMemo(() => {
+    if (shiftPresets && shiftPresets.length > 0) {
+      return shiftPresets[0].startTime;
+    }
+    return shiftMorningStart || '06:30';
+  }, [shiftPresets, shiftMorningStart]);
+
+  const defaultShiftEnd = useMemo(() => {
+    if (shiftPresets && shiftPresets.length > 0) {
+      return shiftPresets[0].endTime;
+    }
+    return shiftMorningEnd || '15:30';
+  }, [shiftPresets, shiftMorningEnd]);
+
 
   const timeSlots = useMemo(() => {
     if (!operatingStartTime || !operatingEndTime) return [];
@@ -476,6 +496,8 @@ function App() {
       setTempRules(rules);
     });
     const unsubMarkedEmptyCells = subscribeToMarkedEmptyCells((cells) => setMarkedEmptyCells(cells));
+    const unsubErpDays = subscribeToErpDays((days) => setErpDays(days));
+    const unsubPtAvailMode = subscribeToPtAvailMode((mode) => setPtAvailMode(mode));
 
     return () => {
       unsubSchedules();
@@ -493,6 +515,8 @@ function App() {
       unsubMonthlyRevenues();
       unsubRevenueStaffRules();
       unsubMarkedEmptyCells();
+      unsubErpDays();
+      unsubPtAvailMode();
     };
   }, []);
 
@@ -514,25 +538,26 @@ function App() {
     if (!isFullTime || !workerName.trim()) return [];
     const targetMonthStr = formatDateString(workerNextMonthStart).substring(0, 7);
     const workerAvails = availabilities.filter(
-      a => a.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase()
+      a => a.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase() &&
+        a.date.startsWith(targetMonthStr)
     );
-    const hasRecords = workerAvails.some(a => a.date.startsWith(targetMonthStr));
-    if (!hasRecords) return [];
+    if (workerAvails.length === 0) return [];
 
-    const workDates = workerAvails
-      .filter(a => a.date.startsWith(targetMonthStr) && !(a.startTime === '00:00' && a.endTime === '00:00'))
+    const explicitRestDates = workerAvails
+      .filter(a => a.startTime === '00:00' && a.endTime === '00:00')
       .map(a => a.date);
 
-    const daysInMonth = getDaysInMonth(workerNextMonthStart);
-    const computedRestDates = daysInMonth
-      .map(formatDateString)
-      .filter(dateStr => !workDates.includes(dateStr));
+    const legacyWorkAvails = workerAvails.filter(a => !(a.startTime === '00:00' && a.endTime === '00:00'));
+    if (legacyWorkAvails.length > 0) {
+      const workDates = legacyWorkAvails.map(a => a.date);
+      const daysInMonth = getDaysInMonth(workerNextMonthStart);
+      const computedRestDates = daysInMonth
+        .map(formatDateString)
+        .filter(dateStr => !workDates.includes(dateStr));
+      return Array.from(new Set([...explicitRestDates, ...computedRestDates])).sort();
+    }
 
-    const legacyRestDates = workerAvails
-      .filter(a => a.date.startsWith(targetMonthStr) && a.startTime === '00:00' && a.endTime === '00:00')
-      .map(a => a.date);
-
-    return Array.from(new Set([...computedRestDates, ...legacyRestDates])).sort();
+    return explicitRestDates.sort();
   }, [availabilities, workerName, isFullTime, workerNextMonthStart]);
 
   const lastSyncedDbRestDatesRef = useRef<string[]>([]);
@@ -659,8 +684,8 @@ function App() {
             employeeName: workerName.trim(),
             date: dateStr,
             workplace: workplaces[0]?.name || '',
-            startTime: shiftMorningStart,
-            endTime: shiftMorningEnd,
+            startTime: defaultShiftStart,
+            endTime: defaultShiftEnd,
             notes: availNotes.trim()
           });
         }
@@ -708,8 +733,8 @@ function App() {
         };
       }
 
-      const defStart = Math.max(0, timeSlots.indexOf(shiftMorningStart));
-      const defEnd = Math.max(0, timeSlots.indexOf(shiftMorningEnd));
+      const defStart = Math.max(0, timeSlots.indexOf(defaultShiftStart));
+      const defEnd = Math.max(0, timeSlots.indexOf(defaultShiftEnd));
       return {
         date,
         startIdx: defStart,
@@ -1207,7 +1232,7 @@ function App() {
         return;
       }
 
-      if (safeConfirm(`確定要將 ${dateStr} 的休假改為配合排班（早班，${shiftMorningStart}-${shiftMorningEnd}）嗎？`)) {
+      if (safeConfirm(`確定要將 ${dateStr} 的休假改為配合排班（${defaultShiftStart}-${defaultShiftEnd}）嗎？`)) {
         try {
           if (avail) {
             await deleteAvailability(avail.id);
@@ -1216,8 +1241,8 @@ function App() {
             employeeName: workerName.trim(),
             date: dateStr,
             workplace: workplaces[0]?.name || '',
-            startTime: shiftMorningStart,
-            endTime: shiftMorningEnd,
+            startTime: defaultShiftStart,
+            endTime: defaultShiftEnd,
             notes: ''
           });
         } catch (error) {
@@ -1345,8 +1370,8 @@ function App() {
     const isFT = emp?.status === '正式夥伴';
 
     if (isFT) {
-      setStartTime(shiftMorningStart);
-      setEndTime(shiftMorningEnd);
+      setStartTime(defaultShiftStart);
+      setEndTime(defaultShiftEnd);
 
       const monthStr = formatDateString(currentMonthStart).substring(0, 7);
       const empMonthAvails = availabilities.filter(
@@ -1490,7 +1515,8 @@ function App() {
       allEmployees,
       employees,
       markedEmptyCells,
-      getDayNote
+      getDayNote,
+      erpDays
     });
   };
 
@@ -1584,7 +1610,8 @@ function App() {
       allEmployees,
       employees,
       markedEmptyCells,
-      getDayNote
+      getDayNote,
+      erpDays
     });
     if (!result) return;
 
@@ -1897,6 +1924,10 @@ function App() {
                   tempRules={tempRules}
                   setTempRules={setTempRules}
                   setRevenueStaffRules={setRevenueStaffRules}
+                  erpDays={erpDays}
+                  setErpDays={setErpDays}
+                  ptAvailMode={ptAvailMode}
+                  setPtAvailMode={setPtAvailMode}
                 />
               ) : (
                 <>
@@ -2023,6 +2054,7 @@ function App() {
                       setFormOriginalStartTime={setFormOriginalStartTime}
                       setFormOriginalEndTime={setFormOriginalEndTime}
                       setIsModalOpen={setIsModalOpen}
+                      erpDays={erpDays}
                     />
                   )}
 
@@ -2071,6 +2103,7 @@ function App() {
         updateAvailConfig={updateAvailConfig}
         removeAvailConfig={removeAvailConfig}
         handleWorkerAvailModalSubmit={handleWorkerAvailModalSubmit}
+        ptAvailMode={ptAvailMode}
       />
 
       <FTAssignModal

@@ -1,6 +1,6 @@
 import React from 'react';
 import type { ShiftPreset, RevenueStaffRules } from '../../services/scheduler';
-import { ALL_TIME_CHOICES } from '../../utils/constants';
+import { ALL_TIME_CHOICES, DAYS_OF_WEEK } from '../../utils/constants';
 import { safeConfirm } from '../../utils/dateUtils';
 import {
   updateOperatingStartTime,
@@ -8,8 +8,11 @@ import {
   updateStartDay,
   updateDeadlineDay,
   updateShiftPresets,
-  updateRevenueStaffRules
+  updateRevenueStaffRules,
+  updateErpDays,
+  updatePtAvailMode
 } from '../../services/scheduler';
+import type { PtAvailMode } from '../../services/scheduler';
 
 interface ManagerSystemViewProps {
   operatingStartTime: string;
@@ -25,6 +28,10 @@ interface ManagerSystemViewProps {
   tempRules: RevenueStaffRules;
   setTempRules: (rules: RevenueStaffRules) => void;
   setRevenueStaffRules: (rules: RevenueStaffRules) => void;
+  erpDays: number[];
+  setErpDays: (days: number[]) => void;
+  ptAvailMode: PtAvailMode;
+  setPtAvailMode: (mode: PtAvailMode) => void;
 }
 
 export const ManagerSystemView: React.FC<ManagerSystemViewProps> = ({
@@ -40,7 +47,11 @@ export const ManagerSystemView: React.FC<ManagerSystemViewProps> = ({
   setShiftPresets,
   tempRules,
   setTempRules,
-  setRevenueStaffRules
+  setRevenueStaffRules,
+  erpDays,
+  setErpDays,
+  ptAvailMode,
+  setPtAvailMode
 }) => {
 
   const handleSaveSystemSettings = async () => {
@@ -51,6 +62,8 @@ export const ManagerSystemView: React.FC<ManagerSystemViewProps> = ({
       await updateDeadlineDay(deadlineDay);
       await updateShiftPresets(shiftPresets);
       await updateRevenueStaffRules(tempRules);
+      await updateErpDays(erpDays);
+      await updatePtAvailMode(ptAvailMode);
       setRevenueStaffRules(tempRules);
       alert('已成功儲存系統管理設定！');
     } catch (error) {
@@ -256,7 +269,90 @@ export const ManagerSystemView: React.FC<ManagerSystemViewProps> = ({
             </div>
           </div>
 
-          {/* Section 4: Revenue Staffing Rules */}
+          {/* Section 4: ERP Delivery Days */}
+          <div className="border-t border-[#E5DCD5]/60 pt-4 space-y-3">
+            <h4 className="text-xs font-bold text-[#3E2723] flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#795548]"></span>
+              ERP 進貨/標記日設定
+            </h4>
+            <p className="text-[11px] text-[#6D4C41]">
+              勾選需要在排班網格表格與 Excel 匯出中顯示 ERP 標籤的星期：
+            </p>
+            <div className="flex flex-wrap gap-2 pt-1">
+              {DAYS_OF_WEEK.map((day) => {
+                const isChecked = erpDays.includes(day.value);
+                return (
+                  <label
+                    key={day.value}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold cursor-pointer transition-all ${
+                      isChecked
+                        ? 'bg-indigo-600/10 border-indigo-600/30 text-indigo-900 shadow-xs'
+                        : 'bg-[#FAF7F2]/60 border-[#DAC0A3]/50 text-[#8D6E63] hover:bg-[#FAF7F2]'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setErpDays([...erpDays, day.value].sort((a, b) => a - b));
+                        } else {
+                          setErpDays(erpDays.filter(d => d !== day.value));
+                        }
+                      }}
+                      className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                    />
+                    <span>{day.name}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Section 4.5: PT Avail Mode Settings */}
+          <div className="border-t border-[#E5DCD5]/60 pt-4 space-y-3">
+            <h4 className="text-xs font-bold text-[#3E2723] flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#795548]"></span>
+              兼職夥伴時間選擇模式設定 (PT Range Slider)
+            </h4>
+            <p className="text-[11px] text-[#6D4C41]">
+              設定兼職同仁在線上登記可用時間時，時間區間滑桿預設的操作方式與彈性：
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+              <button
+                type="button"
+                onClick={() => setPtAvailMode('static')}
+                className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${ptAvailMode === 'static'
+                  ? 'bg-[#795548]/15 border-[#795548] text-[#3E2723] shadow-xs'
+                  : 'bg-[#FAF7F2]/60 border-[#DAC0A3]/50 text-[#6D4C41] hover:bg-[#FAF7F2]'
+                  }`}
+              >
+                <div className="text-xs font-bold mb-1 flex items-center gap-1.5 text-[#3E2723]">
+                  <span>📌</span> 單端固定模式 (Static Ending)
+                </div>
+                <div className="text-[11px] text-[#6D4C41] opacity-90 leading-relaxed">
+                  固定營業開始/結束時間端點，讓夥伴選擇「工作至此時間」或「自此時間開始」。
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={() => setPtAvailMode('flex')}
+                className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${ptAvailMode === 'flex'
+                  ? 'bg-[#795548]/15 border-[#795548] text-[#3E2723] shadow-xs'
+                  : 'bg-[#FAF7F2]/60 border-[#DAC0A3]/50 text-[#6D4C41] hover:bg-[#FAF7F2]'
+                  }`}
+              >
+                <div className="text-xs font-bold mb-1 flex items-center gap-1.5 text-[#3E2723]">
+                  <span>🔀</span> 雙端彈性模式 (Flex Time Range)
+                </div>
+                <div className="text-[11px] text-[#6D4C41] opacity-90 leading-relaxed">
+                  滑桿雙端皆可自由拖曳調整起訖時間，隱藏「工作至此時間」及「自此時間開始」選擇按鈕。
+                </div>
+              </button>
+            </div>
+          </div>
+
+          {/* Section 5: Revenue Staffing Rules */}
           <div className="border-t border-[#E5DCD5]/60 pt-4 space-y-3">
             <h4 className="text-xs font-bold text-[#3E2723] flex items-center gap-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-[#795548]"></span>
