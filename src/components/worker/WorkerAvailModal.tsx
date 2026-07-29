@@ -1,6 +1,6 @@
 import React from 'react';
 import type { WorkerAvailConfig } from '../../App';
-import type { WorkerAvailability } from '../../services/scheduler';
+import type { WorkerAvailability, PtAvailMode } from '../../services/scheduler';
 import workplaces from '../../config/workplaces.json';
 import { calculateDuration, isOverEightHours } from '../../utils/dateUtils';
 
@@ -15,6 +15,7 @@ interface WorkerAvailModalProps {
   updateAvailConfig: (index: number, updates: Partial<WorkerAvailConfig>) => void;
   removeAvailConfig: (index: number) => void;
   handleWorkerAvailModalSubmit: () => void;
+  ptAvailMode?: PtAvailMode;
 }
 
 export const WorkerAvailModal: React.FC<WorkerAvailModalProps> = ({
@@ -27,7 +28,8 @@ export const WorkerAvailModal: React.FC<WorkerAvailModalProps> = ({
   handleSyncAllAvailConfigs,
   updateAvailConfig,
   removeAvailConfig,
-  handleWorkerAvailModalSubmit
+  handleWorkerAvailModalSubmit,
+  ptAvailMode = 'both'
 }) => {
   if (!isWorkerAvailModalOpen) return null;
 
@@ -104,6 +106,14 @@ export const WorkerAvailModal: React.FC<WorkerAvailModalProps> = ({
             }
 
             const pct = maxEndIdx > minStartIdx ? ((dividerIdx - minStartIdx) / (maxEndIdx - minStartIdx)) * 100 : 0;
+            const startPct = maxEndIdx > minStartIdx ? ((config.startIdx - minStartIdx) / (maxEndIdx - minStartIdx)) * 100 : 0;
+            const endPct = maxEndIdx > minStartIdx ? ((config.endIdx - minStartIdx) / (maxEndIdx - minStartIdx)) * 100 : 100;
+
+            const posToIdx = (clientX: number, rect: DOMRect) => {
+              const pct = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+              const rawIdx = minStartIdx + pct * (maxEndIdx - minStartIdx);
+              return Math.round(rawIdx);
+            };
 
             const handleCommit = (nextDividerIdx: number, nextMode: 'until' | 'from') => {
               let start = nextMode === 'until' ? minStartIdx : nextDividerIdx;
@@ -118,13 +128,7 @@ export const WorkerAvailModal: React.FC<WorkerAvailModalProps> = ({
               updateAvailConfig(index, { startIdx: start, endIdx: end });
             };
 
-            const posToIdx = (clientX: number, rect: DOMRect) => {
-              const pct = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
-              const rawIdx = minStartIdx + pct * (maxEndIdx - minStartIdx);
-              return Math.round(rawIdx);
-            };
-
-            const onHandleDown = (e: React.PointerEvent<HTMLDivElement>) => {
+            const onSingleHandleDown = (e: React.PointerEvent<HTMLDivElement>) => {
               e.preventDefault();
               const track = e.currentTarget.parentElement;
               if (!track) return;
@@ -133,6 +137,48 @@ export const WorkerAvailModal: React.FC<WorkerAvailModalProps> = ({
               const onMove = (ev: PointerEvent) => {
                 const nextIdx = posToIdx(ev.clientX, rect);
                 handleCommit(nextIdx, currentMode);
+              };
+
+              const onUp = () => {
+                window.removeEventListener('pointermove', onMove);
+                window.removeEventListener('pointerup', onUp);
+              };
+
+              window.addEventListener('pointermove', onMove);
+              window.addEventListener('pointerup', onUp);
+            };
+
+            const onStartHandleDown = (e: React.PointerEvent<HTMLDivElement>) => {
+              e.preventDefault();
+              const track = e.currentTarget.parentElement;
+              if (!track) return;
+              const rect = track.getBoundingClientRect();
+
+              const onMove = (ev: PointerEvent) => {
+                const nextIdx = posToIdx(ev.clientX, rect);
+                const nextStart = Math.min(config.endIdx - 1, Math.max(minStartIdx, nextIdx));
+                updateAvailConfig(index, { startIdx: nextStart });
+              };
+
+              const onUp = () => {
+                window.removeEventListener('pointermove', onMove);
+                window.removeEventListener('pointerup', onUp);
+              };
+
+              window.addEventListener('pointermove', onMove);
+              window.addEventListener('pointerup', onUp);
+            };
+
+            const onEndHandleDown = (e: React.PointerEvent<HTMLDivElement>) => {
+              e.preventDefault();
+              const track = e.currentTarget.parentElement;
+              if (!track) return;
+              const rect = track.getBoundingClientRect();
+
+              const onMove = (ev: PointerEvent) => {
+                const nextIdx = posToIdx(ev.clientX, rect);
+                const nextEnd = Math.min(maxEndIdx, Math.max(config.startIdx + 1, nextIdx));
+                updateAvailConfig(index, { endIdx: nextEnd });
               };
 
               const onUp = () => {
@@ -174,40 +220,86 @@ export const WorkerAvailModal: React.FC<WorkerAvailModalProps> = ({
                 </div>
 
                 <div className="space-y-4 pt-1">
-                  <div className="relative h-8 mx-2 select-none">
-                    <div className="absolute top-2.5 left-0 right-0 h-3 bg-[#EADBC8] rounded-full" />
-                    <div
-                      onClick={() => handleCommit(dividerIdx, currentMode === 'until' ? 'from' : 'until')}
-                      className="absolute top-2.5 h-3 rounded-full cursor-pointer transition-all"
-                      style={{
-                        left: currentMode === 'until' ? '0%' : `${pct}%`,
-                        width: currentMode === 'until' ? `${pct}%` : `${100 - pct}%`,
-                        backgroundColor: '#8D6E63',
-                      }}
-                    />
-                    <div
-                      onClick={() => handleCommit(dividerIdx, 'until')}
-                      className="absolute top-2.5 left-0 h-3 cursor-pointer"
-                      style={{ width: `${pct}%` }}
-                    />
-                    <div
-                      onClick={() => handleCommit(dividerIdx, 'from')}
-                      className="absolute top-2.5 right-0 h-3 cursor-pointer"
-                      style={{ width: `${100 - pct}%` }}
-                    />
-                    <div
-                      onPointerDown={onHandleDown}
-                      className="absolute top-1.5 w-5 h-5 rounded-full bg-white border-2 shadow-md cursor-grab active:cursor-grabbing flex items-center justify-center"
-                      style={{
-                        left: `${pct}%`,
-                        borderColor: '#795548',
-                        transform: 'translateX(-50%)',
-                        touchAction: 'none'
-                      }}
-                    >
-                      <div className="w-1.5 h-1.5 rounded-full bg-[#795548]" />
+                  {ptAvailMode === 'flex' ? (
+                    /* Flex Mode: Dual handles, no mode buttons */
+                    <div className="relative h-8 mx-2 select-none">
+                      <div className="absolute top-2.5 left-0 right-0 h-3 bg-[#EADBC8] rounded-full" />
+                      <div
+                        className="absolute top-2.5 h-3 rounded-full transition-all"
+                        style={{
+                          left: `${startPct}%`,
+                          width: `${endPct - startPct}%`,
+                          backgroundColor: '#8D6E63',
+                        }}
+                      />
+
+                      {/* Start Handle */}
+                      <div
+                        onPointerDown={onStartHandleDown}
+                        className="absolute top-1.5 w-5 h-5 rounded-full bg-white border-2 shadow-md cursor-grab active:cursor-grabbing flex items-center justify-center z-10"
+                        style={{
+                          left: `${startPct}%`,
+                          borderColor: '#795548',
+                          transform: 'translateX(-50%)',
+                          touchAction: 'none'
+                        }}
+                        title={`開始時間: ${startTime}`}
+                      >
+                        <div className="w-1.5 h-1.5 rounded-full bg-[#795548]" />
+                      </div>
+
+                      {/* End Handle */}
+                      <div
+                        onPointerDown={onEndHandleDown}
+                        className="absolute top-1.5 w-5 h-5 rounded-full bg-white border-2 shadow-md cursor-grab active:cursor-grabbing flex items-center justify-center z-10"
+                        style={{
+                          left: `${endPct}%`,
+                          borderColor: '#795548',
+                          transform: 'translateX(-50%)',
+                          touchAction: 'none'
+                        }}
+                        title={`結束時間: ${endTime}`}
+                      >
+                        <div className="w-1.5 h-1.5 rounded-full bg-[#795548]" />
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    /* Static Mode: Single handle, with until/from buttons */
+                    <div className="relative h-8 mx-2 select-none">
+                      <div className="absolute top-2.5 left-0 right-0 h-3 bg-[#EADBC8] rounded-full" />
+                      <div
+                        onClick={() => handleCommit(dividerIdx, currentMode === 'until' ? 'from' : 'until')}
+                        className="absolute top-2.5 h-3 rounded-full cursor-pointer transition-all"
+                        style={{
+                          left: currentMode === 'until' ? '0%' : `${pct}%`,
+                          width: currentMode === 'until' ? `${pct}%` : `${100 - pct}%`,
+                          backgroundColor: '#8D6E63',
+                        }}
+                      />
+                      <div
+                        onClick={() => handleCommit(dividerIdx, 'until')}
+                        className="absolute top-2.5 left-0 h-3 cursor-pointer"
+                        style={{ width: `${pct}%` }}
+                      />
+                      <div
+                        onClick={() => handleCommit(dividerIdx, 'from')}
+                        className="absolute top-2.5 right-0 h-3 cursor-pointer"
+                        style={{ width: `${100 - pct}%` }}
+                      />
+                      <div
+                        onPointerDown={onSingleHandleDown}
+                        className="absolute top-1.5 w-5 h-5 rounded-full bg-white border-2 shadow-md cursor-grab active:cursor-grabbing flex items-center justify-center z-10"
+                        style={{
+                          left: `${pct}%`,
+                          borderColor: '#795548',
+                          transform: 'translateX(-50%)',
+                          touchAction: 'none'
+                        }}
+                      >
+                        <div className="w-1.5 h-1.5 rounded-full bg-[#795548]" />
+                      </div>
+                    </div>
+                  )}
 
                   <div className="relative h-5 mx-2 text-[9px] text-[#8D6E63]/60 font-mono select-none">
                     {(() => {
@@ -227,7 +319,9 @@ export const WorkerAvailModal: React.FC<WorkerAvailModalProps> = ({
                       }
                       return ticks.map((tick) => {
                         const tickPct = maxEndIdx > minStartIdx ? ((tick.idx - minStartIdx) / (maxEndIdx - minStartIdx)) * 100 : 0;
-                        const isCurrent = tick.idx === dividerIdx;
+                        const isCurrent = ptAvailMode === 'flex'
+                          ? tick.idx === config.startIdx || tick.idx === config.endIdx
+                          : tick.idx === dividerIdx;
                         return (
                           <span
                             key={`${tick.label}-${tick.idx}`}
@@ -245,28 +339,30 @@ export const WorkerAvailModal: React.FC<WorkerAvailModalProps> = ({
                     })()}
                   </div>
 
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleCommit(dividerIdx, 'until')}
-                      className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer ${currentMode === 'until'
-                        ? 'bg-[#795548] text-white border-[#795548] shadow-sm'
-                        : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:bg-[#FAF7F2]'
-                        }`}
-                    >
-                      工作至此時間
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleCommit(dividerIdx, 'from')}
-                      className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer ${currentMode === 'from'
-                        ? 'bg-[#795548] text-white border-[#795548] shadow-sm'
-                        : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:bg-[#FAF7F2]'
-                        }`}
-                    >
-                      自此時間開始
-                    </button>
-                  </div>
+                  {ptAvailMode === 'static' && (
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleCommit(dividerIdx, 'until')}
+                        className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer ${currentMode === 'until'
+                          ? 'bg-[#795548] text-white border-[#795548] shadow-sm'
+                          : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:bg-[#FAF7F2]'
+                          }`}
+                      >
+                        工作至此時間
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleCommit(dividerIdx, 'from')}
+                        className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer ${currentMode === 'from'
+                          ? 'bg-[#795548] text-white border-[#795548] shadow-sm'
+                          : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:bg-[#FAF7F2]'
+                          }`}
+                      >
+                        自此時間開始
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {(() => {

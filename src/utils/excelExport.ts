@@ -12,6 +12,7 @@ interface GenerateExcelParams {
   employees: Employee[];
   markedEmptyCells: Record<string, boolean>;
   getDayNote: (dateStr: string) => string;
+  erpDays?: number[];
 }
 
 export const generateExcelWorkbook = ({
@@ -22,7 +23,8 @@ export const generateExcelWorkbook = ({
   allEmployees,
   employees,
   markedEmptyCells,
-  getDayNote
+  getDayNote,
+  erpDays = [1, 3, 5]
 }: GenerateExcelParams): { wb: XLSX.WorkBook; filename: string } | null => {
   if (!exportStartDate || !exportEndDate) {
     alert('請先選擇匯出的日期範圍。');
@@ -69,7 +71,7 @@ export const generateExcelWorkbook = ({
     const mmdd = parts.length >= 3 ? `${parts[1]}/${parts[2]}` : dateStr;
     const dayOfWeekIndex = dateObj.getDay();
     const mappedDayIndex = dayOfWeekIndex === 0 ? 7 : dayOfWeekIndex;
-    const isERP = mappedDayIndex === 1 || mappedDayIndex === 3 || mappedDayIndex === 5;
+    const isERP = erpDays.includes(mappedDayIndex);
     const customNote = getDayNote(dateStr);
 
     let headerVal = isERP ? `${mmdd}\n(${dayName} ERP)` : `${mmdd}\n(${dayName})`;
