@@ -3,72 +3,77 @@
     {
       "id": "hour-6",
       "hour": 6,
-      "targetCount": 1
+      "targetCount": 2
     },
     {
       "id": "hour-7",
       "hour": 7,
-      "targetCount": 3
+      "targetCount": 2
     },
     {
       "id": "hour-8",
       "hour": 8,
-      "targetCount": 1
+      "targetCount": 3
     },
     {
       "id": "hour-9",
       "hour": 9,
-      "targetCount": 1
+      "targetCount": 3
     },
     {
       "id": "hour-10",
       "hour": 10,
-      "targetCount": 1
+      "targetCount": 3
     },
     {
       "id": "hour-11",
       "hour": 11,
-      "targetCount": 1
+      "targetCount": 2
     },
     {
       "id": "hour-12",
       "hour": 12,
-      "targetCount": 1
+      "targetCount": 3
     },
     {
       "id": "hour-13",
       "hour": 13,
-      "targetCount": 1
+      "targetCount": 2
     },
     {
       "id": "hour-14",
       "hour": 14,
-      "targetCount": 1
+      "targetCount": 2
     },
     {
       "id": "hour-15",
       "hour": 15,
-      "targetCount": 1
+      "targetCount": 2
     },
     {
       "id": "hour-16",
       "hour": 16,
-      "targetCount": 1
+      "targetCount": 2
     },
     {
       "id": "hour-17",
       "hour": 17,
-      "targetCount": 1
+      "targetCount": 2
     },
     {
       "id": "hour-18",
       "hour": 18,
-      "targetCount": 1
+      "targetCount": 2
     },
     {
       "id": "hour-19",
       "hour": 19,
-      "targetCount": 1
+      "targetCount": 2
+    },
+    {
+      "id": "hour-5",
+      "hour": 5,
+      "targetCount": 2
     }
   ],
   "deadlineDay": 27,
@@ -99,7 +104,16 @@
     "Kal3"
   ],
   "monthlyRevenues": {
-    "7": 60000
+    "7": 21888,
+    "8": 54263,
+    "9": 60732,
+    "10": 47817,
+    "11": 42259,
+    "12": 64133,
+    "13": 43041,
+    "14": 43843,
+    "15": 34163,
+    "16": 13342
   },
   "revenueStaffRules": {
     "tier1Limit": 1500,
