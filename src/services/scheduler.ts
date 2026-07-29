@@ -103,6 +103,9 @@ let localMonthlyRevenuesListeners: ((revenues: Record<number, number>) => void)[
 let localRevenueStaffRulesListeners: ((rules: RevenueStaffRules) => void)[] = [];
 let localMarkedEmptyCellsListeners: ((markedCells: Record<string, boolean>) => void)[] = [];
 let localErpDaysListeners: ((days: number[]) => void)[] = [];
+let localPtAvailModeListeners: ((mode: PtAvailMode) => void)[] = [];
+
+export type PtAvailMode = 'static' | 'flex';
 
 export interface ShiftPreset {
   name: string;
@@ -141,6 +144,7 @@ interface DbSchema {
   revenueStaffRules?: RevenueStaffRules;
   markedEmptyCells?: Record<string, boolean>;
   erpDays?: number[];
+  ptAvailMode?: PtAvailMode;
 }
 
 const inMemoryDb: DbSchema = {
@@ -174,7 +178,8 @@ const inMemoryDb: DbSchema = {
     maxStaff: 8
   },
   markedEmptyCells: {},
-  erpDays: [1, 3, 5]
+  erpDays: [1, 3, 5],
+  ptAvailMode: 'static'
 };
 
 const loadedMonths = new Set<string>();
@@ -1232,6 +1237,38 @@ export const updateShiftPresets = async (presets: ShiftPreset[]) => {
       inMemoryDb.shiftMorningStart = firstPreset.startTime;
       inMemoryDb.shiftMorningEnd = firstPreset.endTime;
     }
+    await saveDbForDate();
+  }
+};
+
+export const subscribeToPtAvailMode = (callback: (mode: PtAvailMode) => void) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    return onSnapshot(docRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        callback(data.ptAvailMode !== undefined && (data.ptAvailMode === 'static' || data.ptAvailMode === 'flex') ? data.ptAvailMode : 'static');
+      } else {
+        callback('static');
+      }
+    });
+  } else {
+    localPtAvailModeListeners.push(callback);
+    callback(inMemoryDb.ptAvailMode || 'static');
+    return () => {
+      localPtAvailModeListeners = localPtAvailModeListeners.filter(l => l !== callback);
+    };
+  }
+};
+
+export const updatePtAvailMode = async (mode: PtAvailMode) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    return await setDoc(docRef, { ptAvailMode: mode }, { merge: true });
+  } else {
+    inMemoryDb.ptAvailMode = mode;
+    localStorage.setItem('scheduler_pt_avail_mode', mode);
+    localPtAvailModeListeners.forEach(listener => listener(mode));
     await saveDbForDate();
   }
 };

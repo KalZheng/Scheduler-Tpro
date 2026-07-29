@@ -9,8 +9,10 @@ import {
   updateDeadlineDay,
   updateShiftPresets,
   updateRevenueStaffRules,
-  updateErpDays
+  updateErpDays,
+  updatePtAvailMode
 } from '../../services/scheduler';
+import type { PtAvailMode } from '../../services/scheduler';
 
 interface ManagerSystemViewProps {
   operatingStartTime: string;
@@ -28,6 +30,8 @@ interface ManagerSystemViewProps {
   setRevenueStaffRules: (rules: RevenueStaffRules) => void;
   erpDays: number[];
   setErpDays: (days: number[]) => void;
+  ptAvailMode: PtAvailMode;
+  setPtAvailMode: (mode: PtAvailMode) => void;
 }
 
 export const ManagerSystemView: React.FC<ManagerSystemViewProps> = ({
@@ -45,7 +49,9 @@ export const ManagerSystemView: React.FC<ManagerSystemViewProps> = ({
   setTempRules,
   setRevenueStaffRules,
   erpDays,
-  setErpDays
+  setErpDays,
+  ptAvailMode,
+  setPtAvailMode
 }) => {
 
   const handleSaveSystemSettings = async () => {
@@ -57,6 +63,7 @@ export const ManagerSystemView: React.FC<ManagerSystemViewProps> = ({
       await updateShiftPresets(shiftPresets);
       await updateRevenueStaffRules(tempRules);
       await updateErpDays(erpDays);
+      await updatePtAvailMode(ptAvailMode);
       setRevenueStaffRules(tempRules);
       alert('已成功儲存系統管理設定！');
     } catch (error) {
@@ -299,6 +306,49 @@ export const ManagerSystemView: React.FC<ManagerSystemViewProps> = ({
                   </label>
                 );
               })}
+            </div>
+          </div>
+
+          {/* Section 4.5: PT Avail Mode Settings */}
+          <div className="border-t border-[#E5DCD5]/60 pt-4 space-y-3">
+            <h4 className="text-xs font-bold text-[#3E2723] flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#795548]"></span>
+              兼職夥伴時間選擇模式設定 (PT Range Slider)
+            </h4>
+            <p className="text-[11px] text-[#6D4C41]">
+              設定兼職同仁在線上登記可用時間時，時間區間滑桿預設的操作方式與彈性：
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+              <button
+                type="button"
+                onClick={() => setPtAvailMode('static')}
+                className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${ptAvailMode === 'static'
+                  ? 'bg-[#795548]/15 border-[#795548] text-[#3E2723] shadow-xs'
+                  : 'bg-[#FAF7F2]/60 border-[#DAC0A3]/50 text-[#6D4C41] hover:bg-[#FAF7F2]'
+                  }`}
+              >
+                <div className="text-xs font-bold mb-1 flex items-center gap-1.5 text-[#3E2723]">
+                  <span>📌</span> 單端固定模式 (Static Ending)
+                </div>
+                <div className="text-[11px] text-[#6D4C41] opacity-90 leading-relaxed">
+                  固定營業開始/結束時間端點，讓夥伴選擇「工作至此時間」或「自此時間開始」。
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={() => setPtAvailMode('flex')}
+                className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${ptAvailMode === 'flex'
+                  ? 'bg-[#795548]/15 border-[#795548] text-[#3E2723] shadow-xs'
+                  : 'bg-[#FAF7F2]/60 border-[#DAC0A3]/50 text-[#6D4C41] hover:bg-[#FAF7F2]'
+                  }`}
+              >
+                <div className="text-xs font-bold mb-1 flex items-center gap-1.5 text-[#3E2723]">
+                  <span>🔀</span> 雙端彈性模式 (Flex Time Range)
+                </div>
+                <div className="text-[11px] text-[#6D4C41] opacity-90 leading-relaxed">
+                  滑桿雙端皆可自由拖曳調整起訖時間，隱藏「工作至此時間」及「自此時間開始」選擇按鈕。
+                </div>
+              </button>
             </div>
           </div>
 

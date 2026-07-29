@@ -30,8 +30,10 @@ import {
   subscribeToRevenueStaffRules,
   subscribeToMarkedEmptyCells,
   updateMarkedEmptyCells,
-  subscribeToErpDays
+  subscribeToErpDays,
+  subscribeToPtAvailMode
 } from './services/scheduler';
+import type { PtAvailMode } from './services/scheduler';
 import type { WorkSchedule, WorkerAvailability, StaffingTarget, Employee, ShiftPreset, RevenueStaffRules } from './services/scheduler';
 import { isValidConfig } from './firebase';
 import workplaces from './config/workplaces.json';
@@ -145,6 +147,7 @@ function App() {
   const [shiftPresets, setShiftPresets] = useState<ShiftPreset[]>([]);
   const [employeeOrder, setEmployeeOrder] = useState<string[]>([]);
   const [erpDays, setErpDays] = useState<number[]>([1, 3, 5]);
+  const [ptAvailMode, setPtAvailMode] = useState<PtAvailMode>('static');
 
   const defaultShiftStart = useMemo(() => {
     if (shiftPresets && shiftPresets.length > 0) {
@@ -494,6 +497,7 @@ function App() {
     });
     const unsubMarkedEmptyCells = subscribeToMarkedEmptyCells((cells) => setMarkedEmptyCells(cells));
     const unsubErpDays = subscribeToErpDays((days) => setErpDays(days));
+    const unsubPtAvailMode = subscribeToPtAvailMode((mode) => setPtAvailMode(mode));
 
     return () => {
       unsubSchedules();
@@ -512,6 +516,7 @@ function App() {
       unsubRevenueStaffRules();
       unsubMarkedEmptyCells();
       unsubErpDays();
+      unsubPtAvailMode();
     };
   }, []);
 
@@ -1921,6 +1926,8 @@ function App() {
                   setRevenueStaffRules={setRevenueStaffRules}
                   erpDays={erpDays}
                   setErpDays={setErpDays}
+                  ptAvailMode={ptAvailMode}
+                  setPtAvailMode={setPtAvailMode}
                 />
               ) : (
                 <>
@@ -2096,6 +2103,7 @@ function App() {
         updateAvailConfig={updateAvailConfig}
         removeAvailConfig={removeAvailConfig}
         handleWorkerAvailModalSubmit={handleWorkerAvailModalSubmit}
+        ptAvailMode={ptAvailMode}
       />
 
       <FTAssignModal

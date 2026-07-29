@@ -75,8 +75,8 @@
   "startDay": 13,
   "operatingStartTime": "05:00",
   "operatingEndTime": "20:00",
-  "shiftMorningStart": "06:30",
-  "shiftMorningEnd": "15:30",
+  "shiftMorningStart": "08:00",
+  "shiftMorningEnd": "17:00",
   "shiftEveningStart": "08:30",
   "shiftEveningEnd": "17:30",
   "shiftPresets": [
