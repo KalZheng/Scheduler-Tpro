@@ -502,6 +502,7 @@ const loadFileDb = async () => {
     inMemoryDb.shiftEveningStart = localStorage.getItem('scheduler_shift_evening_start') || '08:30';
     inMemoryDb.shiftEveningEnd = getLocalShiftEveningEnd();
     inMemoryDb.shiftPresets = getLocalShiftPresets();
+    inMemoryDb.erpDays = getLocalErpDays();
     try {
       inMemoryDb.employeeOrder = JSON.parse(localStorage.getItem('scheduler_employee_order') || '[]');
     } catch {
@@ -1216,11 +1217,21 @@ export const subscribeToShiftPresets = (callback: (presets: ShiftPreset[]) => vo
 };
 
 export const updateShiftPresets = async (presets: ShiftPreset[]) => {
+  const firstPreset = presets[0];
   if (isValidConfig && db) {
     const docRef = doc(db, 'settings', 'global');
-    return await setDoc(docRef, { shiftPresets: presets }, { merge: true });
+    const payload: any = { shiftPresets: presets };
+    if (firstPreset) {
+      payload.shiftMorningStart = firstPreset.startTime;
+      payload.shiftMorningEnd = firstPreset.endTime;
+    }
+    return await setDoc(docRef, payload, { merge: true });
   } else {
     inMemoryDb.shiftPresets = presets;
+    if (firstPreset) {
+      inMemoryDb.shiftMorningStart = firstPreset.startTime;
+      inMemoryDb.shiftMorningEnd = firstPreset.endTime;
+    }
     await saveDbForDate();
   }
 };

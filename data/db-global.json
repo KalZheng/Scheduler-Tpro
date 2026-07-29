@@ -82,13 +82,8 @@
   "shiftPresets": [
     {
       "name": "早班",
-      "startTime": "06:30",
-      "endTime": "15:30"
-    },
-    {
-      "name": "晚班",
-      "startTime": "08:30",
-      "endTime": "17:30"
+      "startTime": "08:00",
+      "endTime": "17:00"
     }
   ],
   "employeeOrder": [

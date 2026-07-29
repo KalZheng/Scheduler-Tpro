@@ -146,6 +146,27 @@ function App() {
   const [employeeOrder, setEmployeeOrder] = useState<string[]>([]);
   const [erpDays, setErpDays] = useState<number[]>([1, 3, 5]);
 
+  const defaultShiftStart = useMemo(() => {
+    if (shiftPresets && shiftPresets.length > 0) {
+      return shiftPresets[0].startTime;
+    }
+    return shiftMorningStart || '06:30';
+  }, [shiftPresets, shiftMorningStart]);
+
+  const defaultShiftEnd = useMemo(() => {
+    if (shiftPresets && shiftPresets.length > 0) {
+      return shiftPresets[0].endTime;
+    }
+    return shiftMorningEnd || '15:30';
+  }, [shiftPresets, shiftMorningEnd]);
+
+  const defaultShiftName = useMemo(() => {
+    if (shiftPresets && shiftPresets.length > 0) {
+      return shiftPresets[0].name;
+    }
+    return '早班';
+  }, [shiftPresets]);
+
   const timeSlots = useMemo(() => {
     if (!operatingStartTime || !operatingEndTime) return [];
     const [startH, startM] = operatingStartTime.split(':').map(Number);
@@ -663,8 +684,8 @@ function App() {
             employeeName: workerName.trim(),
             date: dateStr,
             workplace: workplaces[0]?.name || '',
-            startTime: shiftMorningStart,
-            endTime: shiftMorningEnd,
+            startTime: defaultShiftStart,
+            endTime: defaultShiftEnd,
             notes: availNotes.trim()
           });
         }
@@ -712,8 +733,8 @@ function App() {
         };
       }
 
-      const defStart = Math.max(0, timeSlots.indexOf(shiftMorningStart));
-      const defEnd = Math.max(0, timeSlots.indexOf(shiftMorningEnd));
+      const defStart = Math.max(0, timeSlots.indexOf(defaultShiftStart));
+      const defEnd = Math.max(0, timeSlots.indexOf(defaultShiftEnd));
       return {
         date,
         startIdx: defStart,
@@ -1211,7 +1232,7 @@ function App() {
         return;
       }
 
-      if (safeConfirm(`確定要將 ${dateStr} 的休假改為配合排班（早班，${shiftMorningStart}-${shiftMorningEnd}）嗎？`)) {
+      if (safeConfirm(`確定要將 ${dateStr} 的休假改為配合排班（${defaultShiftName}，${defaultShiftStart}-${defaultShiftEnd}）嗎？`)) {
         try {
           if (avail) {
             await deleteAvailability(avail.id);
@@ -1220,8 +1241,8 @@ function App() {
             employeeName: workerName.trim(),
             date: dateStr,
             workplace: workplaces[0]?.name || '',
-            startTime: shiftMorningStart,
-            endTime: shiftMorningEnd,
+            startTime: defaultShiftStart,
+            endTime: defaultShiftEnd,
             notes: ''
           });
         } catch (error) {
@@ -1349,8 +1370,8 @@ function App() {
     const isFT = emp?.status === '正式夥伴';
 
     if (isFT) {
-      setStartTime(shiftMorningStart);
-      setEndTime(shiftMorningEnd);
+      setStartTime(defaultShiftStart);
+      setEndTime(defaultShiftEnd);
 
       const monthStr = formatDateString(currentMonthStart).substring(0, 7);
       const empMonthAvails = availabilities.filter(
