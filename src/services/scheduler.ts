@@ -102,6 +102,7 @@ let localEmployeeOrderListeners: ((order: string[]) => void)[] = [];
 let localMonthlyRevenuesListeners: ((revenues: Record<number, number>) => void)[] = [];
 let localRevenueStaffRulesListeners: ((rules: RevenueStaffRules) => void)[] = [];
 let localMarkedEmptyCellsListeners: ((markedCells: Record<string, boolean>) => void)[] = [];
+let localErpDaysListeners: ((days: number[]) => void)[] = [];
 
 export interface ShiftPreset {
   name: string;
@@ -139,6 +140,7 @@ interface DbSchema {
   monthlyRevenues?: Record<string, number>;
   revenueStaffRules?: RevenueStaffRules;
   markedEmptyCells?: Record<string, boolean>;
+  erpDays?: number[];
 }
 
 const inMemoryDb: DbSchema = {
@@ -171,7 +173,8 @@ const inMemoryDb: DbSchema = {
     incrementAmount: 1000,
     maxStaff: 8
   },
-  markedEmptyCells: {}
+  markedEmptyCells: {},
+  erpDays: [1, 3, 5]
 };
 
 const loadedMonths = new Set<string>();
@@ -271,6 +274,16 @@ const getLocalShiftPresets = (): ShiftPreset[] => {
   }
 };
 
+const getLocalErpDays = (): number[] => {
+  const data = localStorage.getItem('scheduler_erp_days');
+  if (!data) return [1, 3, 5];
+  try {
+    return JSON.parse(data);
+  } catch {
+    return [1, 3, 5];
+  }
+};
+
 // Sync and merge data of a specific month into memory
 export const syncActiveMonth = async (monthStr: string) => {
   if (isValidConfig && db) return; // Skip if Cloud DB is enabled
@@ -340,6 +353,9 @@ export const syncActiveMonth = async (monthStr: string) => {
       if (data.revenueStaffRules !== undefined) {
         inMemoryDb.revenueStaffRules = data.revenueStaffRules;
       }
+      if (data.erpDays !== undefined) {
+        inMemoryDb.erpDays = data.erpDays;
+      }
 
       // Update LocalStorage backup
       localStorage.setItem('weekly_work_schedules', JSON.stringify(inMemoryDb.schedules));
@@ -358,6 +374,7 @@ export const syncActiveMonth = async (monthStr: string) => {
       localStorage.setItem('scheduler_employee_order', JSON.stringify(inMemoryDb.employeeOrder || []));
       localStorage.setItem('monthly_revenue_data', JSON.stringify(inMemoryDb.monthlyRevenues || {}));
       localStorage.setItem('revenue_staff_rules', JSON.stringify(inMemoryDb.revenueStaffRules || {}));
+      localStorage.setItem('scheduler_erp_days', JSON.stringify(inMemoryDb.erpDays || [1, 3, 5]));
 
       // Trigger all active UI listeners
       localListeners.forEach(listener => listener([...inMemoryDb.schedules]));
@@ -374,6 +391,7 @@ export const syncActiveMonth = async (monthStr: string) => {
       localShiftEveningEndListeners.forEach(listener => listener(inMemoryDb.shiftEveningEnd || '17:30'));
       localShiftPresetsListeners.forEach(listener => listener(inMemoryDb.shiftPresets || []));
       localEmployeeOrderListeners.forEach(listener => listener(inMemoryDb.employeeOrder || []));
+      localErpDaysListeners.forEach(listener => listener(inMemoryDb.erpDays || [1, 3, 5]));
       localMonthlyRevenuesListeners.forEach(listener => {
         const revenues: Record<number, number> = {};
         if (inMemoryDb.monthlyRevenues) {
@@ -1355,6 +1373,36 @@ export const updateMarkedEmptyCells = async (markedCells: Record<string, boolean
     return await setDoc(docRef, { markedEmptyCells: markedCells }, { merge: true });
   } else {
     inMemoryDb.markedEmptyCells = markedCells;
+    await saveDbForDate();
+  }
+};
+
+export const subscribeToErpDays = (callback: (days: number[]) => void) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    return onSnapshot(docRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        callback(data.erpDays !== undefined ? data.erpDays : [1, 3, 5]);
+      } else {
+        callback([1, 3, 5]);
+      }
+    });
+  } else {
+    localErpDaysListeners.push(callback);
+    callback(inMemoryDb.erpDays || [1, 3, 5]);
+    return () => {
+      localErpDaysListeners = localErpDaysListeners.filter(l => l !== callback);
+    };
+  }
+};
+
+export const updateErpDays = async (days: number[]) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    return await setDoc(docRef, { erpDays: days }, { merge: true });
+  } else {
+    inMemoryDb.erpDays = days;
     await saveDbForDate();
   }
 };

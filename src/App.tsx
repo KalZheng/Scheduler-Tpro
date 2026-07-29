@@ -29,7 +29,8 @@ import {
   updateMonthlyRevenues,
   subscribeToRevenueStaffRules,
   subscribeToMarkedEmptyCells,
-  updateMarkedEmptyCells
+  updateMarkedEmptyCells,
+  subscribeToErpDays
 } from './services/scheduler';
 import type { WorkSchedule, WorkerAvailability, StaffingTarget, Employee, ShiftPreset, RevenueStaffRules } from './services/scheduler';
 import { isValidConfig } from './firebase';
@@ -143,6 +144,7 @@ function App() {
   const [shiftMorningEnd, setShiftMorningEnd] = useState<string>('15:30');
   const [shiftPresets, setShiftPresets] = useState<ShiftPreset[]>([]);
   const [employeeOrder, setEmployeeOrder] = useState<string[]>([]);
+  const [erpDays, setErpDays] = useState<number[]>([1, 3, 5]);
 
   const timeSlots = useMemo(() => {
     if (!operatingStartTime || !operatingEndTime) return [];
@@ -476,6 +478,7 @@ function App() {
       setTempRules(rules);
     });
     const unsubMarkedEmptyCells = subscribeToMarkedEmptyCells((cells) => setMarkedEmptyCells(cells));
+    const unsubErpDays = subscribeToErpDays((days) => setErpDays(days));
 
     return () => {
       unsubSchedules();
@@ -493,6 +496,7 @@ function App() {
       unsubMonthlyRevenues();
       unsubRevenueStaffRules();
       unsubMarkedEmptyCells();
+      unsubErpDays();
     };
   }, []);
 
@@ -1490,7 +1494,8 @@ function App() {
       allEmployees,
       employees,
       markedEmptyCells,
-      getDayNote
+      getDayNote,
+      erpDays
     });
   };
 
@@ -1584,7 +1589,8 @@ function App() {
       allEmployees,
       employees,
       markedEmptyCells,
-      getDayNote
+      getDayNote,
+      erpDays
     });
     if (!result) return;
 
@@ -1897,6 +1903,8 @@ function App() {
                   tempRules={tempRules}
                   setTempRules={setTempRules}
                   setRevenueStaffRules={setRevenueStaffRules}
+                  erpDays={erpDays}
+                  setErpDays={setErpDays}
                 />
               ) : (
                 <>
@@ -2023,6 +2031,7 @@ function App() {
                       setFormOriginalStartTime={setFormOriginalStartTime}
                       setFormOriginalEndTime={setFormOriginalEndTime}
                       setIsModalOpen={setIsModalOpen}
+                      erpDays={erpDays}
                     />
                   )}
 

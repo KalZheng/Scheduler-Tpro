@@ -1,6 +1,6 @@
 import React from 'react';
 import type { ShiftPreset, RevenueStaffRules } from '../../services/scheduler';
-import { ALL_TIME_CHOICES } from '../../utils/constants';
+import { ALL_TIME_CHOICES, DAYS_OF_WEEK } from '../../utils/constants';
 import { safeConfirm } from '../../utils/dateUtils';
 import {
   updateOperatingStartTime,
@@ -8,7 +8,8 @@ import {
   updateStartDay,
   updateDeadlineDay,
   updateShiftPresets,
-  updateRevenueStaffRules
+  updateRevenueStaffRules,
+  updateErpDays
 } from '../../services/scheduler';
 
 interface ManagerSystemViewProps {
@@ -25,6 +26,8 @@ interface ManagerSystemViewProps {
   tempRules: RevenueStaffRules;
   setTempRules: (rules: RevenueStaffRules) => void;
   setRevenueStaffRules: (rules: RevenueStaffRules) => void;
+  erpDays: number[];
+  setErpDays: (days: number[]) => void;
 }
 
 export const ManagerSystemView: React.FC<ManagerSystemViewProps> = ({
@@ -40,7 +43,9 @@ export const ManagerSystemView: React.FC<ManagerSystemViewProps> = ({
   setShiftPresets,
   tempRules,
   setTempRules,
-  setRevenueStaffRules
+  setRevenueStaffRules,
+  erpDays,
+  setErpDays
 }) => {
 
   const handleSaveSystemSettings = async () => {
@@ -51,6 +56,7 @@ export const ManagerSystemView: React.FC<ManagerSystemViewProps> = ({
       await updateDeadlineDay(deadlineDay);
       await updateShiftPresets(shiftPresets);
       await updateRevenueStaffRules(tempRules);
+      await updateErpDays(erpDays);
       setRevenueStaffRules(tempRules);
       alert('已成功儲存系統管理設定！');
     } catch (error) {
@@ -256,7 +262,47 @@ export const ManagerSystemView: React.FC<ManagerSystemViewProps> = ({
             </div>
           </div>
 
-          {/* Section 4: Revenue Staffing Rules */}
+          {/* Section 4: ERP Delivery Days */}
+          <div className="border-t border-[#E5DCD5]/60 pt-4 space-y-3">
+            <h4 className="text-xs font-bold text-[#3E2723] flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#795548]"></span>
+              ERP 進貨/標記日設定
+            </h4>
+            <p className="text-[11px] text-[#6D4C41]">
+              勾選需要在排班網格表格與 Excel 匯出中顯示 ERP 標籤的星期：
+            </p>
+            <div className="flex flex-wrap gap-2 pt-1">
+              {DAYS_OF_WEEK.map((day) => {
+                const isChecked = erpDays.includes(day.value);
+                return (
+                  <label
+                    key={day.value}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold cursor-pointer transition-all ${
+                      isChecked
+                        ? 'bg-indigo-600/10 border-indigo-600/30 text-indigo-900 shadow-xs'
+                        : 'bg-[#FAF7F2]/60 border-[#DAC0A3]/50 text-[#8D6E63] hover:bg-[#FAF7F2]'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setErpDays([...erpDays, day.value].sort((a, b) => a - b));
+                        } else {
+                          setErpDays(erpDays.filter(d => d !== day.value));
+                        }
+                      }}
+                      className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                    />
+                    <span>{day.name}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Section 5: Revenue Staffing Rules */}
           <div className="border-t border-[#E5DCD5]/60 pt-4 space-y-3">
             <h4 className="text-xs font-bold text-[#3E2723] flex items-center gap-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-[#795548]"></span>

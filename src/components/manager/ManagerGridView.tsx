@@ -38,6 +38,7 @@ interface ManagerGridViewProps {
   setFormOriginalStartTime: (time: string | null) => void;
   setFormOriginalEndTime: (time: string | null) => void;
   setIsModalOpen: (open: boolean) => void;
+  erpDays?: number[];
 }
 
 export const ManagerGridView: React.FC<ManagerGridViewProps> = ({
@@ -73,7 +74,8 @@ export const ManagerGridView: React.FC<ManagerGridViewProps> = ({
   setSelectedDates,
   setFormOriginalStartTime,
   setFormOriginalEndTime,
-  setIsModalOpen
+  setIsModalOpen,
+  erpDays = [1, 3, 5]
 }) => {
   return (
     <main className="glass-panel rounded-2xl overflow-hidden border border-[#DAC0A3]/50 shadow-sm animate-scale-in">
@@ -128,7 +130,7 @@ export const ManagerGridView: React.FC<ManagerGridViewProps> = ({
                 const isSelected = dateStr === selectedDateStr;
                 const dayOfWeekIndex = dateObj.getDay();
                 const mappedDayIndex = dayOfWeekIndex === 0 ? 7 : dayOfWeekIndex;
-                const isERP = mappedDayIndex === 1 || mappedDayIndex === 3 || mappedDayIndex === 5;
+                const isERP = erpDays.includes(mappedDayIndex);
 
                 return (
                   <th
