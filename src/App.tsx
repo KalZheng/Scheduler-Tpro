@@ -160,12 +160,6 @@ function App() {
     return shiftMorningEnd || '15:30';
   }, [shiftPresets, shiftMorningEnd]);
 
-  const defaultShiftName = useMemo(() => {
-    if (shiftPresets && shiftPresets.length > 0) {
-      return shiftPresets[0].name;
-    }
-    return '早班';
-  }, [shiftPresets]);
 
   const timeSlots = useMemo(() => {
     if (!operatingStartTime || !operatingEndTime) return [];
@@ -539,25 +533,26 @@ function App() {
     if (!isFullTime || !workerName.trim()) return [];
     const targetMonthStr = formatDateString(workerNextMonthStart).substring(0, 7);
     const workerAvails = availabilities.filter(
-      a => a.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase()
+      a => a.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase() &&
+        a.date.startsWith(targetMonthStr)
     );
-    const hasRecords = workerAvails.some(a => a.date.startsWith(targetMonthStr));
-    if (!hasRecords) return [];
+    if (workerAvails.length === 0) return [];
 
-    const workDates = workerAvails
-      .filter(a => a.date.startsWith(targetMonthStr) && !(a.startTime === '00:00' && a.endTime === '00:00'))
+    const explicitRestDates = workerAvails
+      .filter(a => a.startTime === '00:00' && a.endTime === '00:00')
       .map(a => a.date);
 
-    const daysInMonth = getDaysInMonth(workerNextMonthStart);
-    const computedRestDates = daysInMonth
-      .map(formatDateString)
-      .filter(dateStr => !workDates.includes(dateStr));
+    const legacyWorkAvails = workerAvails.filter(a => !(a.startTime === '00:00' && a.endTime === '00:00'));
+    if (legacyWorkAvails.length > 0) {
+      const workDates = legacyWorkAvails.map(a => a.date);
+      const daysInMonth = getDaysInMonth(workerNextMonthStart);
+      const computedRestDates = daysInMonth
+        .map(formatDateString)
+        .filter(dateStr => !workDates.includes(dateStr));
+      return Array.from(new Set([...explicitRestDates, ...computedRestDates])).sort();
+    }
 
-    const legacyRestDates = workerAvails
-      .filter(a => a.date.startsWith(targetMonthStr) && a.startTime === '00:00' && a.endTime === '00:00')
-      .map(a => a.date);
-
-    return Array.from(new Set([...computedRestDates, ...legacyRestDates])).sort();
+    return explicitRestDates.sort();
   }, [availabilities, workerName, isFullTime, workerNextMonthStart]);
 
   const lastSyncedDbRestDatesRef = useRef<string[]>([]);
@@ -1232,7 +1227,7 @@ function App() {
         return;
       }
 
-      if (safeConfirm(`確定要將 ${dateStr} 的休假改為配合排班（${defaultShiftName}，${defaultShiftStart}-${defaultShiftEnd}）嗎？`)) {
+      if (safeConfirm(`確定要將 ${dateStr} 的休假改為配合排班（${defaultShiftStart}-${defaultShiftEnd}）嗎？`)) {
         try {
           if (avail) {
             await deleteAvailability(avail.id);
