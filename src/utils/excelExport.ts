@@ -13,6 +13,9 @@ interface GenerateExcelParams {
   markedEmptyCells: Record<string, boolean>;
   getDayNote: (dateStr: string) => string;
   erpDays?: number[];
+  filenamePrefix?: string;
+  customPrefix?: string;
+  storeName?: string;
 }
 
 export const generateExcelWorkbook = ({
@@ -24,7 +27,10 @@ export const generateExcelWorkbook = ({
   employees,
   markedEmptyCells,
   getDayNote,
-  erpDays = [1, 3, 5]
+  erpDays = [1, 3, 5],
+  filenamePrefix,
+  customPrefix,
+  storeName
 }: GenerateExcelParams): { wb: XLSX.WorkBook; filename: string } | null => {
   if (!exportStartDate || !exportEndDate) {
     alert('請先選擇匯出的日期範圍。');
@@ -208,9 +214,11 @@ export const generateExcelWorkbook = ({
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '排班網格表');
 
+  const prefix = filenamePrefix ?? customPrefix ?? storeName ?? '';
+
   return {
     wb,
-    filename: `${exportStartDate}_至_${exportEndDate}_精品咖啡館排班網格表.xlsx`
+    filename: `${exportStartDate}_至_${exportEndDate}_${prefix}精品咖啡館排班網格表.xlsx`
   };
 };
 

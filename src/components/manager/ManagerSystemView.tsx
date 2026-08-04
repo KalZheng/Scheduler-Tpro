@@ -10,7 +10,8 @@ import {
   updateShiftPresets,
   updateRevenueStaffRules,
   updateErpDays,
-  updatePtAvailMode
+  updatePtAvailMode,
+  updateFilenamePrefix
 } from '../../services/scheduler';
 import type { PtAvailMode } from '../../services/scheduler';
 
@@ -32,6 +33,8 @@ interface ManagerSystemViewProps {
   setErpDays: (days: number[]) => void;
   ptAvailMode: PtAvailMode;
   setPtAvailMode: (mode: PtAvailMode) => void;
+  filenamePrefix: string;
+  setFilenamePrefix: (prefix: string) => void;
 }
 
 export const ManagerSystemView: React.FC<ManagerSystemViewProps> = ({
@@ -51,7 +54,9 @@ export const ManagerSystemView: React.FC<ManagerSystemViewProps> = ({
   erpDays,
   setErpDays,
   ptAvailMode,
-  setPtAvailMode
+  setPtAvailMode,
+  filenamePrefix,
+  setFilenamePrefix
 }) => {
 
   const handleSaveSystemSettings = async () => {
@@ -64,6 +69,7 @@ export const ManagerSystemView: React.FC<ManagerSystemViewProps> = ({
       await updateRevenueStaffRules(tempRules);
       await updateErpDays(erpDays);
       await updatePtAvailMode(ptAvailMode);
+      await updateFilenamePrefix(filenamePrefix);
       setRevenueStaffRules(tempRules);
       alert('已成功儲存系統管理設定！');
     } catch (error) {
@@ -306,6 +312,32 @@ export const ManagerSystemView: React.FC<ManagerSystemViewProps> = ({
                   </label>
                 );
               })}
+            </div>
+          </div>
+
+          {/* Section 4.1: Excel Export Filename Prefix Settings */}
+          <div className="border-t border-[#E5DCD5]/60 pt-4 space-y-3">
+            <h4 className="text-xs font-bold text-[#3E2723] flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#795548]"></span>
+              Excel 匯出檔名前綴設定
+            </h4>
+            <p className="text-[11px] text-[#6D4C41]">
+              設定匯出 Excel 排班網格表時的自訂前綴（例如店名「濟南店」），產出的檔名格式為：<br/>
+              <code className="text-[10px] bg-amber-50 text-amber-900 px-1.5 py-0.5 rounded border border-amber-200 font-mono font-bold mt-1 inline-block">YYYY-MM-DD_至_YYYY-MM-DD_&#123;前綴&#125;精品咖啡館排班網格表.xlsx</code>
+            </p>
+            <div>
+              <label className="block text-[11px] font-semibold text-[#6D4C41] mb-1.5">檔名前綴 (可留空)</label>
+              <input
+                type="text"
+                value={filenamePrefix}
+                onChange={(e) => setFilenamePrefix(e.target.value)}
+                placeholder="例如：濟南店 或 門市名稱"
+                className="w-full glass-input px-3 py-2 rounded-xl text-xs"
+              />
+            </div>
+            <div className="bg-[#FAF7F2]/80 p-2.5 rounded-xl border border-[#EADBC8]/50 text-[11px] text-[#6D4C41]">
+              <span className="font-bold text-[#3E2723]">📄 檔名預覽：</span>
+              <span className="font-mono font-bold text-[#795548] ml-1">2026-08-01_至_2026-08-31_{filenamePrefix}精品咖啡館排班網格表.xlsx</span>
             </div>
           </div>
 

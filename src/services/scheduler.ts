@@ -104,6 +104,7 @@ let localRevenueStaffRulesListeners: ((rules: RevenueStaffRules) => void)[] = []
 let localMarkedEmptyCellsListeners: ((markedCells: Record<string, boolean>) => void)[] = [];
 let localErpDaysListeners: ((days: number[]) => void)[] = [];
 let localPtAvailModeListeners: ((mode: PtAvailMode) => void)[] = [];
+let localFilenamePrefixListeners: ((prefix: string) => void)[] = [];
 
 export type PtAvailMode = 'static' | 'flex';
 
@@ -145,6 +146,7 @@ interface DbSchema {
   markedEmptyCells?: Record<string, boolean>;
   erpDays?: number[];
   ptAvailMode?: PtAvailMode;
+  filenamePrefix?: string;
 }
 
 const inMemoryDb: DbSchema = {
@@ -179,7 +181,8 @@ const inMemoryDb: DbSchema = {
   },
   markedEmptyCells: {},
   erpDays: [1, 3, 5],
-  ptAvailMode: 'static'
+  ptAvailMode: 'static',
+  filenamePrefix: ''
 };
 
 const loadedMonths = new Set<string>();
@@ -361,6 +364,9 @@ export const syncActiveMonth = async (monthStr: string) => {
       if (data.erpDays !== undefined) {
         inMemoryDb.erpDays = data.erpDays;
       }
+      if (data.filenamePrefix !== undefined) {
+        inMemoryDb.filenamePrefix = data.filenamePrefix;
+      }
 
       // Update LocalStorage backup
       localStorage.setItem('weekly_work_schedules', JSON.stringify(inMemoryDb.schedules));
@@ -380,6 +386,7 @@ export const syncActiveMonth = async (monthStr: string) => {
       localStorage.setItem('monthly_revenue_data', JSON.stringify(inMemoryDb.monthlyRevenues || {}));
       localStorage.setItem('revenue_staff_rules', JSON.stringify(inMemoryDb.revenueStaffRules || {}));
       localStorage.setItem('scheduler_erp_days', JSON.stringify(inMemoryDb.erpDays || [1, 3, 5]));
+      localStorage.setItem('scheduler_filename_prefix', inMemoryDb.filenamePrefix || '');
 
       // Trigger all active UI listeners
       localListeners.forEach(listener => listener([...inMemoryDb.schedules]));
@@ -397,6 +404,7 @@ export const syncActiveMonth = async (monthStr: string) => {
       localShiftPresetsListeners.forEach(listener => listener(inMemoryDb.shiftPresets || []));
       localEmployeeOrderListeners.forEach(listener => listener(inMemoryDb.employeeOrder || []));
       localErpDaysListeners.forEach(listener => listener(inMemoryDb.erpDays || [1, 3, 5]));
+      localFilenamePrefixListeners.forEach(listener => listener(inMemoryDb.filenamePrefix || ''));
       localMonthlyRevenuesListeners.forEach(listener => {
         const revenues: Record<number, number> = {};
         if (inMemoryDb.monthlyRevenues) {
@@ -471,6 +479,9 @@ const loadFileDb = async () => {
       if (data.revenueStaffRules !== undefined) {
         inMemoryDb.revenueStaffRules = data.revenueStaffRules;
       }
+      if (data.filenamePrefix !== undefined) {
+        inMemoryDb.filenamePrefix = data.filenamePrefix;
+      }
       
       // Update local storage backup
       localStorage.setItem('weekly_work_schedules', JSON.stringify(inMemoryDb.schedules));
@@ -489,6 +500,7 @@ const loadFileDb = async () => {
       localStorage.setItem('scheduler_employee_order', JSON.stringify(inMemoryDb.employeeOrder || []));
       localStorage.setItem('monthly_revenue_data', JSON.stringify(inMemoryDb.monthlyRevenues || {}));
       localStorage.setItem('revenue_staff_rules', JSON.stringify(inMemoryDb.revenueStaffRules || {}));
+      localStorage.setItem('scheduler_filename_prefix', inMemoryDb.filenamePrefix || '');
     } else {
       throw new Error("Local DB API response not OK");
     }
@@ -508,6 +520,7 @@ const loadFileDb = async () => {
     inMemoryDb.shiftEveningEnd = getLocalShiftEveningEnd();
     inMemoryDb.shiftPresets = getLocalShiftPresets();
     inMemoryDb.erpDays = getLocalErpDays();
+    inMemoryDb.filenamePrefix = localStorage.getItem('scheduler_filename_prefix') || '';
     try {
       inMemoryDb.employeeOrder = JSON.parse(localStorage.getItem('scheduler_employee_order') || '[]');
     } catch {
@@ -539,6 +552,7 @@ const loadFileDb = async () => {
     localShiftEveningEndListeners.forEach(listener => listener(inMemoryDb.shiftEveningEnd || '17:30'));
     localShiftPresetsListeners.forEach(listener => listener(inMemoryDb.shiftPresets || []));
     localEmployeeOrderListeners.forEach(listener => listener(inMemoryDb.employeeOrder || []));
+    localFilenamePrefixListeners.forEach(listener => listener(inMemoryDb.filenamePrefix || ''));
     localMonthlyRevenuesListeners.forEach(listener => {
       const revenues: Record<number, number> = {};
       if (inMemoryDb.monthlyRevenues) {
@@ -588,6 +602,7 @@ const saveDbForDate = async (dateStr?: string) => {
   localStorage.setItem('monthly_revenue_data', JSON.stringify(inMemoryDb.monthlyRevenues || {}));
   localStorage.setItem('revenue_staff_rules', JSON.stringify(inMemoryDb.revenueStaffRules || {}));
   localStorage.setItem('marked_empty_cells', JSON.stringify(inMemoryDb.markedEmptyCells || {}));
+  localStorage.setItem('scheduler_filename_prefix', inMemoryDb.filenamePrefix || '');
 
   // Trigger active listeners immediately for immediate UI response
   localListeners.forEach(listener => listener([...inMemoryDb.schedules]));
@@ -604,6 +619,7 @@ const saveDbForDate = async (dateStr?: string) => {
   localShiftEveningEndListeners.forEach(listener => listener(inMemoryDb.shiftEveningEnd || '17:30'));
   localShiftPresetsListeners.forEach(listener => listener(inMemoryDb.shiftPresets || []));
   localEmployeeOrderListeners.forEach(listener => listener(inMemoryDb.employeeOrder || []));
+  localFilenamePrefixListeners.forEach(listener => listener(inMemoryDb.filenamePrefix || ''));
   localMonthlyRevenuesListeners.forEach(listener => {
     const revenues: Record<number, number> = {};
     if (inMemoryDb.monthlyRevenues) {
@@ -648,6 +664,7 @@ const saveDbForDate = async (dateStr?: string) => {
       shiftPresets: inMemoryDb.shiftPresets || [],
       employeeOrder: inMemoryDb.employeeOrder || [],
       monthlyRevenues: inMemoryDb.monthlyRevenues || {},
+      filenamePrefix: inMemoryDb.filenamePrefix || '',
       revenueStaffRules: inMemoryDb.revenueStaffRules || {
         tier1Limit: 1500,
         tier2Limit: 2500,
@@ -1451,6 +1468,36 @@ export const updateErpDays = async (days: number[]) => {
     return await setDoc(docRef, { erpDays: days }, { merge: true });
   } else {
     inMemoryDb.erpDays = days;
+    await saveDbForDate();
+  }
+};
+
+export const subscribeToFilenamePrefix = (callback: (prefix: string) => void) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    return onSnapshot(docRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        callback(data.filenamePrefix !== undefined ? data.filenamePrefix : '');
+      } else {
+        callback('');
+      }
+    });
+  } else {
+    localFilenamePrefixListeners.push(callback);
+    callback(inMemoryDb.filenamePrefix || '');
+    return () => {
+      localFilenamePrefixListeners = localFilenamePrefixListeners.filter(l => l !== callback);
+    };
+  }
+};
+
+export const updateFilenamePrefix = async (prefix: string) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    return await setDoc(docRef, { filenamePrefix: prefix }, { merge: true });
+  } else {
+    inMemoryDb.filenamePrefix = prefix;
     await saveDbForDate();
   }
 };
