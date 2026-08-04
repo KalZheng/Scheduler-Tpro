@@ -31,7 +31,8 @@ import {
   subscribeToMarkedEmptyCells,
   updateMarkedEmptyCells,
   subscribeToErpDays,
-  subscribeToPtAvailMode
+  subscribeToPtAvailMode,
+  subscribeToFilenamePrefix
 } from './services/scheduler';
 import type { PtAvailMode } from './services/scheduler';
 import type { WorkSchedule, WorkerAvailability, StaffingTarget, Employee, ShiftPreset, RevenueStaffRules } from './services/scheduler';
@@ -148,6 +149,7 @@ function App() {
   const [employeeOrder, setEmployeeOrder] = useState<string[]>([]);
   const [erpDays, setErpDays] = useState<number[]>([1, 3, 5]);
   const [ptAvailMode, setPtAvailMode] = useState<PtAvailMode>('static');
+  const [filenamePrefix, setFilenamePrefix] = useState<string>('');
 
   const defaultShiftStart = useMemo(() => {
     if (shiftPresets && shiftPresets.length > 0) {
@@ -498,6 +500,7 @@ function App() {
     const unsubMarkedEmptyCells = subscribeToMarkedEmptyCells((cells) => setMarkedEmptyCells(cells));
     const unsubErpDays = subscribeToErpDays((days) => setErpDays(days));
     const unsubPtAvailMode = subscribeToPtAvailMode((mode) => setPtAvailMode(mode));
+    const unsubFilenamePrefix = subscribeToFilenamePrefix((prefix) => setFilenamePrefix(prefix));
 
     return () => {
       unsubSchedules();
@@ -517,6 +520,7 @@ function App() {
       unsubMarkedEmptyCells();
       unsubErpDays();
       unsubPtAvailMode();
+      unsubFilenamePrefix();
     };
   }, []);
 
@@ -1516,7 +1520,8 @@ function App() {
       employees,
       markedEmptyCells,
       getDayNote,
-      erpDays
+      erpDays,
+      filenamePrefix
     });
   };
 
@@ -1611,7 +1616,8 @@ function App() {
       employees,
       markedEmptyCells,
       getDayNote,
-      erpDays
+      erpDays,
+      filenamePrefix
     });
     if (!result) return;
 
@@ -1928,6 +1934,8 @@ function App() {
                   setErpDays={setErpDays}
                   ptAvailMode={ptAvailMode}
                   setPtAvailMode={setPtAvailMode}
+                  filenamePrefix={filenamePrefix}
+                  setFilenamePrefix={setFilenamePrefix}
                 />
               ) : (
                 <>

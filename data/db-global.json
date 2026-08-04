@@ -96,6 +96,7 @@
   "monthlyRevenues": {
     "7": 60000
   },
+  "filenamePrefix": "test",
   "revenueStaffRules": {
     "tier1Limit": 1500,
     "tier2Limit": 2500,
