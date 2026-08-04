@@ -145,6 +145,7 @@ function localDbPlugin() {
               ];
               let employeeOrder = [];
               let monthlyRevenues = {};
+              let filenamePrefix = '';
               let revenueStaffRules = {
                 tier1Limit: 1500,
                 tier2Limit: 2500,
@@ -195,6 +196,9 @@ function localDbPlugin() {
                 if (globalData.revenueStaffRules !== undefined) {
                   revenueStaffRules = globalData.revenueStaffRules;
                 }
+                if (globalData.filenamePrefix !== undefined) {
+                  filenamePrefix = globalData.filenamePrefix;
+                }
               } else {
                 // Initialize default staffing targets if global doesn't exist
                 globalTargets = Array.from({ length: 14 }, (_, i) => ({
@@ -238,7 +242,8 @@ function localDbPlugin() {
                 shiftPresets: shiftPresets,
                 employeeOrder: employeeOrder,
                 monthlyRevenues: monthlyRevenues,
-                revenueStaffRules: revenueStaffRules
+                revenueStaffRules: revenueStaffRules,
+                filenamePrefix: filenamePrefix
               }));
             } catch (error) {
               res.statusCode = 500;
@@ -298,6 +303,7 @@ function localDbPlugin() {
                   shiftPresets: parsed.shiftPresets !== undefined ? parsed.shiftPresets : [],
                   employeeOrder: parsed.employeeOrder !== undefined ? parsed.employeeOrder : [],
                   monthlyRevenues: parsed.monthlyRevenues !== undefined ? parsed.monthlyRevenues : {},
+                  filenamePrefix: parsed.filenamePrefix !== undefined ? parsed.filenamePrefix : '',
                   revenueStaffRules: parsed.revenueStaffRules !== undefined ? parsed.revenueStaffRules : {
                     tier1Limit: 1500,
                     tier2Limit: 2500,
