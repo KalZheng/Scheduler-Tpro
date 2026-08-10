@@ -70,11 +70,25 @@ export const generateAutoSchedule = (
   const virtualSchedules: WorkSchedule[] = [...safeSchedules];
 
   const getStaffingTargetForHour = (hour: number, dateStr: string): number => {
+    let baseTarget = 2;
     const dateMatch = safeStaffingTargets.find(t => t.hour === hour && t.date === dateStr);
-    if (dateMatch) return dateMatch.targetCount;
-    const globalMatch = safeStaffingTargets.find(t => t.hour === hour && !t.date);
-    if (globalMatch) return globalMatch.targetCount;
-    return 2;
+    if (dateMatch) {
+      baseTarget = dateMatch.targetCount;
+    } else {
+      const globalMatch = safeStaffingTargets.find(t => t.hour === hour && !t.date);
+      if (globalMatch) baseTarget = globalMatch.targetCount;
+    }
+
+    // Weekend (Saturday & Sunday) peak hours (10:00 - 15:00, hours 10-14) get +1 extra worker target
+    if (dateStr) {
+      const d = new Date(dateStr + 'T00:00:00');
+      const dayOfWeek = d.getDay();
+      if ((dayOfWeek === 0 || dayOfWeek === 6) && hour >= 10 && hour < 15) {
+        baseTarget += 1;
+      }
+    }
+
+    return baseTarget;
   };
 
   // Sort dates chronologically
@@ -138,8 +152,12 @@ export const generateAutoSchedule = (
 
       const daySchedules = virtualSchedules.filter(s => s && s.date === dateStr);
 
-      const evaluateShiftDeficit = (candStart: string, candEnd: string): number => {
-        let deficitCount = 0;
+      const evaluateShiftDeficit = (candStart: string, candEnd: string): { usefulHours: number; openingSurplus: number; closingSurplus: number; midSurplus: number } => {
+        let usefulHours = 0;
+        let openingSurplus = 0; // 06:00 - 08:00
+        let closingSurplus = 0; // 17:00 - 19:00
+        let midSurplus = 0;     // 08:00 - 17:00
+
         for (const hour of safeHoursRange) {
           if (isShiftActiveAtHour(candStart, candEnd, hour)) {
             const target = getStaffingTargetForHour(hour, dateStr);
@@ -147,47 +165,69 @@ export const generateAutoSchedule = (
               s => s && s.startTime && s.endTime && isShiftActiveAtHour(s.startTime, s.endTime, hour)
             ).length;
             if (currentCount < target) {
-              deficitCount++;
+              usefulHours++;
+            } else {
+              if (hour < 8) {
+                openingSurplus++;
+              } else if (hour >= 17) {
+                closingSurplus++;
+              } else {
+                midSurplus++;
+              }
             }
           }
         }
-        return deficitCount;
+        return { usefulHours, openingSurplus, closingSurplus, midSurplus };
       };
 
       let bestStartTime = rawStart;
       let bestEndTime = rawEnd;
-      let maxDeficitCovered = -1;
+      let maxScore = -9999;
+      let bestUsefulHours = 0;
 
-      // 3. Find optimal shift window (considering shift presets and sliding windows)
+      // 3. Find optimal shift window (considering shift presets for FT, and min 4h / max 9h for PT)
       if (isFT && safeShiftPresets.length > 0) {
-        // Evaluate fitting shift presets
+        // Evaluate fitting shift presets for full-time employees
         const fittingPresets = safeShiftPresets.filter(
           p => p && p.startTime && p.endTime && p.startTime >= rawStart && p.endTime <= rawEnd
         );
         for (const preset of fittingPresets) {
-          const score = evaluateShiftDeficit(preset.startTime, preset.endTime);
-          if (score > maxDeficitCovered) {
-            maxDeficitCovered = score;
-            bestStartTime = preset.startTime;
-            bestEndTime = preset.endTime;
+          const { usefulHours, openingSurplus, closingSurplus, midSurplus } = evaluateShiftDeficit(preset.startTime, preset.endTime);
+          if (usefulHours > 0) {
+            // Score: +15 per useful hour, -50 heavy penalty for opening/closing surplus, -1 light penalty for midday overlap
+            const score = usefulHours * 15 - openingSurplus * 50 - closingSurplus * 50 - midSurplus * 1;
+            if (score > maxScore) {
+              maxScore = score;
+              bestUsefulHours = usefulHours;
+              bestStartTime = preset.startTime;
+              bestEndTime = preset.endTime;
+            }
           }
         }
       }
 
-      // If no preset was selected or for part-time workers:
-      if (maxDeficitCovered < 0) {
-        const totalSpanHours = (availEndMin - availStartMin) / 60;
+      // For Part-Time workers or if no FT preset scored positive:
+      if (maxScore < 0) {
+        const availSpanMinutes = availEndMin - availStartMin;
 
-        if (totalSpanHours <= maxHoursPerShift) {
-          bestStartTime = rawStart;
-          bestEndTime = rawEnd;
-          maxDeficitCovered = evaluateShiftDeficit(bestStartTime, bestEndTime);
-        } else {
-          // Slide a window of maxHoursPerShift in 30-min steps to find window covering MAX deficits
-          const windowMinutes = maxHoursPerShift * 60;
-          for (let curStart = availStartMin; curStart <= availEndMin - windowMinutes; curStart += 30) {
-            const curEnd = curStart + windowMinutes;
-            
+        // Bounded shift limits: Part-time workers minimum 4 hours (240 min), maximum 9 hours (540 min)
+        const minShiftMinutes = isFT ? 6 * 60 : 4 * 60; // 4 hours min for part-time
+        const maxShiftMinutes = Math.min(9 * 60, maxHoursPerShift * 60); // 9 hours max for part-time
+
+        if (availSpanMinutes < minShiftMinutes) {
+          // If available window is less than minimum 4 hours, cannot assign shift
+          unassignedAvailabilitiesCount++;
+          continue;
+        }
+
+        const maxDur = Math.min(maxShiftMinutes, availSpanMinutes);
+        const minDur = Math.min(minShiftMinutes, maxDur);
+
+        // Slide window with varying durations from minDur (4h) to maxDur (9h) in 30-min steps
+        for (let dur = minDur; dur <= maxDur; dur += 30) {
+          for (let curStart = availStartMin; curStart <= availEndMin - dur; curStart += 30) {
+            const curEnd = curStart + dur;
+
             const startH = Math.floor(curStart / 60) % 24;
             const startM = curStart % 60;
             const endH = Math.floor(curEnd / 60) % 24;
@@ -196,18 +236,26 @@ export const generateAutoSchedule = (
             const candStartStr = `${startH.toString().padStart(2, '0')}:${startM.toString().padStart(2, '0')}`;
             const candEndStr = `${endH.toString().padStart(2, '0')}:${endM.toString().padStart(2, '0')}`;
 
-            const score = evaluateShiftDeficit(candStartStr, candEndStr);
-            if (score > maxDeficitCovered) {
-              maxDeficitCovered = score;
-              bestStartTime = candStartStr;
-              bestEndTime = candEndStr;
+            const { usefulHours, openingSurplus, closingSurplus, midSurplus } = evaluateShiftDeficit(candStartStr, candEndStr);
+
+            if (usefulHours > 0) {
+              const edgePenalty = onlyFillDeficits ? 75 : 50;
+              // Score: +15 per useful hour, heavy penalty (-50/-75) for opening/closing over-staffing, light penalty (-1) for midday overlap
+              const score = usefulHours * 15 - openingSurplus * edgePenalty - closingSurplus * edgePenalty - midSurplus * 1;
+
+              if (score > maxScore) {
+                maxScore = score;
+                bestUsefulHours = usefulHours;
+                bestStartTime = candStartStr;
+                bestEndTime = candEndStr;
+              }
             }
           }
         }
       }
 
-      // If onlyFillDeficits is set and 0 deficit hours covered, skip this assignment to avoid over-assigning
-      if (onlyFillDeficits && maxDeficitCovered <= 0) {
+      // STRICT CAP: Skip assignment if 0 useful hours covered or maxScore is negative
+      if (bestUsefulHours <= 0 || maxScore < 0) {
         unassignedAvailabilitiesCount++;
         continue;
       }
@@ -224,11 +272,11 @@ export const generateAutoSchedule = (
         workerNotes: avail.notes ? avail.notes.trim() : '',
         managerNotes: '智能自動帶入',
         color: derivedColor,
-        coveredDeficitHoursCount: Math.max(0, maxDeficitCovered)
+        coveredDeficitHoursCount: Math.max(0, bestUsefulHours)
       };
 
       proposedSchedules.push(proposed);
-      coveredDeficitHoursTotal += Math.max(0, maxDeficitCovered);
+      coveredDeficitHoursTotal += Math.max(0, bestUsefulHours);
 
       // Add to virtualSchedules and empAssignedDates for subsequent iteration checks
       if (!empAssignedDates[empKey]) {

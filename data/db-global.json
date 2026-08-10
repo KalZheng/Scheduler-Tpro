@@ -1,29 +1,9 @@
 {
   "staffingTargets": [
     {
-      "id": "hour-6",
-      "hour": 6,
-      "targetCount": 2
-    },
-    {
-      "id": "hour-7",
-      "hour": 7,
-      "targetCount": 2
-    },
-    {
-      "id": "hour-8",
-      "hour": 8,
-      "targetCount": 3
-    },
-    {
-      "id": "hour-9",
-      "hour": 9,
-      "targetCount": 3
-    },
-    {
       "id": "hour-10",
-      "hour": 10,
-      "targetCount": 3
+      "targetCount": 3,
+      "hour": 10
     },
     {
       "id": "hour-11",
@@ -37,8 +17,8 @@
     },
     {
       "id": "hour-13",
-      "hour": 13,
-      "targetCount": 2
+      "targetCount": 2,
+      "hour": 13
     },
     {
       "id": "hour-14",
@@ -52,13 +32,13 @@
     },
     {
       "id": "hour-16",
-      "hour": 16,
-      "targetCount": 2
+      "targetCount": 2,
+      "hour": 16
     },
     {
       "id": "hour-17",
-      "hour": 17,
-      "targetCount": 2
+      "targetCount": 2,
+      "hour": 17
     },
     {
       "id": "hour-18",
@@ -67,63 +47,72 @@
     },
     {
       "id": "hour-19",
-      "hour": 19,
+      "targetCount": 2,
+      "hour": 19
+    },
+    {
+      "id": "hour-6",
+      "targetCount": 2,
+      "hour": 6
+    },
+    {
+      "id": "hour-7",
+      "hour": 7,
       "targetCount": 2
     },
     {
-      "id": "hour-5",
-      "hour": 5,
-      "targetCount": 2
+      "id": "hour-8",
+      "hour": 8,
+      "targetCount": 3
+    },
+    {
+      "id": "hour-9",
+      "targetCount": 3,
+      "hour": 9
     }
   ],
-  "deadlineDay": 27,
-  "startDay": 13,
-  "operatingStartTime": "05:00",
-  "operatingEndTime": "20:00",
+  "deadlineDay": 20,
+  "startDay": 15,
+  "operatingStartTime": "06:30",
+  "operatingEndTime": "17:30",
   "shiftMorningStart": "06:30",
   "shiftMorningEnd": "15:30",
   "shiftEveningStart": "08:30",
   "shiftEveningEnd": "17:30",
   "shiftPresets": [
     {
-      "name": "早班",
+      "endTime": "15:30",
       "startTime": "06:30",
-      "endTime": "15:30"
+      "name": "早班"
     },
     {
-      "name": "晚班",
       "startTime": "08:30",
-      "endTime": "17:30"
+      "endTime": "17:30",
+      "name": "晚班"
     }
   ],
   "employeeOrder": [
-    "Kal",
-    "Kal2",
-    "Zheng",
-    "Zheng Full",
-    "Kal3"
+    "林汭怡",
+    "王昌薇 Wei(W)",
+    "洪佩琪",
+    "王新嵐 Lena",
+    "張嘉纖 Alisa(I)",
+    "張以恩",
+    "陳宣含 Xuan(X)",
+    "陳育璇",
+    "羅芷蕾 Lai",
+    "Tony"
   ],
-  "monthlyRevenues": {
-    "7": 21888,
-    "8": 54263,
-    "9": 60732,
-    "10": 47817,
-    "11": 42259,
-    "12": 64133,
-    "13": 43041,
-    "14": 43843,
-    "15": 34163,
-    "16": 13342
-  },
+  "monthlyRevenues": {},
   "revenueStaffRules": {
-    "tier1Limit": 1500,
-    "tier2Limit": 2500,
-    "tier3Limit": 3500,
-    "tier1Staff": 2,
     "tier2Staff": 3,
-    "tier3Staff": 4,
+    "maxStaff": 8,
+    "tier1Limit": 1500,
     "tier4Staff": 5,
+    "tier3Staff": 4,
     "incrementAmount": 1000,
-    "maxStaff": 8
+    "tier3Limit": 3500,
+    "tier2Limit": 2500,
+    "tier1Staff": 2
   }
 }

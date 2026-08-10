@@ -25,6 +25,7 @@ interface ManagerSystemViewProps {
   tempRules: RevenueStaffRules;
   setTempRules: (rules: RevenueStaffRules) => void;
   setRevenueStaffRules: (rules: RevenueStaffRules) => void;
+  onOpenClearModal?: () => void;
 }
 
 export const ManagerSystemView: React.FC<ManagerSystemViewProps> = ({
@@ -40,7 +41,8 @@ export const ManagerSystemView: React.FC<ManagerSystemViewProps> = ({
   setShiftPresets,
   tempRules,
   setTempRules,
-  setRevenueStaffRules
+  setRevenueStaffRules,
+  onOpenClearModal
 }) => {
 
   const handleSaveSystemSettings = async () => {
@@ -367,6 +369,27 @@ export const ManagerSystemView: React.FC<ManagerSystemViewProps> = ({
               </div>
             </div>
           </div>
+
+          {/* Section 5: Batch Reset & Clear Confirmed Schedules */}
+          {onOpenClearModal && (
+            <div className="border-t border-[#E5DCD5]/60 pt-4 space-y-3">
+              <h4 className="text-xs font-bold text-[#3E2723] flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-rose-700"></span>
+                班表清除與重置管理
+              </h4>
+              <p className="text-xs text-[#6D4C41] leading-relaxed">
+                如需重新演練 AI 智慧排班，可在此選擇日期範圍一鍵清除已確認班表，並將同仁登記之可用時間重置為「待排班」。
+              </p>
+              <button
+                type="button"
+                onClick={onOpenClearModal}
+                className="w-full py-2.5 bg-rose-700 hover:bg-rose-800 text-white font-extrabold rounded-xl text-xs transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer border border-rose-700/30 hover:-translate-y-0.5 active:translate-y-0"
+              >
+                <span className="text-sm">🧹</span>
+                <span>選擇日期範圍清除已確認班表 (重置待排班)</span>
+              </button>
+            </div>
+          )}
 
           <div className="pt-4 border-t border-[#E5DCD5]">
             <button

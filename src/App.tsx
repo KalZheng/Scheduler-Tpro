@@ -61,6 +61,7 @@ import { WorkerLogin } from './components/worker/WorkerLogin';
 import { WorkerAvailForm } from './components/worker/WorkerAvailForm';
 import { WorkerAvailModal } from './components/worker/WorkerAvailModal';
 import { AutoScheduleModal } from './components/modals/AutoScheduleModal';
+import { ClearScheduleModal } from './components/modals/ClearScheduleModal';
 import type { ProposedSchedule } from './utils/autoScheduler';
 
 import { ManagerLogin } from './components/manager/ManagerLogin';
@@ -251,6 +252,7 @@ function App() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
   const [isAutoScheduleModalOpen, setIsAutoScheduleModalOpen] = useState(false);
+  const [isClearScheduleModalOpen, setIsClearScheduleModalOpen] = useState(false);
   const [employeeFormMode, setEmployeeFormMode] = useState<'create' | 'edit'>('create');
   const [editingEmployeeId, setEditingEmployeeId] = useState<string | null>(null);
 
@@ -830,44 +832,15 @@ function App() {
 
   const applyAvailabilitySubtraction = async (
     targetAvail: WorkerAvailability,
-    assignStart: string,
-    assignEnd: string
+    _assignStart: string,
+    _assignEnd: string
   ) => {
     if (!targetAvail) return;
 
-    const origStart = targetAvail.startTime;
-    const origEnd = targetAvail.endTime;
-
-    // 1. Update original targetAvail time range to match assigned shift and set confirmed: true
+    // Simply mark original worker availability as confirmed without splitting into extra fragment records
     await updateAvailability(targetAvail.id, {
-      startTime: assignStart,
-      endTime: assignEnd,
       confirmed: true
     });
-
-    // 2. Early unassigned fragment (origStart ~ assignStart)
-    if (compareTimeStrings(assignStart, origStart) > 0) {
-      await addAvailability({
-        employeeName: targetAvail.employeeName,
-        date: targetAvail.date,
-        workplace: targetAvail.workplace || workplaces[0]?.name || '',
-        startTime: origStart,
-        endTime: assignStart,
-        notes: targetAvail.notes ? `未排入剩餘時間段: ${targetAvail.notes}` : ''
-      });
-    }
-
-    // 3. Late unassigned fragment (assignEnd ~ origEnd)
-    if (compareTimeStrings(origEnd, assignEnd) > 0) {
-      await addAvailability({
-        employeeName: targetAvail.employeeName,
-        date: targetAvail.date,
-        workplace: targetAvail.workplace || workplaces[0]?.name || '',
-        startTime: assignEnd,
-        endTime: origEnd,
-        notes: targetAvail.notes ? `未排入剩餘時間段: ${targetAvail.notes}` : ''
-      });
-    }
   };
 
   const handleInstantAssign = async (avail: WorkerAvailability) => {
@@ -1481,11 +1454,19 @@ function App() {
   const gridDates = getDaysInMonth(currentMonthStart);
 
   const allEmployees = useMemo(() => {
+    const activeNames = employees
+      .filter(e => e.active !== false)
+      .map(e => e.name.trim());
+
+    const gridDateSet = new Set(gridDates.map(d => formatDateString(d)));
+    const scheduledNames = schedules
+      .filter(s => s.date && gridDateSet.has(s.date))
+      .map(s => s.employeeName.trim());
+
     const uniqueNames = Array.from(
       new Set([
-        ...employees.map(e => e.name.trim()),
-        ...schedules.map(s => s.employeeName.trim()),
-        ...availabilities.map(a => a.employeeName.trim())
+        ...activeNames,
+        ...scheduledNames
       ])
     ).filter(Boolean);
 
@@ -1499,7 +1480,7 @@ function App() {
       if (idxB !== -1) return 1;
       return a.localeCompare(b, 'zh-Hant');
     });
-  }, [employees, schedules, availabilities, employeeOrder]);
+  }, [employees, schedules, gridDates, employeeOrder]);
 
   const handleMoveEmployeeUp = async (name: string) => {
     const currentOrder = [...allEmployees];
@@ -1975,6 +1956,7 @@ function App() {
                   tempRules={tempRules}
                   setTempRules={setTempRules}
                   setRevenueStaffRules={setRevenueStaffRules}
+                  onOpenClearModal={() => setIsClearScheduleModalOpen(true)}
                 />
               ) : (
                 <>
@@ -2185,6 +2167,12 @@ function App() {
         analysisHoursRange={analysisHoursRange}
         shiftPresets={shiftPresets}
         onExecuteBatchAutoSchedule={handleBatchApplyAutoSchedules}
+      />
+
+      <ClearScheduleModal
+        isOpen={isClearScheduleModalOpen}
+        onClose={() => setIsClearScheduleModalOpen(false)}
+        currentMonthStart={currentMonthStart}
       />
 
       <ShiftModal

@@ -213,6 +213,13 @@ export const ManagerGridView: React.FC<ManagerGridViewProps> = ({
                 const matchingEmp = employees.find(
                   e => e.name.trim().toLowerCase() === empName.trim().toLowerCase()
                 );
+                if (matchingEmp && matchingEmp.active === false) {
+                  const gridDateStrings = gridDates.map(d => formatDateString(d));
+                  const hasScheduleInView = schedules.some(
+                    s => s.employeeName.trim().toLowerCase() === empName.trim().toLowerCase() && gridDateStrings.includes(s.date)
+                  );
+                  if (!hasScheduleInView) return null;
+                }
                 const isNewcomer = matchingEmp ? !!matchingEmp.isNewcomer : false;
 
                 return (
