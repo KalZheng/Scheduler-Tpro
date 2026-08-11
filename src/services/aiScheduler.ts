@@ -142,9 +142,9 @@ export async function runAIScheduler(options: RunAIScheduleOptions): Promise<Pro
   let rawText = '';
 
   const geminiModelsToTry = Array.from(new Set([
-    options.modelName || 'gemini-2.0-flash',
-    'gemini-2.0-flash',
-    'gemini-1.5-flash'
+    options.modelName || 'gemini-3.5-flash',
+    'gemini-3.1-pro-preview'
+
   ]));
 
   for (const model of geminiModelsToTry) {

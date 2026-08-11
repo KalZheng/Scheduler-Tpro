@@ -1,10 +1,9 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import type { WorkSchedule, WorkerAvailability, Employee, StaffingTarget, ShiftPreset } from '../../services/scheduler';
-import { generateAutoSchedule } from '../../utils/autoScheduler';
 import type { ProposedSchedule, AutoScheduleResult } from '../../utils/autoScheduler';
 import { formatDateString, getDaysInMonth, getDatesInRange, isShiftActiveAtHour, getTooltipAlignment, getTooltipArrowAlignment } from '../../utils/dateUtils';
 import { DAYS_OF_WEEK } from '../../utils/constants';
-import { runAIScheduler, buildAIPromptPayload } from '../../services/aiScheduler';
+import { runAIScheduler } from '../../services/aiScheduler';
 
 interface AutoScheduleModalProps {
   isOpen: boolean;
@@ -47,7 +46,6 @@ export const AutoScheduleModal: React.FC<AutoScheduleModalProps> = ({
   const [calculationResult, setCalculationResult] = useState<AutoScheduleResult | null>(null);
   const [selectedProposedIds, setSelectedProposedIds] = useState<Set<string>>(new Set());
   const [isApplying, setIsApplying] = useState(false);
-  const [previewPromptText, setPreviewPromptText] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -56,30 +54,8 @@ export const AutoScheduleModal: React.FC<AutoScheduleModalProps> = ({
       setStartDate(s);
       setEndDate(e);
       setCalculationResult(null);
-      setPreviewPromptText(null);
     }
   }, [isOpen, daysInMonth]);
-
-  const handlePreviewPrompt = () => {
-    if (dateRangeList.length === 0) {
-      alert('請選擇有效的日期範圍。');
-      return;
-    }
-    const activeEmployeeNames = new Set(
-      employees.filter(e => e.active !== false).map(e => e.name.trim().toLowerCase())
-    );
-    const payload = buildAIPromptPayload({
-      dateRange: dateRangeList,
-      availabilities: availabilities.filter(
-        a => dateRangeList.includes(a.date) && a.confirmed !== true && activeEmployeeNames.has(a.employeeName.trim().toLowerCase())
-      ),
-      schedules,
-      employees,
-      staffingTargets,
-      onlyFillDeficits
-    });
-    setPreviewPromptText(JSON.stringify(payload, null, 2));
-  };
 
   const dateRangeList = useMemo(() => {
     if (!startDate || !endDate) return [];
@@ -125,82 +101,59 @@ export const AutoScheduleModal: React.FC<AutoScheduleModalProps> = ({
       return;
     }
 
-    if (useAiMode) {
-      const geminiKey = (import.meta.env.VITE_GEMINI_API_KEY as string) || '';
-      const activeKey = geminiKey.trim();
+    const geminiKey = (import.meta.env.VITE_GEMINI_API_KEY as string) || '';
+    const activeKey = geminiKey.trim();
 
-      if (!activeKey) {
-        alert('⚠️ 未偵測到 Google Gemini API Key！\n\n請在專案檔 .env.local 或 .env.puli-production 中設定：\nVITE_GEMINI_API_KEY="AIzaSy..."\n\n設定完成後即可進行 AI 智慧排班。');
-        return;
-      }
-
-      const activeEmployeeNames = new Set(
-        employees.filter(e => e.active !== false).map(e => e.name.trim().toLowerCase())
-      );
-
-      setIsAiLoading(true);
-      try {
-        const aiProposed = await runAIScheduler({
-          apiKey: activeKey,
-          dateRange: dateRangeList,
-          availabilities: availabilities.filter(
-            a => dateRangeList.includes(a.date) && a.confirmed !== true && activeEmployeeNames.has(a.employeeName.trim().toLowerCase())
-          ),
-          schedules,
-          employees,
-          staffingTargets,
-          onlyFillDeficits
-        });
-
-        const mappedProposed: ProposedSchedule[] = aiProposed.map(p => ({
-          availabilityId: p.availabilityId,
-          employeeName: p.employeeName,
-          date: p.date,
-          workplace: p.workplace,
-          startTime: p.startTime,
-          endTime: p.endTime,
-          notes: p.notes,
-          workerNotes: p.workerNotes || '',
-          managerNotes: p.managerNotes || '',
-          color: '#795548',
-          coveredDeficitHoursCount: 8
-        }));
-
-        setCalculationResult({
-          totalNewConfirmedShifts: mappedProposed.length,
-          coveredDeficitHoursTotal: mappedProposed.length * 8,
-          unassignedAvailabilitiesCount: Math.max(0, availabilities.length - mappedProposed.length),
-          proposedSchedules: mappedProposed
-        });
-        setSelectedProposedIds(new Set(mappedProposed.map(p => p.availabilityId)));
-      } catch (err: any) {
-        console.error('AI Auto schedule error:', err);
-        alert(`Gemini AI 排班失敗: ${err?.message || err}\n已自動為您切換至本地演算法模式。`);
-        setUseAiMode(false);
-      } finally {
-        setIsAiLoading(false);
-      }
+    if (!activeKey) {
+      alert('⚠️ 未偵測到 Google Gemini API Key！\n\n請在專案檔 .env.local 或 .env.puli-production 中設定：\nVITE_GEMINI_API_KEY="AIzaSy..."\n\n設定完成後即可進行 AI 智慧排班。');
       return;
     }
 
-    // Local Algorithm Fallback
-    const result = generateAutoSchedule(
-      availabilities,
-      schedules,
-      employees,
-      staffingTargets,
-      analysisHoursRange,
-      shiftPresets,
-      {
-        dateRange: dateRangeList,
-        prioritizeFullTime,
-        maxHoursPerShift,
-        onlyFillDeficits
-      }
+    const activeEmployeeNames = new Set(
+      employees.filter(e => e.active !== false).map(e => e.name.trim().toLowerCase())
     );
 
-    setCalculationResult(result);
-    setSelectedProposedIds(new Set(result.proposedSchedules.map(p => p.availabilityId)));
+    setIsAiLoading(true);
+    try {
+      const aiProposed = await runAIScheduler({
+        apiKey: activeKey,
+        dateRange: dateRangeList,
+        availabilities: availabilities.filter(
+          a => dateRangeList.includes(a.date) && a.confirmed !== true && activeEmployeeNames.has(a.employeeName.trim().toLowerCase())
+        ),
+        schedules,
+        employees,
+        staffingTargets,
+        onlyFillDeficits
+      });
+
+      const mappedProposed: ProposedSchedule[] = aiProposed.map(p => ({
+        availabilityId: p.availabilityId,
+        employeeName: p.employeeName,
+        date: p.date,
+        workplace: p.workplace,
+        startTime: p.startTime,
+        endTime: p.endTime,
+        notes: p.notes,
+        workerNotes: p.workerNotes || '',
+        managerNotes: p.managerNotes || '',
+        color: '#795548',
+        coveredDeficitHoursCount: 8
+      }));
+
+      setCalculationResult({
+        totalNewConfirmedShifts: mappedProposed.length,
+        coveredDeficitHoursTotal: mappedProposed.length * 8,
+        unassignedAvailabilitiesCount: Math.max(0, availabilities.length - mappedProposed.length),
+        proposedSchedules: mappedProposed
+      });
+      setSelectedProposedIds(new Set(mappedProposed.map(p => p.availabilityId)));
+    } catch (err: any) {
+      console.error('AI Auto schedule error:', err);
+      alert(`Gemini AI 排班失敗: ${err?.message || err}`);
+    } finally {
+      setIsAiLoading(false);
+    }
   };
 
   const toggleSelectProposed = (availId: string) => {
@@ -323,54 +276,24 @@ export const AutoScheduleModal: React.FC<AutoScheduleModalProps> = ({
               </div>
             </div>
 
-            {/* AI Mode Selector */}
+            {/* Gemini API Key Status Banner */}
             <div className="pt-2 border-t border-[#DAC0A3]/30 flex flex-col gap-3">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-[#5D4037]">排班引擎模式:</span>
-                <button
-                  type="button"
-                  onClick={() => setUseAiMode(true)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${useAiMode ? 'bg-[#795548] text-white shadow-sm' : 'bg-white/70 text-[#6D4C41] border border-[#DAC0A3]/60'}`}
-                >
-                  🤖 ChatGPT / Gemini AI 智慧排班 (推薦)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setUseAiMode(false)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${!useAiMode ? 'bg-[#795548] text-white shadow-sm' : 'bg-white/70 text-[#6D4C41] border border-[#DAC0A3]/60'}`}
-                >
-                  ⚡ 本地演算法排班
-                </button>
+              <div className="p-2.5 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center justify-between animate-fade-in text-xs">
+                {import.meta.env.VITE_GEMINI_API_KEY ? (
+                  <span className="text-emerald-800 font-bold flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                    已由環境變數 (.env) 成功載入 AI API Key
+                  </span>
+                ) : (
+                  <span className="text-amber-800 font-bold flex items-center gap-1.5">
+                    <span>⚠️</span>
+                    未設定 VITE_GEMINI_API_KEY (請於 .env.local 中設定)
+                  </span>
+                )}
               </div>
-
-              {useAiMode && (
-                <div className="p-2.5 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center justify-between animate-fade-in text-xs">
-                  {import.meta.env.VITE_GEMINI_API_KEY ? (
-                    <span className="text-emerald-800 font-bold flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                      已由環境變數 (.env) 成功載入 Google Gemini API Key
-                    </span>
-                  ) : (
-                    <span className="text-amber-800 font-bold flex items-center gap-1.5">
-                      <span>⚠️</span>
-                      未設定 VITE_GEMINI_API_KEY / VITE_OPENROUTER_API_KEY (請於 .env.local 中設定)
-                    </span>
-                  )}
-                </div>
-              )}
             </div>
 
             <div className="pt-2 flex justify-end gap-2">
-              {useAiMode && (
-                <button
-                  type="button"
-                  onClick={handlePreviewPrompt}
-                  className="bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-md transition-all cursor-pointer flex items-center gap-1.5"
-                >
-                  <span>🔍</span>
-                  <span>預覽 AI Prompt (不發送 API)</span>
-                </button>
-              )}
               <button
                 onClick={handleRunCalculation}
                 disabled={isAiLoading}
@@ -382,54 +305,17 @@ export const AutoScheduleModal: React.FC<AutoScheduleModalProps> = ({
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                     </svg>
-                    <span>Gemini AI 正在分析排班規則與人力需求...</span>
+                    <span>AI 正在分析排班規則與人力需求...</span>
                   </>
                 ) : (
                   <>
-                    <span>{useAiMode ? '🤖' : '⚡'}</span>
-                    <span>{useAiMode ? '開始 Gemini AI 智慧排班' : '開始本地演算預覽'}</span>
+                    <span>🤖</span>
+                    <span>一鍵 AI 智慧排班</span>
                   </>
                 )}
               </button>
             </div>
           </div>
-
-          {/* AI Prompt Preview Drawer / Sub-modal */}
-          {previewPromptText && (
-            <div className="p-4 bg-slate-900 border border-slate-700 rounded-xl space-y-3 animate-fade-in text-white">
-              <div className="flex justify-between items-center">
-                <h5 className="text-xs font-bold text-amber-400 flex items-center gap-1.5">
-                  <span>📜</span>
-                  <span>AI API Prompt Payload 內容 (JSON 測試與調適模式)</span>
-                </h5>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      navigator.clipboard.writeText(previewPromptText);
-                      alert('已成功複製 Prompt JSON 到剪貼簿！');
-                    }}
-                    className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold rounded text-[11px] cursor-pointer"
-                  >
-                    📋 複製 Prompt
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPreviewPromptText(null)}
-                    className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded text-[11px] cursor-pointer"
-                  >
-                    ✕ 關閉預覽
-                  </button>
-                </div>
-              </div>
-              <textarea
-                readOnly
-                rows={14}
-                value={previewPromptText}
-                className="w-full bg-slate-950 text-emerald-400 font-mono text-[11px] p-3 rounded-lg border border-slate-800 focus:outline-none"
-              />
-            </div>
-          )}
 
           {/* Results Preview Section */}
           {calculationResult && (
