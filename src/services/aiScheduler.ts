@@ -133,6 +133,8 @@ export async function runAIScheduler(options: RunAIScheduleOptions): Promise<Pro
     ],
     generationConfig: {
       temperature: 0.1,
+      topP: 0.1,
+      topK: 1,
       responseMimeType: "application/json",
       responseSchema: responseSchema
     }

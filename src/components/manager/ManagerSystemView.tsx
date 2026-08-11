@@ -28,6 +28,7 @@ interface ManagerSystemViewProps {
   setShiftPresets: (presets: ShiftPreset[]) => void;
   tempRules: RevenueStaffRules;
   setTempRules: (rules: RevenueStaffRules) => void;
+  setRevenueStaffRules: (rules: RevenueStaffRules) => void;
   erpDays: number[];
   setErpDays: (days: number[]) => void;
   ptAvailMode: PtAvailMode;

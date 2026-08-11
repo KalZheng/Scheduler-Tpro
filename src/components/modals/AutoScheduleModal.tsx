@@ -105,7 +105,7 @@ export const AutoScheduleModal: React.FC<AutoScheduleModalProps> = ({
     const activeKey = geminiKey.trim();
 
     if (!activeKey) {
-      alert('⚠️ 未偵測到 Google Gemini API Key！\n\n請在專案檔 .env.local 或 .env.puli-production 中設定：\nVITE_GEMINI_API_KEY="AIzaSy..."\n\n設定完成後即可進行 AI 智慧排班。');
+      alert('⚠️ 未偵測到 AI API Key！\n\n請先設定環境變數。');
       return;
     }
 
@@ -150,7 +150,7 @@ export const AutoScheduleModal: React.FC<AutoScheduleModalProps> = ({
       setSelectedProposedIds(new Set(mappedProposed.map(p => p.availabilityId)));
     } catch (err: any) {
       console.error('AI Auto schedule error:', err);
-      alert(`Gemini AI 排班失敗: ${err?.message || err}`);
+      alert(` AI 排班失敗: ${err?.message || err}`);
     } finally {
       setIsAiLoading(false);
     }
@@ -282,12 +282,12 @@ export const AutoScheduleModal: React.FC<AutoScheduleModalProps> = ({
                 {import.meta.env.VITE_GEMINI_API_KEY ? (
                   <span className="text-emerald-800 font-bold flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                    已由環境變數 (.env) 成功載入 AI API Key
+                    成功載入 AI API Key
                   </span>
                 ) : (
                   <span className="text-amber-800 font-bold flex items-center gap-1.5">
                     <span>⚠️</span>
-                    未設定 VITE_GEMINI_API_KEY (請於 .env.local 中設定)
+                    未設定 AI API Key
                   </span>
                 )}
               </div>
