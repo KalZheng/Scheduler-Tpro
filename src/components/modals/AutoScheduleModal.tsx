@@ -27,7 +27,7 @@ export const AutoScheduleModal: React.FC<AutoScheduleModalProps> = ({
   employees,
   staffingTargets,
   analysisHoursRange,
-  shiftPresets,
+  shiftPresets: _shiftPresets,
   onExecuteBatchAutoSchedule
 }) => {
   const daysInMonth = useMemo(() => getDaysInMonth(currentMonthStart), [currentMonthStart]);
@@ -39,8 +39,6 @@ export const AutoScheduleModal: React.FC<AutoScheduleModalProps> = ({
   const [prioritizeFullTime, setPrioritizeFullTime] = useState(true);
   const [onlyFillDeficits, setOnlyFillDeficits] = useState(false);
   const [maxHoursPerShift, setMaxHoursPerShift] = useState(8);
-
-  const [useAiMode, setUseAiMode] = useState(true);
 
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [calculationResult, setCalculationResult] = useState<AutoScheduleResult | null>(null);
