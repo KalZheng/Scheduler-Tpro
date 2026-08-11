@@ -64,6 +64,9 @@ import { FTAssignModal } from './components/modals/FTAssignModal';
 import { WorkerLogin } from './components/worker/WorkerLogin';
 import { WorkerAvailForm } from './components/worker/WorkerAvailForm';
 import { WorkerAvailModal } from './components/worker/WorkerAvailModal';
+import { AutoScheduleModal } from './components/modals/AutoScheduleModal';
+import { ClearScheduleModal } from './components/modals/ClearScheduleModal';
+import type { ProposedSchedule } from './utils/autoScheduler';
 
 import { ManagerLogin } from './components/manager/ManagerLogin';
 import { ManagerHeader } from './components/manager/ManagerHeader';
@@ -284,6 +287,8 @@ function App() {
 
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
+  const [isAutoScheduleModalOpen, setIsAutoScheduleModalOpen] = useState(false);
+  const [isClearScheduleModalOpen, setIsClearScheduleModalOpen] = useState(false);
   const [employeeFormMode, setEmployeeFormMode] = useState<'create' | 'edit'>('create');
   const [editingEmployeeId, setEditingEmployeeId] = useState<string | null>(null);
 
@@ -868,6 +873,19 @@ function App() {
     }
   };
 
+  const applyAvailabilitySubtraction = async (
+    targetAvail: WorkerAvailability,
+    _assignStart: string,
+    _assignEnd: string
+  ) => {
+    if (!targetAvail) return;
+
+    // Simply mark original worker availability as confirmed without splitting into extra fragment records
+    await updateAvailability(targetAvail.id, {
+      confirmed: true
+    });
+  };
+
   const handleInstantAssign = async (avail: WorkerAvailability) => {
     if (avail.startTime === '00:00' && avail.endTime === '00:00') {
       alert('此同仁此日登記為休假，無法直接指派排班！');
@@ -930,7 +948,7 @@ function App() {
         availabilityId: avail.id
       };
       await addSchedule(payload);
-      await updateAvailability(avail.id, { confirmed: true });
+      await applyAvailabilitySubtraction(avail, avail.startTime, avail.endTime);
     } catch (error) {
       console.error("Error doing instant assign: ", error);
       alert('自動排程失敗，請重試。');
@@ -986,10 +1004,43 @@ function App() {
         availabilityId: avail.id
       };
       await addSchedule(payload);
-      await updateAvailability(avail.id, { confirmed: true });
+      await applyAvailabilitySubtraction(avail, sTime, eTime);
     } catch (error) {
       console.error("Error doing full-time assign: ", error);
       alert('自動排程失敗，請重試。');
+    }
+  };
+
+  const handleBatchApplyAutoSchedules = async (proposedSchedules: ProposedSchedule[]) => {
+    try {
+      for (const item of proposedSchedules) {
+        await addSchedule({
+          title: item.employeeName,
+          employeeName: item.employeeName,
+          date: item.date,
+          workplace: item.workplace,
+          startTime: item.startTime,
+          endTime: item.endTime,
+          notes: item.notes,
+          managerNotes: item.managerNotes,
+          workerNotes: item.workerNotes,
+          color: item.color,
+          originalStartTime: item.startTime,
+          originalEndTime: item.endTime,
+          availabilityId: item.availabilityId
+        });
+
+        const targetAvail = availabilities.find(a => a.id === item.availabilityId);
+        if (targetAvail) {
+          await applyAvailabilitySubtraction(targetAvail, item.startTime, item.endTime);
+        } else {
+          await updateAvailability(item.availabilityId, { confirmed: true });
+        }
+      }
+      alert(`成功為 ${proposedSchedules.length} 筆登記建立排班，並將排定時段確認、剩餘時段精準扣除備用！`);
+    } catch (error) {
+      console.error("Error executing batch auto schedule: ", error);
+      alert('批次建立自動排班失敗，請重試。');
     }
   };
 
@@ -1446,11 +1497,19 @@ function App() {
   const gridDates = getDaysInMonth(currentMonthStart);
 
   const allEmployees = useMemo(() => {
+    const activeNames = employees
+      .filter(e => e.active !== false)
+      .map(e => e.name.trim());
+
+    const gridDateSet = new Set(gridDates.map(d => formatDateString(d)));
+    const scheduledNames = schedules
+      .filter(s => s.date && gridDateSet.has(s.date))
+      .map(s => s.employeeName.trim());
+
     const uniqueNames = Array.from(
       new Set([
-        ...employees.map(e => e.name.trim()),
-        ...schedules.map(s => s.employeeName.trim()),
-        ...availabilities.map(a => a.employeeName.trim())
+        ...activeNames,
+        ...scheduledNames
       ])
     ).filter(Boolean);
 
@@ -1464,7 +1523,7 @@ function App() {
       if (idxB !== -1) return 1;
       return a.localeCompare(b, 'zh-Hant');
     });
-  }, [employees, schedules, availabilities, employeeOrder]);
+  }, [employees, schedules, gridDates, employeeOrder]);
 
   const handleMoveEmployeeUp = async (name: string) => {
     const currentOrder = [...allEmployees];
@@ -1966,18 +2025,30 @@ function App() {
                   setPtAvailMode={setPtAvailMode}
                   filenamePrefix={filenamePrefix}
                   setFilenamePrefix={setFilenamePrefix}
+                  onOpenClearModal={() => setIsClearScheduleModalOpen(true)}
                 />
               ) : (
                 <>
-                  {/* Export Panel */}
-                  <div className="glass-panel p-4 rounded-xl border border-[#DAC0A3]/50 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm animate-fade-in bg-white/60 mb-6">
-                    <div className="flex items-center gap-2 text-sm text-[#5D4037] font-semibold">
-                      <svg className="w-5 h-5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  {/* Export & Auto Schedule Toolbox Panel */}
+                  <div className="glass-panel p-4 rounded-xl border border-[#DAC0A3]/50 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4 shadow-sm animate-fade-in bg-white/60 mb-6">
+                    <div className="flex items-center gap-2 text-sm text-[#5D4037] font-bold">
+                      <svg className="w-5 h-5 text-emerald-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
                       </svg>
-                      <span>排班表匯出 Excel</span>
+                      <span>排班表工具箱與匯出</span>
                     </div>
                     <div className="flex flex-wrap items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setIsAutoScheduleModalOpen(true)}
+                        className="bg-[#2E7D32] hover:bg-[#1B5E20] text-white font-extrabold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md hover:-translate-y-0.5 active:translate-y-0 flex items-center gap-1.5 cursor-pointer border border-[#2E7D32]/30 shrink-0"
+                        title="依據同仁登記可用時間與缺工需求，一鍵智能演算帶入最佳排班"
+                      >
+                        <span className="text-sm">⚡</span> 智能自動帶入與確認排班
+                      </button>
+
+                      <div className="w-px h-6 bg-[#DAC0A3]/40 hidden sm:block"></div>
+
                       <div className="flex items-center gap-2 text-xs md:text-sm text-[#6D4C41]">
                         <span>匯出區間：</span>
                         <input
@@ -2008,10 +2079,10 @@ function App() {
                         onClick={handleUploadToStorage}
                         disabled={isUploadingExcel}
                         className={`font-bold text-xs px-4.5 py-2.5 rounded-xl transition-all shadow-md flex items-center gap-1.5 cursor-pointer border ${isUploadingExcel
-                            ? 'bg-amber-600/50 border-amber-600/20 text-white cursor-not-allowed'
-                            : uploadExcelStatus === 'success'
-                              ? 'bg-indigo-650 hover:bg-indigo-700 border-indigo-650/30 text-white shadow-indigo-600/15'
-                              : 'bg-indigo-600 hover:bg-indigo-700 border-indigo-600/30 text-white hover:shadow-indigo-600/20 hover:-translate-y-0.5 active:translate-y-0'
+                          ? 'bg-amber-600/50 border-amber-600/20 text-white cursor-not-allowed'
+                          : uploadExcelStatus === 'success'
+                            ? 'bg-indigo-650 hover:bg-indigo-700 border-indigo-650/30 text-white shadow-indigo-600/15'
+                            : 'bg-indigo-600 hover:bg-indigo-700 border-indigo-600/30 text-white hover:shadow-indigo-600/20 hover:-translate-y-0.5 active:translate-y-0'
                           }`}
                         title="備份目前日期範圍的排班表至您的 Google 雲端硬碟 (Google Drive)"
                       >
@@ -2154,6 +2225,25 @@ function App() {
           setPendingAssignAvail(null);
         }}
         onExecuteFTAssign={executeFTAssign}
+      />
+
+      <AutoScheduleModal
+        isOpen={isAutoScheduleModalOpen}
+        onClose={() => setIsAutoScheduleModalOpen(false)}
+        currentMonthStart={currentMonthStart}
+        availabilities={availabilities}
+        schedules={schedules}
+        employees={employees}
+        staffingTargets={staffingTargets}
+        analysisHoursRange={analysisHoursRange}
+        shiftPresets={shiftPresets}
+        onExecuteBatchAutoSchedule={handleBatchApplyAutoSchedules}
+      />
+
+      <ClearScheduleModal
+        isOpen={isClearScheduleModalOpen}
+        onClose={() => setIsClearScheduleModalOpen(false)}
+        currentMonthStart={currentMonthStart}
       />
 
       <ShiftModal
