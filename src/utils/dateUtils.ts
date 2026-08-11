@@ -31,6 +31,9 @@ export const compareTimeStrings = (timeA: string, timeB: string): number => {
 };
 
 export const formatDateString = (date: Date): string => {
+  if (!date || !(date instanceof Date) || isNaN(date.getTime())) {
+    return '';
+  }
   const y = date.getFullYear();
   const m = (date.getMonth() + 1).toString().padStart(2, '0');
   const d = date.getDate().toString().padStart(2, '0');
@@ -38,6 +41,9 @@ export const formatDateString = (date: Date): string => {
 };
 
 export const formatMMDD = (date: Date): string => {
+  if (!date || !(date instanceof Date) || isNaN(date.getTime())) {
+    return '';
+  }
   return `${date.getMonth() + 1}/${date.getDate()}`;
 };
 
@@ -57,6 +63,10 @@ export const getMonthGridDates = (monthStart: Date): Date[] => {
 };
 
 export const getDaysInMonth = (monthStart: Date): Date[] => {
+  if (!monthStart || !(monthStart instanceof Date) || isNaN(monthStart.getTime())) {
+    const fallback = new Date();
+    monthStart = new Date(fallback.getFullYear(), fallback.getMonth(), 1);
+  }
   const year = monthStart.getFullYear();
   const month = monthStart.getMonth();
   const date = new Date(year, month, 1);
