@@ -1,13 +1,15 @@
-import { 
-  collection, 
-  addDoc, 
-  updateDoc, 
-  deleteDoc, 
-  doc, 
+import {
+  collection,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  doc,
   onSnapshot,
   query,
   orderBy,
-  setDoc
+  setDoc,
+  where,
+  getDocs
 } from 'firebase/firestore';
 import { db, isValidConfig } from '../firebase';
 
@@ -295,13 +297,13 @@ const getLocalErpDays = (): number[] => {
 // Sync and merge data of a specific month into memory
 export const syncActiveMonth = async (monthStr: string) => {
   if (isValidConfig && db) return; // Skip if Cloud DB is enabled
-  
+
   try {
     const res = await fetch(`/api/db?month=${monthStr}`);
     if (res.ok) {
       loadedMonths.add(monthStr);
       const data = await res.json();
-      
+
       // Merge month schedules (replace existing for this month)
       inMemoryDb.schedules = [
         ...inMemoryDb.schedules.filter(s => s.date.substring(0, 7) !== monthStr),
@@ -482,7 +484,6 @@ const loadFileDb = async () => {
       if (data.filenamePrefix !== undefined) {
         inMemoryDb.filenamePrefix = data.filenamePrefix;
       }
-      
       // Update local storage backup
       localStorage.setItem('weekly_work_schedules', JSON.stringify(inMemoryDb.schedules));
       localStorage.setItem('weekly_worker_availabilities', JSON.stringify(inMemoryDb.availabilities));
@@ -695,7 +696,7 @@ export const subscribeToSchedules = (callback: (schedules: WorkSchedule[]) => vo
   if (isValidConfig && db) {
     const schedulesCollection = collection(db, 'schedules');
     const q = query(schedulesCollection, orderBy('createdAt', 'desc'));
-    
+
     return onSnapshot(q, (snapshot) => {
       const schedules = snapshot.docs.map(doc => ({
         id: doc.id,
@@ -762,11 +763,85 @@ export const deleteSchedule = async (id: string) => {
   }
 };
 
+export const clearConfirmedSchedulesInRange = async (
+  startDateStr: string,
+  endDateStr: string,
+  onlyAi: boolean = false
+): Promise<{ deletedSchedulesCount: number; resetAvailabilitiesCount: number }> => {
+  if (!startDateStr || !endDateStr) return { deletedSchedulesCount: 0, resetAvailabilitiesCount: 0 };
+
+  const isAiSchedule = (s: WorkSchedule) => {
+    return !!s.availabilityId || (!!s.notes && (s.notes.includes('🤖') || s.notes.includes('AI'))) || (!!s.managerNotes && (s.managerNotes.includes('🤖') || s.managerNotes.includes('AI')));
+  };
+
+  if (isValidConfig && db) {
+    const schedulesCollection = collection(db, 'schedules');
+    const qSchedules = query(schedulesCollection, where('date', '>=', startDateStr), where('date', '<=', endDateStr));
+    const schedSnap = await getDocs(qSchedules);
+
+    const docsToDelete = schedSnap.docs.filter(docSnap => {
+      if (!onlyAi) return true;
+      const data = docSnap.data() as WorkSchedule;
+      return isAiSchedule(data);
+    });
+
+    const deletePromises = docsToDelete.map(docSnap => deleteDoc(doc(db, 'schedules', docSnap.id)));
+    await Promise.all(deletePromises);
+
+    const deletedAvailabilityIds = new Set(docsToDelete.map(d => (d.data() as WorkSchedule).availabilityId).filter(Boolean));
+
+    const availsCollection = collection(db, 'availabilities');
+    const qAvails = query(availsCollection, where('date', '>=', startDateStr), where('date', '<=', endDateStr));
+    const availSnap = await getDocs(qAvails);
+
+    const availsToReset = availSnap.docs.filter(docSnap => {
+      if (!onlyAi) return true;
+      return deletedAvailabilityIds.has(docSnap.id);
+    });
+
+    const resetPromises = availsToReset.map(docSnap => updateDoc(doc(db, 'availabilities', docSnap.id), { confirmed: false }));
+    await Promise.all(resetPromises);
+
+    return { deletedSchedulesCount: docsToDelete.length, resetAvailabilitiesCount: availsToReset.length };
+  } else {
+    const startMonth = startDateStr.substring(0, 7);
+    await syncActiveMonth(startMonth);
+
+    const schedulesInRange = inMemoryDb.schedules.filter(
+      s => s.date >= startDateStr && s.date <= endDateStr
+    );
+
+    const schedulesToDelete = schedulesInRange.filter(s => {
+      if (!onlyAi) return true;
+      return isAiSchedule(s);
+    });
+
+    const deletedIds = new Set(schedulesToDelete.map(s => s.id));
+    const deletedAvailIds = new Set(schedulesToDelete.map(s => s.availabilityId).filter(Boolean));
+
+    inMemoryDb.schedules = inMemoryDb.schedules.filter(s => !deletedIds.has(s.id));
+
+    let resetCount = 0;
+    inMemoryDb.availabilities = inMemoryDb.availabilities.map(a => {
+      if (a.date >= startDateStr && a.date <= endDateStr) {
+        if (!onlyAi || deletedAvailIds.has(a.id)) {
+          resetCount++;
+          return { ...a, confirmed: false };
+        }
+      }
+      return a;
+    });
+
+    await saveDbForDate(startDateStr);
+    return { deletedSchedulesCount: schedulesToDelete.length, resetAvailabilitiesCount: resetCount };
+  }
+};
+
 export const subscribeToAvailabilities = (callback: (availabilities: WorkerAvailability[]) => void) => {
   if (isValidConfig && db) {
     const availabilitiesCollection = collection(db, 'availabilities');
     const q = query(availabilitiesCollection, orderBy('createdAt', 'desc'));
-    
+
     return onSnapshot(q, (snapshot) => {
       const availabilities = snapshot.docs.map(doc => ({
         id: doc.id,
@@ -886,7 +961,7 @@ export const subscribeToEmployees = (callback: (employees: Employee[]) => void) 
   if (isValidConfig && db) {
     const employeesCollection = collection(db, 'employees');
     const q = query(employeesCollection, orderBy('createdAt', 'desc'));
-    
+
     return onSnapshot(q, (snapshot) => {
       const employees = snapshot.docs.map(doc => migrateEmployee({
         id: doc.id,

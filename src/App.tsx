@@ -64,6 +64,9 @@ import { FTAssignModal } from './components/modals/FTAssignModal';
 import { WorkerLogin } from './components/worker/WorkerLogin';
 import { WorkerAvailForm } from './components/worker/WorkerAvailForm';
 import { WorkerAvailModal } from './components/worker/WorkerAvailModal';
+import { AutoScheduleModal } from './components/modals/AutoScheduleModal';
+import { ClearScheduleModal } from './components/modals/ClearScheduleModal';
+import type { ProposedSchedule } from './utils/autoScheduler';
 
 import { ManagerLogin } from './components/manager/ManagerLogin';
 import { ManagerHeader } from './components/manager/ManagerHeader';
@@ -211,6 +214,20 @@ function App() {
   }, [operatingStartTime, operatingEndTime]);
 
   const gridContainerRef = useRef<HTMLDivElement>(null);
+  const [isScrolled, setIsScrolled] = useState(false);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      const scrollY = window.scrollY;
+      if (scrollY > 80) {
+        setIsScrolled(true);
+      } else if (scrollY < 20) {
+        setIsScrolled(false);
+      }
+    };
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   useEffect(() => {
     const container = gridContainerRef.current;
@@ -270,6 +287,8 @@ function App() {
 
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
+  const [isAutoScheduleModalOpen, setIsAutoScheduleModalOpen] = useState(false);
+  const [isClearScheduleModalOpen, setIsClearScheduleModalOpen] = useState(false);
   const [employeeFormMode, setEmployeeFormMode] = useState<'create' | 'edit'>('create');
   const [editingEmployeeId, setEditingEmployeeId] = useState<string | null>(null);
 
@@ -854,6 +873,19 @@ function App() {
     }
   };
 
+  const applyAvailabilitySubtraction = async (
+    targetAvail: WorkerAvailability,
+    _assignStart: string,
+    _assignEnd: string
+  ) => {
+    if (!targetAvail) return;
+
+    // Simply mark original worker availability as confirmed without splitting into extra fragment records
+    await updateAvailability(targetAvail.id, {
+      confirmed: true
+    });
+  };
+
   const handleInstantAssign = async (avail: WorkerAvailability) => {
     if (avail.startTime === '00:00' && avail.endTime === '00:00') {
       alert('此同仁此日登記為休假，無法直接指派排班！');
@@ -916,7 +948,7 @@ function App() {
         availabilityId: avail.id
       };
       await addSchedule(payload);
-      await updateAvailability(avail.id, { confirmed: true });
+      await applyAvailabilitySubtraction(avail, avail.startTime, avail.endTime);
     } catch (error) {
       console.error("Error doing instant assign: ", error);
       alert('自動排程失敗，請重試。');
@@ -972,10 +1004,43 @@ function App() {
         availabilityId: avail.id
       };
       await addSchedule(payload);
-      await updateAvailability(avail.id, { confirmed: true });
+      await applyAvailabilitySubtraction(avail, sTime, eTime);
     } catch (error) {
       console.error("Error doing full-time assign: ", error);
       alert('自動排程失敗，請重試。');
+    }
+  };
+
+  const handleBatchApplyAutoSchedules = async (proposedSchedules: ProposedSchedule[]) => {
+    try {
+      for (const item of proposedSchedules) {
+        await addSchedule({
+          title: item.employeeName,
+          employeeName: item.employeeName,
+          date: item.date,
+          workplace: item.workplace,
+          startTime: item.startTime,
+          endTime: item.endTime,
+          notes: item.notes,
+          managerNotes: item.managerNotes,
+          workerNotes: item.workerNotes,
+          color: item.color,
+          originalStartTime: item.startTime,
+          originalEndTime: item.endTime,
+          availabilityId: item.availabilityId
+        });
+
+        const targetAvail = availabilities.find(a => a.id === item.availabilityId);
+        if (targetAvail) {
+          await applyAvailabilitySubtraction(targetAvail, item.startTime, item.endTime);
+        } else {
+          await updateAvailability(item.availabilityId, { confirmed: true });
+        }
+      }
+      alert(`成功為 ${proposedSchedules.length} 筆登記建立排班，並將排定時段確認、剩餘時段精準扣除備用！`);
+    } catch (error) {
+      console.error("Error executing batch auto schedule: ", error);
+      alert('批次建立自動排班失敗，請重試。');
     }
   };
 
@@ -1432,11 +1497,19 @@ function App() {
   const gridDates = getDaysInMonth(currentMonthStart);
 
   const allEmployees = useMemo(() => {
+    const activeNames = employees
+      .filter(e => e.active !== false)
+      .map(e => e.name.trim());
+
+    const gridDateSet = new Set(gridDates.map(d => formatDateString(d)));
+    const scheduledNames = schedules
+      .filter(s => s.date && gridDateSet.has(s.date))
+      .map(s => s.employeeName.trim());
+
     const uniqueNames = Array.from(
       new Set([
-        ...employees.map(e => e.name.trim()),
-        ...schedules.map(s => s.employeeName.trim()),
-        ...availabilities.map(a => a.employeeName.trim())
+        ...activeNames,
+        ...scheduledNames
       ])
     ).filter(Boolean);
 
@@ -1450,7 +1523,7 @@ function App() {
       if (idxB !== -1) return 1;
       return a.localeCompare(b, 'zh-Hant');
     });
-  }, [employees, schedules, availabilities, employeeOrder]);
+  }, [employees, schedules, gridDates, employeeOrder]);
 
   const handleMoveEmployeeUp = async (name: string) => {
     const currentOrder = [...allEmployees];
@@ -1733,60 +1806,76 @@ function App() {
 
   return (
     <div className="min-h-screen text-[#3E2723] font-sans pb-12">
-      <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-6">
+      {/* Sticky Top Header Bar - Constant Height */}
+      <header
+        className={`sticky top-0 z-40 w-full transition-all duration-300 ease-out ${
+          isScrolled
+            ? 'bg-[#FAF7F2]/95 backdrop-blur-md border-b border-[#DAC0A3]/60 shadow-md py-3 px-4 md:px-8'
+            : 'bg-transparent py-4 md:py-6 px-4 md:px-8'
+        }`}
+      >
+        <div
+          className={`max-w-7xl mx-auto transition-all duration-300 ease-out flex flex-col md:flex-row justify-between items-start md:items-center gap-4 ${
+            isScrolled
+              ? 'bg-transparent p-4 md:p-5 rounded-none border-transparent shadow-none'
+              : 'bg-white/70 p-6 md:p-8 rounded-2xl border border-[#DAC0A3]/50 backdrop-blur-md shadow-sm relative overflow-hidden'
+          }`}
+        >
+          {/* Background blur circle when at top */}
+          {!isScrolled && (
+            <div className="absolute top-0 right-0 w-80 h-80 bg-[#8D6E63]/8 rounded-full blur-3xl -translate-y-1/2 translate-x-1/4 pointer-events-none transition-opacity duration-300"></div>
+          )}
 
-        {/* Header Banner */}
-        <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white/60 p-6 md:p-8 rounded-2xl border border-[#DAC0A3]/50 backdrop-blur-md relative overflow-hidden shadow-sm">
-          <div className="absolute top-0 right-0 w-80 h-80 bg-[#8D6E63]/8 rounded-full blur-3xl -translate-y-1/2 translate-x-1/4 pointer-events-none"></div>
-
-          <div className="space-y-2 z-10">
+          <div className="space-y-1.5 z-10">
             <div className="flex flex-wrap items-center gap-3">
               <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight bg-gradient-to-r from-[#5D4037] via-[#8D6E63] to-[#A1887F] bg-clip-text text-transparent flex items-center gap-2">
-                精品咖啡館 ☕ 夥伴排班系統
+                {import.meta.env.VITE_APP_TITLE ? `${import.meta.env.VITE_APP_TITLE} ` : ''}精品咖啡館 ☕ 夥伴排班系統
               </h1>
               {isValidConfig ? (
-                <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-600/10 border border-emerald-600/20 text-[#2E7D32]">
+                <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-600/10 border border-emerald-600/20 text-[#2E7D32]">
                   <span className="w-1.5 h-1.5 rounded-full bg-[#2E7D32] animate-ping"></span>
                   雲端同步已啟用
                 </span>
               ) : (
-                <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-[#8D6E63]/10 border border-[#8D6E63]/20 text-[#6D4C41]">
+                <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#8D6E63]/10 border border-[#8D6E63]/20 text-[#6D4C41]">
                   <span className="w-1.5 h-1.5 rounded-full bg-[#8D6E63]"></span>
                   本機儲存 (LocalStorage)
                 </span>
               )}
             </div>
-            <p className="text-[#6D4C41]/80 text-xs md:text-sm font-medium">
-              提供排班夥伴登記可用時段與店長排班規劃，支援咖啡館人力覆蓋率與工時即時同步。
-            </p>
-          </div>
-
-          <div className="z-10 flex gap-2 w-full md:w-auto">
-            {activeRole === 'manager' && isAuthenticated && (
-              <div className="flex gap-2 w-full md:w-auto">
-                <button
-                  onClick={() => handleOpenAddModal(selectedDateStr)}
-                  className="flex-1 md:flex-initial bg-[#795548] hover:bg-[#6D4C41] text-white font-semibold px-5 py-2.5 rounded-xl shadow-lg shadow-[#795548]/15 hover:shadow-[#795548]/25 transition-all hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center gap-2 cursor-pointer text-sm"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
-                  </svg>
-                  新增排班紀錄
-                </button>
-                <button
-                  onClick={handleLogout}
-                  className="bg-white hover:bg-[#FAF7F2] border border-[#E5DCD5] text-[#5D4037] hover:text-[#3E2723] font-semibold px-4 py-2.5 rounded-xl transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer text-sm"
-                  title="登出管理模式"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 01-3-3h4a3 3 0 013 3v1" />
-                  </svg>
-                  登出
-                </button>
-              </div>
+            {!isScrolled && (
+              <p className="text-[#6D4C41]/80 text-xs md:text-sm font-medium animate-fade-in">
+                提供排班夥伴登記可用時段與店長排班規劃，支援咖啡館人力覆蓋率與工時即時同步。
+              </p>
             )}
           </div>
-        </header>
+
+          {activeRole === 'manager' && isAuthenticated && (
+            <div className="z-10 flex items-center gap-2 w-full md:w-auto">
+              <button
+                onClick={() => handleOpenAddModal(selectedDateStr)}
+                className="bg-[#795548] hover:bg-[#6D4C41] text-white font-semibold px-4 py-2.5 rounded-xl shadow-md shadow-[#795548]/15 transition-all hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center gap-2 cursor-pointer text-xs"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+                </svg>
+                新增排班紀錄
+              </button>
+              <button
+                onClick={handleLogout}
+                className="bg-white hover:bg-[#FAF7F2] border border-[#E5DCD5] text-[#5D4037] hover:text-[#3E2723] font-semibold px-3.5 py-2.5 rounded-xl transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer text-xs"
+                title="登出管理模式"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 01-3-3h4a3 3 0 013 3v1" />
+                </svg>
+              </button>
+            </div>
+          )}
+        </div>
+      </header>
+
+      <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-6">
 
         {/* Role Switcher */}
         {isAuthenticated && (
@@ -1936,18 +2025,30 @@ function App() {
                   setPtAvailMode={setPtAvailMode}
                   filenamePrefix={filenamePrefix}
                   setFilenamePrefix={setFilenamePrefix}
+                  onOpenClearModal={() => setIsClearScheduleModalOpen(true)}
                 />
               ) : (
                 <>
-                  {/* Export Panel */}
-                  <div className="glass-panel p-4 rounded-xl border border-[#DAC0A3]/50 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm animate-fade-in bg-white/60 mb-6">
-                    <div className="flex items-center gap-2 text-sm text-[#5D4037] font-semibold">
-                      <svg className="w-5 h-5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  {/* Export & Auto Schedule Toolbox Panel */}
+                  <div className="glass-panel p-4 rounded-xl border border-[#DAC0A3]/50 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4 shadow-sm animate-fade-in bg-white/60 mb-6">
+                    <div className="flex items-center gap-2 text-sm text-[#5D4037] font-bold">
+                      <svg className="w-5 h-5 text-emerald-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
                       </svg>
-                      <span>排班表匯出 Excel</span>
+                      <span>排班表工具箱與匯出</span>
                     </div>
                     <div className="flex flex-wrap items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setIsAutoScheduleModalOpen(true)}
+                        className="bg-[#2E7D32] hover:bg-[#1B5E20] text-white font-extrabold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md hover:-translate-y-0.5 active:translate-y-0 flex items-center gap-1.5 cursor-pointer border border-[#2E7D32]/30 shrink-0"
+                        title="依據同仁登記可用時間與缺工需求，一鍵智能演算帶入最佳排班"
+                      >
+                        <span className="text-sm">⚡</span> 智能自動帶入與確認排班
+                      </button>
+
+                      <div className="w-px h-6 bg-[#DAC0A3]/40 hidden sm:block"></div>
+
                       <div className="flex items-center gap-2 text-xs md:text-sm text-[#6D4C41]">
                         <span>匯出區間：</span>
                         <input
@@ -1978,10 +2079,10 @@ function App() {
                         onClick={handleUploadToStorage}
                         disabled={isUploadingExcel}
                         className={`font-bold text-xs px-4.5 py-2.5 rounded-xl transition-all shadow-md flex items-center gap-1.5 cursor-pointer border ${isUploadingExcel
-                            ? 'bg-amber-600/50 border-amber-600/20 text-white cursor-not-allowed'
-                            : uploadExcelStatus === 'success'
-                              ? 'bg-indigo-650 hover:bg-indigo-700 border-indigo-650/30 text-white shadow-indigo-600/15'
-                              : 'bg-indigo-600 hover:bg-indigo-700 border-indigo-600/30 text-white hover:shadow-indigo-600/20 hover:-translate-y-0.5 active:translate-y-0'
+                          ? 'bg-amber-600/50 border-amber-600/20 text-white cursor-not-allowed'
+                          : uploadExcelStatus === 'success'
+                            ? 'bg-indigo-650 hover:bg-indigo-700 border-indigo-650/30 text-white shadow-indigo-600/15'
+                            : 'bg-indigo-600 hover:bg-indigo-700 border-indigo-600/30 text-white hover:shadow-indigo-600/20 hover:-translate-y-0.5 active:translate-y-0'
                           }`}
                         title="備份目前日期範圍的排班表至您的 Google 雲端硬碟 (Google Drive)"
                       >
@@ -2124,6 +2225,25 @@ function App() {
           setPendingAssignAvail(null);
         }}
         onExecuteFTAssign={executeFTAssign}
+      />
+
+      <AutoScheduleModal
+        isOpen={isAutoScheduleModalOpen}
+        onClose={() => setIsAutoScheduleModalOpen(false)}
+        currentMonthStart={currentMonthStart}
+        availabilities={availabilities}
+        schedules={schedules}
+        employees={employees}
+        staffingTargets={staffingTargets}
+        analysisHoursRange={analysisHoursRange}
+        shiftPresets={shiftPresets}
+        onExecuteBatchAutoSchedule={handleBatchApplyAutoSchedules}
+      />
+
+      <ClearScheduleModal
+        isOpen={isClearScheduleModalOpen}
+        onClose={() => setIsClearScheduleModalOpen(false)}
+        currentMonthStart={currentMonthStart}
       />
 
       <ShiftModal

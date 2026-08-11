@@ -33,3 +33,4 @@ src/config/workplace.json
 .env.jinan-production
 .env.master
 .env.deploy
+.env.feature-autoschedule
