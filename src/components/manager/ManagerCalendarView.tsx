@@ -62,7 +62,7 @@ export const ManagerCalendarView: React.FC<ManagerCalendarViewProps> = ({
             <div
               key={dateStr}
               onClick={() => setSelectedDateStr(dateStr)}
-              className={`min-h-[75px] md:min-h-[110px] p-1.5 flex flex-col justify-between transition-colors cursor-pointer select-none relative group ${isSelected
+              className={`min-h-[75px] md:min-h-[135px] p-1.5 flex flex-col justify-between transition-colors cursor-pointer select-none relative group ${isSelected
                 ? 'bg-[#8D6E63]/10'
                 : isToday
                   ? 'bg-[#FAF7F2]'
@@ -135,7 +135,7 @@ export const ManagerCalendarView: React.FC<ManagerCalendarViewProps> = ({
               <div className="flex-1 space-y-1 overflow-y-auto">
                 {/* Desktop View */}
                 <div className="hidden md:block space-y-1">
-                  {daySchedules.slice(0, 3).map(schedule => {
+                  {daySchedules.slice(0, 5).map(schedule => {
                     const theme = getScheduleTheme(schedule);
                     return (
                       <div
@@ -150,9 +150,9 @@ export const ManagerCalendarView: React.FC<ManagerCalendarViewProps> = ({
                       </div>
                     );
                   })}
-                  {daySchedules.length > 3 && (
+                  {daySchedules.length > 5 && (
                     <div className="text-[9px] text-[#6D4C41] font-bold text-center pl-1">
-                      還有 {daySchedules.length - 3} 個班...
+                      還有 {daySchedules.length - 5} 個班...
                     </div>
                   )}
                 </div>

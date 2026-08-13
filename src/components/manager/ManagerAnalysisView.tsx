@@ -211,19 +211,25 @@ export const ManagerAnalysisView: React.FC<ManagerAnalysisViewProps> = ({
             <span className="text-2xl font-extrabold text-[#3E2723] font-mono">
               {(() => {
                 const days = daysInMonth;
-                if (days.length === 0) return 0;
+                if (days.length === 0) return '0.0';
                 let totalWorkersCount = 0;
+                let workingDaysCount = 0;
                 days.forEach(dateObj => {
                   const dateStr = formatDateString(dateObj);
-                  totalWorkersCount += schedules.filter(s => s.date === dateStr).length;
+                  const count = schedules.filter(s => s.date === dateStr).length;
+                  if (count > 0) {
+                    workingDaysCount++;
+                    totalWorkersCount += count;
+                  }
                 });
-                return (totalWorkersCount / days.length).toFixed(1);
+                if (workingDaysCount === 0) return '0.0';
+                return (totalWorkersCount / workingDaysCount).toFixed(1);
               })()}
             </span>
-            <span className="text-xs text-[#6D4C41]">人/天</span>
+            <span className="text-xs text-[#6D4C41]">人/工作日</span>
           </div>
           <p className="text-[10px] text-[#8D6E63] mt-1.5 leading-normal">
-            本月日平均確認上班人次（不重複人次）。
+            工作日日平均確認上班人次（自動排除無排班之非工作日）。
           </p>
         </div>
 
@@ -233,7 +239,7 @@ export const ManagerAnalysisView: React.FC<ManagerAnalysisViewProps> = ({
           <div className="mt-1 flex items-baseline gap-1.5">
             <span className="text-lg font-extrabold text-[#3E2723] font-mono">
               {(() => {
-                let maxCount = -1;
+                let maxCount = 0;
                 let bestHour = -1;
                 analysisHoursRange.forEach(hour => {
                   let countForHour = 0;
@@ -246,13 +252,13 @@ export const ManagerAnalysisView: React.FC<ManagerAnalysisViewProps> = ({
                     bestHour = hour;
                   }
                 });
-                if (bestHour === -1) return '無資料';
+                if (bestHour === -1 || maxCount === 0) return '無排班資料';
                 return `${bestHour.toString().padStart(2, '0')}:00 - ${(bestHour + 1).toString().padStart(2, '0')}:00`;
               })()}
             </span>
           </div>
           <p className="text-[10px] text-[#8D6E63] mt-1.5 leading-normal">
-            本月平均配置人數最多的營運時段。
+            本月工作日中累積配置最多排班人次的時段。
           </p>
         </div>
 
@@ -267,6 +273,9 @@ export const ManagerAnalysisView: React.FC<ManagerAnalysisViewProps> = ({
                 daysInMonth.forEach(dateObj => {
                   const dateStr = formatDateString(dateObj);
                   const daySchedules = schedules.filter(s => s.date === dateStr);
+                  // Ignore non-working / un-scheduled days
+                  if (daySchedules.length === 0) return;
+
                   analysisHoursRange.forEach(hour => {
                     const target = getStaffingTargetForHour(hour, dateStr);
                     if (target > 0) {
@@ -284,7 +293,7 @@ export const ManagerAnalysisView: React.FC<ManagerAnalysisViewProps> = ({
             </span>
           </div>
           <p className="text-[10px] text-[#8D6E63] mt-1.5 leading-normal">
-            在所有設定了人力目標的時段中，實排人數達標的比率。
+            在已有排班之工作日中，各時段人數達標的比率。
           </p>
         </div>
       </div>

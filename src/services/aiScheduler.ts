@@ -60,19 +60,21 @@ export function buildAIPromptPayload(options: RunAIScheduleOptions) {
     4. **Fair rotation**
       Every registered worker in \`availabilities\` should get shifts when unfilled targets remain for that date. Avoid stacking one worker 8–10 days straight while another gets zero shifts.
 
-    5. **No 7 consecutive workdays**
-   Check \`existingSchedules\` (shifts already assigned before this date range)
-   together with any new shifts you assign. No worker may work 7 consecutive
-   days counting both. If a worker's existing streak is already at 6 days
-   entering this range, their first day here must be a rest day.
+    5. **No 7 consecutive workdays & Count confirmed shifts**
+   Check \`existingConfirmedSchedules\` (shifts already confirmed before or on these dates). These workers are already working those shifts, so count them toward the hourly target headcount and do not assign them overlapping shifts or 7 consecutive workdays.
 
     6. **Part-time shift bounds**
-      The \`time\` property (e.g. \`06:30-17:30\`) is a worker's max availability window. Trim as needed to fit store demand (e.g. \`06:30-17:30\` can become \`08:30-17:30\`). Assigned shift length must be 240–540 minutes (4–9 hours). Map \`id\` -> \`availabilityId\` and \`who\` -> \`employeeName\` in response.
+       The \`time\` property (e.g. \`06:30-17:30\`) is a worker's max availability window. Trim as needed to fit store demand (e.g. \`06:30-17:30\` can become \`08:30-17:30\`). Assigned shift length must be 240–540 minutes (4–9 hours). Map \`id\` -> \`availabilityId\` and \`who\` -> \`employeeName\` in response.
 
     Return ONLY JSON matching the specified schema.`,
 
     dateRange: options.dateRange,
     storeHourlyTargetsPerDate: targetSummary,
+    existingConfirmedSchedules: options.schedules.map(s => ({
+      who: s.employeeName.trim(),
+      date: s.date,
+      time: `${s.startTime}-${s.endTime}`
+    })),
     availabilities: options.availabilities.map(a => {
       const emp = activeEmployees.find(e => e.name.trim().toLowerCase() === a.employeeName.trim().toLowerCase());
       const item: Record<string, any> = {
@@ -84,8 +86,7 @@ export function buildAIPromptPayload(options: RunAIScheduleOptions) {
       if (emp?.status) item.status = emp.status;
       if (a.notes && a.notes.trim()) item.notes = a.notes.trim();
       return item;
-    }),
-    existingSchedulesCount: options.schedules.length
+    })
   };
 }
 
