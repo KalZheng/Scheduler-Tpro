@@ -121,13 +121,13 @@ export const hasSevenConsecutiveDays = (dateStrings: string[]): boolean => {
 };
 
 export const getColorFromName = (name: string): string => {
-  if (!name || !name.trim()) return 'indigo';
+  if (!name || !name.trim()) return 'emerald';
   const trimmed = name.trim();
   let hash = 0;
   for (let i = 0; i < trimmed.length; i++) {
     hash = trimmed.charCodeAt(i) + ((hash << 5) - hash);
   }
-  const colors = ['indigo', 'emerald', 'violet', 'amber', 'rose'];
+  const colors = ['emerald', 'amber', 'teal', 'indigo', 'purple', 'rose', 'blue'];
   const index = Math.abs(hash) % colors.length;
   return colors[index];
 };
