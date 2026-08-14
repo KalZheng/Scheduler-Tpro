@@ -132,19 +132,18 @@ export const getColorFromName = (name: string): string => {
   return colors[index];
 };
 
-export const isShiftActiveAtHour = (startTime: string, endTime: string, hourIndex: number): boolean => {
+export const isShiftActiveAtHour = (startTime: string, endTime: string, hourIndex: number, useHalfHourOffset: boolean = true): boolean => {
   if (!startTime || !endTime) return false;
   const [sh, sm] = startTime.split(':').map(Number);
   const [eh, em] = endTime.split(':').map(Number);
   if (isNaN(sh) || isNaN(sm) || isNaN(eh) || isNaN(em)) return false;
 
   const start = sh + sm / 60;
-  const end = eh + em / 60;
-  const checkTime = hourIndex + 0.5;
+  let end = eh + em / 60;
+  if (end < start) end += 24;
 
-  if (end < start) {
-    return (checkTime >= start) || (checkTime < end);
-  }
+  const checkTime = useHalfHourOffset ? hourIndex + 1.0 : hourIndex + 0.5;
+
   return (checkTime >= start) && (checkTime < end);
 };
 
