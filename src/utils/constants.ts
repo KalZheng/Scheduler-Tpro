@@ -59,6 +59,30 @@ export const COLOR_THEMES: Record<string, { bg: string; border: string; text: st
     hover: 'hover:border-[#BCAAA4]/70 hover:bg-[#D7CCC8]/50',
     badgeBg: 'bg-[#8D6E63]'
   },
+  teal: {
+    bg: 'bg-teal-50',
+    border: 'border-teal-500/40',
+    text: 'text-teal-900',
+    dot: 'bg-teal-600',
+    hover: 'hover:border-teal-500 hover:bg-teal-100/70',
+    badgeBg: 'bg-teal-600'
+  },
+  purple: {
+    bg: 'bg-purple-50',
+    border: 'border-purple-500/40',
+    text: 'text-purple-900',
+    dot: 'bg-purple-600',
+    hover: 'hover:border-purple-500 hover:bg-purple-100/70',
+    badgeBg: 'bg-purple-600'
+  },
+  blue: {
+    bg: 'bg-blue-50',
+    border: 'border-blue-500/40',
+    text: 'text-blue-900',
+    dot: 'bg-blue-600',
+    hover: 'hover:border-blue-500 hover:bg-blue-100/70',
+    badgeBg: 'bg-blue-600'
+  },
   lightBlue: {
     bg: '!bg-[#E0F2FE]',
     border: '!border-[#bae6fd]',

@@ -1,7 +1,18 @@
 import React from 'react';
 import type { WorkSchedule, Employee } from '../../services/scheduler';
-import { DAYS_OF_WEEK } from '../../utils/constants';
-import { formatDateString, getDaysInMonth, isShiftActiveAtHour, getTooltipAlignment, getTooltipArrowAlignment } from '../../utils/dateUtils';
+import { DAYS_OF_WEEK, COLOR_THEMES } from '../../utils/constants';
+import {
+  formatDateString,
+  getDaysInMonth,
+  isShiftActiveAtHour,
+  getTooltipAlignment,
+  getTooltipArrowAlignment,
+  getColorFromName,
+  calculateDuration,
+  isOverEightHours,
+  getManagerNote,
+  getWorkerNote
+} from '../../utils/dateUtils';
 
 interface ManagerAnalysisViewProps {
   currentMonthStart: Date;
@@ -297,6 +308,324 @@ export const ManagerAnalysisView: React.FC<ManagerAnalysisViewProps> = ({
           </p>
         </div>
       </div>
+
+      {/* Weekly Confirmed Shift Timeline Chart */}
+      <ManagerWeeklyTimelineChart
+        currentMonthStart={currentMonthStart}
+        daysInMonth={daysInMonth}
+        schedules={schedules}
+        employees={employees}
+        analysisHoursRange={analysisHoursRange}
+      />
     </div>
   );
 };
+
+const ManagerWeeklyTimelineChart: React.FC<{
+  currentMonthStart: Date;
+  daysInMonth: Date[];
+  schedules: WorkSchedule[];
+  employees: Employee[];
+  analysisHoursRange: number[];
+}> = ({ daysInMonth, schedules, employees, analysisHoursRange }) => {
+  // Chunk weeks so every week starts on Monday (週一)
+  const weeks = React.useMemo(() => {
+    const chunks: Date[][] = [];
+    let currentChunk: Date[] = [];
+
+    daysInMonth.forEach((dateObj) => {
+      const dayOfWeek = dateObj.getDay(); // 0 is Sunday, 1 is Monday
+      if (dayOfWeek === 1 && currentChunk.length > 0) {
+        chunks.push(currentChunk);
+        currentChunk = [];
+      }
+      currentChunk.push(dateObj);
+    });
+
+    if (currentChunk.length > 0) {
+      chunks.push(currentChunk);
+    }
+
+    return chunks;
+  }, [daysInMonth]);
+
+  // Map each worker to a unique color from 7 distinct color themes so the same worker always has the exact same color
+  const workerColorMap = React.useMemo(() => {
+    const map: Record<string, string> = {};
+    const SEVEN_COLORS = ['emerald', 'amber', 'teal', 'indigo', 'purple', 'rose', 'blue'];
+
+    const allNamesSet = new Set<string>();
+    employees.forEach(e => {
+      if (e.name) allNamesSet.add(e.name.trim());
+    });
+    schedules.forEach(s => {
+      if (s.employeeName) allNamesSet.add(s.employeeName.trim());
+    });
+
+    const nameList = Array.from(allNamesSet).sort((a, b) => a.localeCompare(b));
+    nameList.forEach((name, idx) => {
+      map[name] = SEVEN_COLORS[idx % SEVEN_COLORS.length];
+    });
+
+    return map;
+  }, [employees, schedules]);
+
+  const [viewScope, setViewScope] = React.useState<'month' | 'week'>('month');
+  const [selectedWeekIdx, setSelectedWeekIdx] = React.useState<number | null>(null);
+
+  const defaultWeekIdx = React.useMemo(() => {
+    const todayStr = formatDateString(new Date());
+    const foundIdx = weeks.findIndex(w => w.some(d => formatDateString(d) === todayStr));
+    if (foundIdx >= 0) return foundIdx;
+
+    for (let i = 0; i < weeks.length; i++) {
+      const hasScheds = weeks[i].some(d => {
+        const dStr = formatDateString(d);
+        return schedules.some(s => s.date === dStr);
+      });
+      if (hasScheds) return i;
+    }
+    return 0;
+  }, [weeks, schedules]);
+
+  const activeWeekIdx = selectedWeekIdx ?? defaultWeekIdx;
+  const currentWeekDays = weeks[activeWeekIdx] || weeks[0] || [];
+
+  const displayDays = viewScope === 'month' ? daysInMonth : currentWeekDays;
+
+  const minHour = analysisHoursRange.length > 0 ? analysisHoursRange[0] : 6;
+  const maxHour = analysisHoursRange.length > 0 ? analysisHoursRange[analysisHoursRange.length - 1] + 1 : 21;
+  const totalSpan = Math.max(1, maxHour - minHour);
+
+  return (
+    <div className="glass-panel p-6 rounded-2xl border border-[#DAC0A3]/50 shadow-sm bg-white/70 space-y-5 mt-6">
+      {/* Header & View Scope Selector */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#DAC0A3]/30 pb-4">
+        <div>
+          <h3 className="text-base font-bold text-[#3E2723] flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-[#E65100]"></span>
+            夥伴垂直排班時間軸圖表 (Vertical Shift Timeline)
+          </h3>
+          <p className="text-xs text-[#6D4C41] mt-0.5">
+            縱軸為時段、橫軸為日期，週別以週一為起始日，長條內直向顯示出勤夥伴全名。
+          </p>
+        </div>
+
+        {/* View Mode Toggle & Week Switcher Pills */}
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+          {/* Scope Toggle: Full Month vs Weekly */}
+          <div className="flex items-center gap-1 bg-[#FAF7F2] p-1 rounded-xl border border-[#DAC0A3]/40">
+            <button
+              onClick={() => setViewScope('month')}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                viewScope === 'month'
+                  ? 'bg-[#795548] text-white shadow-sm'
+                  : 'text-[#6D4C41] hover:bg-[#EADBC8]/40'
+              }`}
+            >
+              📅 全月總覽 ({daysInMonth.length}天)
+            </button>
+            <button
+              onClick={() => setViewScope('week')}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                viewScope === 'week'
+                  ? 'bg-[#795548] text-white shadow-sm'
+                  : 'text-[#6D4C41] hover:bg-[#EADBC8]/40'
+              }`}
+            >
+              🗓️ 分週檢視
+            </button>
+          </div>
+
+          {/* Week Selector Pills (visible when in week mode) */}
+          {viewScope === 'week' && (
+            <div className="flex flex-wrap items-center gap-1 bg-[#FAF7F2] p-1 rounded-xl border border-[#DAC0A3]/40">
+              {weeks.map((weekDays, idx) => {
+                if (weekDays.length === 0) return null;
+                const firstDate = weekDays[0];
+                const lastDate = weekDays[weekDays.length - 1];
+                const isSelected = idx === activeWeekIdx;
+                return (
+                  <button
+                    key={idx}
+                    onClick={() => setSelectedWeekIdx(idx)}
+                    className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-[#5D4037] text-white shadow-sm'
+                        : 'text-[#6D4C41] hover:bg-[#EADBC8]/40'
+                    }`}
+                  >
+                    第 {idx + 1} 週 ({firstDate.getDate()}~{lastDate.getDate()}日)
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Main Grid Container: Y-Axis = Hours, X-Axis = Dates */}
+      <div className="overflow-x-auto max-w-full select-none">
+        <div style={{ minWidth: `${Math.max(950, displayDays.length * 85 + 144)}px` }} className="pb-2">
+          {/* Header Row: Corner label & X-Axis Dates */}
+          <div className="flex border-b border-[#DAC0A3]/40 pb-2.5">
+            <div className="w-36 shrink-0 text-xs font-extrabold text-[#6D4C41] flex items-center pl-2">
+              時段 \ 日期
+            </div>
+            <div className="flex flex-1 justify-around">
+              {displayDays.map((dateObj) => {
+                const dNum = dateObj.getDate();
+                const dayName = DAYS_OF_WEEK[dateObj.getDay() === 0 ? 6 : dateObj.getDay() - 1].name.substring(1);
+                const isWeekend = dateObj.getDay() === 0 || dateObj.getDay() === 6;
+                const dateStr = formatDateString(dateObj);
+                const hasSchedules = schedules.some(s => s.date === dateStr);
+
+                return (
+                  <div key={dNum} className={`flex-1 text-center flex flex-col items-center min-w-[70px] border-r border-[#DAC0A3]/20 last:border-r-0 ${isWeekend ? 'text-red-650 font-bold' : 'text-[#6D4C41]'}`}>
+                    <span className={`text-[14px] font-mono font-extrabold leading-none ${hasSchedules ? 'text-[#3E2723]' : 'opacity-70'}`}>{dNum}</span>
+                    <span className="text-[11px] font-extrabold mt-0.5 opacity-90">{dayName}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Grid Body with Vertical Bars Overlay */}
+          <div className="relative mt-1 border border-[#DAC0A3]/30 rounded-xl overflow-hidden bg-white/90">
+            {/* Hour Rows Background Grid (Y-Axis = Hours) */}
+            <div className="divide-y divide-[#DAC0A3]/20">
+              {analysisHoursRange.map((hour) => {
+                const hourStr = `${hour.toString().padStart(2, '0')}:00 - ${(hour + 1).toString().padStart(2, '0')}:00`;
+                return (
+                  <div key={hour} className="flex h-12 items-center hover:bg-[#FAF7F2]/30 transition-colors">
+                    {/* Hour Row Label (Y-Axis) */}
+                    <div className="w-36 shrink-0 text-[11px] font-mono font-bold text-[#6D4C41] flex items-center pl-2 border-r border-[#DAC0A3]/30 h-full bg-[#FAF7F2]/40">
+                      ⏰ {hourStr}
+                    </div>
+
+                    {/* Columns Background Guidelines */}
+                    <div className="flex flex-1 justify-around h-full">
+                      {displayDays.map((dateObj) => (
+                        <div key={dateObj.getDate()} className="flex-1 min-w-[70px] border-r border-[#DAC0A3]/15 last:border-r-0 h-full"></div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Vertical Shift Line Bars Overlay */}
+            <div className="absolute inset-0 left-36 flex justify-around pointer-events-none">
+              {displayDays.map((dateObj) => {
+                const dateStr = formatDateString(dateObj);
+                const daySchedules = schedules.filter(s => s.date === dateStr);
+                const count = daySchedules.length;
+
+                return (
+                  <div key={dateStr} className="flex-1 min-w-[70px] relative h-full">
+                    {daySchedules.map((sched, idx) => {
+                      const emp = employees.find(e => e.name === sched.employeeName);
+                      const isFt = emp?.status === '正式夥伴';
+                      const empNameKey = (sched.employeeName || '').trim();
+                      const colorKey = workerColorMap[empNameKey] || getColorFromName(empNameKey);
+                      const theme = COLOR_THEMES[colorKey] || COLOR_THEMES.indigo;
+
+                      const [sh, sm] = (sched.startTime || '09:00').split(':').map(Number);
+                      const [eh, em] = (sched.endTime || '17:00').split(':').map(Number);
+                      const startVal = (isNaN(sh) ? 9 : sh) + (isNaN(sm) ? 0 : sm) / 60;
+                      let endVal = (isNaN(eh) ? 17 : eh) + (isNaN(em) ? 0 : em) / 60;
+                      if (endVal < startVal) endVal += 24;
+
+                      const clampedStart = Math.max(minHour, Math.min(maxHour, startVal));
+                      const clampedEnd = Math.max(minHour, Math.min(maxHour, endVal));
+                      const topPercent = ((clampedStart - minHour) / totalSpan) * 100;
+                      const heightPercent = Math.max(4, ((clampedEnd - clampedStart) / totalSpan) * 100);
+
+                      const slotWidth = count > 1 ? 100 / count : 92;
+                      const barLeft = count > 1 ? idx * slotWidth + 1 : 4;
+                      const barWidth = count > 1 ? slotWidth - 2 : 92;
+
+                      const durationHours = calculateDuration(sched.startTime, sched.endTime);
+                      const isOver8 = isOverEightHours(sched.startTime, sched.endTime);
+                      const mgrNote = getManagerNote(sched);
+                      const wrkNote = getWorkerNote(sched);
+
+                      return (
+                        <div
+                          key={sched.id}
+                          style={{
+                            top: `${topPercent}%`,
+                            height: `${heightPercent}%`,
+                            left: `${barLeft}%`,
+                            width: `${barWidth}%`
+                          }}
+                          title={`${sched.employeeName} (${sched.startTime} - ${sched.endTime}, ${durationHours}h)${mgrNote ? ` | 主管備註: ${mgrNote}` : ''}${wrkNote ? ` | 夥伴登記: ${wrkNote}` : ''}`}
+                          className={`absolute rounded-xl border-2 ${theme.bg} ${theme.border} ${theme.text} shadow-md p-1 flex flex-col justify-between items-center transition-all duration-200 hover:z-30 hover:scale-[1.03] hover:shadow-lg overflow-hidden pointer-events-auto select-none backdrop-blur-xs`}
+                        >
+                          {/* Top Dot & Start Time */}
+                          <div className="flex flex-col items-center gap-0.5 text-center w-full shrink-0">
+                            <span className={`w-2 h-2 rounded-full ${theme.dot}`}></span>
+                            <span className="text-[9px] font-mono font-extrabold opacity-80 leading-none">{sched.startTime}</span>
+                          </div>
+
+                          {/* Center Name (Vertical Text) */}
+                          <div className="flex-1 flex items-center justify-center my-0.5 overflow-hidden">
+                            <span
+                              style={{ writingMode: 'vertical-rl' }}
+                              className="font-extrabold text-xs tracking-wider max-h-full py-0.5 leading-tight select-none text-[#3E2723]"
+                            >
+                              {sched.employeeName}
+                            </span>
+                          </div>
+
+                          {/* Bottom End Time & Badges */}
+                          <div className="flex flex-col items-center gap-0.5 text-center w-full shrink-0">
+                            <span className="text-[9px] font-mono font-extrabold opacity-80 leading-none">{sched.endTime}</span>
+                            <div className="flex items-center gap-0.5 mt-0.5">
+                              <span className={`text-[8px] font-extrabold px-1 rounded ${isFt ? 'bg-[#795548] text-white' : 'bg-[#EADBC8] text-[#5D4037]'}`}>
+                                {isFt ? '正' : '兼'}
+                              </span>
+                              {isOver8 && (
+                                <span className="bg-red-500 text-white text-[8px] font-extrabold px-0.5 rounded animate-pulse" title="工時 > 8 小時">
+                                  ⚠️
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Chart Legend */}
+      <div className="flex flex-wrap items-center justify-between border-t border-[#DAC0A3]/25 pt-3 text-xs text-[#6D4C41]">
+        <div className="flex items-center gap-4">
+          <span className="font-extrabold text-[#3E2723]">標籤說明:</span>
+          <div className="flex items-center gap-1.5">
+            <span className="px-1.5 py-0.5 rounded text-[10px] bg-[#795548] text-white font-bold">正職</span>
+            <span>正式夥伴</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="px-1.5 py-0.5 rounded text-[10px] bg-[#EADBC8] text-[#5D4037] font-bold">兼職</span>
+            <span>兼職夥伴</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-extrabold bg-red-500 text-white px-1 rounded">⚠️ 超時</span>
+            <span>扣除休息後工時 &gt; 8 小時</span>
+          </div>
+        </div>
+        <div className="text-[11px] text-[#8D6E63] italic">
+          💡 週別以週一為起始日，垂直長條內以直向文字（Vertical Text）完整呈現同仁全名與班別起訖。
+        </div>
+      </div>
+    </div>
+  );
+};
+
+
