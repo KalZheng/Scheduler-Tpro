@@ -41,7 +41,7 @@ export const ManagerAnalysisView: React.FC<ManagerAnalysisViewProps> = ({
           每小時排班人數分析圖表
         </h2>
         <p className="text-xs text-[#6D4C41]">
-          此圖表顯示 {currentMonthStart.getFullYear()}年 {currentMonthStart.getMonth() + 1}月 每日各時段（以小時為單位）已確認排班的總人數。
+          此圖表顯示 {currentMonthStart.getFullYear()}年 {currentMonthStart.getMonth() + 1}月 每日各時段（以 06:30-07:30 等一小時為單位）已確認排班的總人數。
         </p>
       </div>
 
@@ -76,7 +76,7 @@ export const ManagerAnalysisView: React.FC<ManagerAnalysisViewProps> = ({
             {/* Hour Rows */}
             <div className="divide-y divide-[#DAC0A3]/20 mt-1">
               {analysisHoursRange.map(hour => {
-                const hourStr = `${hour.toString().padStart(2, '0')}:00 - ${(hour + 1).toString().padStart(2, '0')}:00`;
+                const hourStr = `${hour.toString().padStart(2, '0')}:30 - ${(hour + 1).toString().padStart(2, '0')}:30`;
                 return (
                   <div key={hour} className="flex py-1.5 items-center hover:bg-[#FAF7F2]/45 transition-colors">
                     {/* Row Label */}
@@ -349,28 +349,19 @@ const ManagerWeeklyTimelineChart: React.FC<{
     return chunks;
   }, [daysInMonth]);
 
-  // Map each worker to a unique color from 7 distinct color themes so the same worker always has the exact same color
-  const workerColorMap = React.useMemo(() => {
-    const map: Record<string, string> = {};
-    const SEVEN_COLORS = ['emerald', 'amber', 'teal', 'indigo', 'purple', 'rose', 'blue'];
+  const DISTINCT_COLOR_KEYS = React.useMemo(() => [
+    'skyBlue',
+    'crimson',
+    'amberGold',
+    'emeraldGreen',
+    'deepPurple',
+    'cyanAqua',
+    'slateSteel',
+    'hotPink',
+    'warmOrange',
+    'coffeeBrown'
+  ], []);
 
-    const allNamesSet = new Set<string>();
-    employees.forEach(e => {
-      if (e.name) allNamesSet.add(e.name.trim());
-    });
-    schedules.forEach(s => {
-      if (s.employeeName) allNamesSet.add(s.employeeName.trim());
-    });
-
-    const nameList = Array.from(allNamesSet).sort((a, b) => a.localeCompare(b));
-    nameList.forEach((name, idx) => {
-      map[name] = SEVEN_COLORS[idx % SEVEN_COLORS.length];
-    });
-
-    return map;
-  }, [employees, schedules]);
-
-  const [viewScope, setViewScope] = React.useState<'month' | 'week'>('month');
   const [selectedWeekIdx, setSelectedWeekIdx] = React.useState<number | null>(null);
 
   const defaultWeekIdx = React.useMemo(() => {
@@ -389,78 +380,106 @@ const ManagerWeeklyTimelineChart: React.FC<{
   }, [weeks, schedules]);
 
   const activeWeekIdx = selectedWeekIdx ?? defaultWeekIdx;
-  const currentWeekDays = weeks[activeWeekIdx] || weeks[0] || [];
+  const displayDays = weeks[activeWeekIdx] || weeks[0] || [];
 
-  const displayDays = viewScope === 'month' ? daysInMonth : currentWeekDays;
+  // Map each active worker in current week to a distinct, high-contrast color
+  const weeklyWorkerColorMap = React.useMemo(() => {
+    const map: Record<string, string> = {};
+    const activeDateStrs = new Set(displayDays.map(d => formatDateString(d)));
+    const weekSchedules = schedules.filter(s => activeDateStrs.has(s.date));
+
+    const workerNamesSet = new Set<string>();
+    weekSchedules.forEach(s => {
+      if (s.employeeName) workerNamesSet.add(s.employeeName.trim());
+    });
+
+    const nameList = Array.from(workerNamesSet).sort((a, b) => a.localeCompare(b));
+    nameList.forEach((name, idx) => {
+      map[name] = DISTINCT_COLOR_KEYS[idx % DISTINCT_COLOR_KEYS.length];
+    });
+
+    return map;
+  }, [displayDays, schedules, DISTINCT_COLOR_KEYS]);
+
+  const getWorkerColorKey = React.useCallback((name: string): string => {
+    if (!name) return DISTINCT_COLOR_KEYS[0];
+    const trimmed = name.trim();
+
+    if (weeklyWorkerColorMap[trimmed]) {
+      return weeklyWorkerColorMap[trimmed];
+    }
+
+    const sampleSched = schedules.find(s => (s.employeeName || '').trim() === trimmed && s.color && COLOR_THEMES[s.color]);
+    if (sampleSched && sampleSched.color) {
+      return sampleSched.color;
+    }
+
+    return getColorFromName(trimmed);
+  }, [schedules, weeklyWorkerColorMap, DISTINCT_COLOR_KEYS]);
 
   const minHour = analysisHoursRange.length > 0 ? analysisHoursRange[0] : 6;
   const maxHour = analysisHoursRange.length > 0 ? analysisHoursRange[analysisHoursRange.length - 1] + 1 : 21;
-  const totalSpan = Math.max(1, maxHour - minHour);
+  const minHourVal = minHour + 0.5;
+  const maxHourVal = maxHour + 0.5;
+  const totalSpan = Math.max(1, maxHourVal - minHourVal);
+
+  const activeLegendWorkers = React.useMemo(() => {
+    const activeDateStrs = new Set(displayDays.map(d => formatDateString(d)));
+    const activeSchedules = schedules.filter(s => activeDateStrs.has(s.date));
+
+    const workerShiftMap = new Map<string, number>();
+    activeSchedules.forEach(s => {
+      if (s.employeeName) {
+        const name = s.employeeName.trim();
+        workerShiftMap.set(name, (workerShiftMap.get(name) || 0) + 1);
+      }
+    });
+
+    const items = Array.from(workerShiftMap.entries()).map(([name, shiftCount]) => {
+      const emp = employees.find(e => e.name === name);
+      const isFt = emp?.status === '正式夥伴';
+      const colorKey = getWorkerColorKey(name);
+      return { name, colorKey, isFt, shiftCount };
+    });
+
+    return items.sort((a, b) => a.name.localeCompare(b.name));
+  }, [displayDays, schedules, employees, getWorkerColorKey]);
 
   return (
     <div className="glass-panel p-6 rounded-2xl border border-[#DAC0A3]/50 shadow-sm bg-white/70 space-y-5 mt-6">
-      {/* Header & View Scope Selector */}
+      {/* Header & Week Selector */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#DAC0A3]/30 pb-4">
         <div>
           <h3 className="text-base font-bold text-[#3E2723] flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-[#E65100]"></span>
-            夥伴垂直排班時間軸圖表 (Vertical Shift Timeline)
+            週層級夥伴垂直排班時間軸圖表 (Vertical Shift Timeline)
           </h3>
           <p className="text-xs text-[#6D4C41] mt-0.5">
-            縱軸為時段、橫軸為日期，週別以週一為起始日，長條內直向顯示出勤夥伴全名。
+            縱軸為時段（06:30-07:30起）、橫軸為日期，週別以週一為起始日，長條內直向顯示出勤夥伴全名。
           </p>
         </div>
 
-        {/* View Mode Toggle & Week Switcher Pills */}
-        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
-          {/* Scope Toggle: Full Month vs Weekly */}
-          <div className="flex items-center gap-1 bg-[#FAF7F2] p-1 rounded-xl border border-[#DAC0A3]/40">
-            <button
-              onClick={() => setViewScope('month')}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-                viewScope === 'month'
-                  ? 'bg-[#795548] text-white shadow-sm'
-                  : 'text-[#6D4C41] hover:bg-[#EADBC8]/40'
-              }`}
-            >
-              📅 全月總覽 ({daysInMonth.length}天)
-            </button>
-            <button
-              onClick={() => setViewScope('week')}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-                viewScope === 'week'
-                  ? 'bg-[#795548] text-white shadow-sm'
-                  : 'text-[#6D4C41] hover:bg-[#EADBC8]/40'
-              }`}
-            >
-              🗓️ 分週檢視
-            </button>
-          </div>
-
-          {/* Week Selector Pills (visible when in week mode) */}
-          {viewScope === 'week' && (
-            <div className="flex flex-wrap items-center gap-1 bg-[#FAF7F2] p-1 rounded-xl border border-[#DAC0A3]/40">
-              {weeks.map((weekDays, idx) => {
-                if (weekDays.length === 0) return null;
-                const firstDate = weekDays[0];
-                const lastDate = weekDays[weekDays.length - 1];
-                const isSelected = idx === activeWeekIdx;
-                return (
-                  <button
-                    key={idx}
-                    onClick={() => setSelectedWeekIdx(idx)}
-                    className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
-                      isSelected
-                        ? 'bg-[#5D4037] text-white shadow-sm'
-                        : 'text-[#6D4C41] hover:bg-[#EADBC8]/40'
-                    }`}
-                  >
-                    第 {idx + 1} 週 ({firstDate.getDate()}~{lastDate.getDate()}日)
-                  </button>
-                );
-              })}
-            </div>
-          )}
+        {/* Week Switcher Pills */}
+        <div className="flex flex-wrap items-center gap-1.5 bg-[#FAF7F2] p-1.5 rounded-xl border border-[#DAC0A3]/40 self-start sm:self-auto">
+          {weeks.map((weekDays, idx) => {
+            if (weekDays.length === 0) return null;
+            const firstDate = weekDays[0];
+            const lastDate = weekDays[weekDays.length - 1];
+            const isSelected = idx === activeWeekIdx;
+            return (
+              <button
+                key={idx}
+                onClick={() => setSelectedWeekIdx(idx)}
+                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                  isSelected
+                    ? 'bg-[#5D4037] text-white shadow-sm'
+                    : 'text-[#6D4C41] hover:bg-[#EADBC8]/40'
+                }`}
+              >
+                第 {idx + 1} 週 ({firstDate.getDate()}~{lastDate.getDate()}日)
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -493,9 +512,9 @@ const ManagerWeeklyTimelineChart: React.FC<{
           {/* Grid Body with Vertical Bars Overlay */}
           <div className="relative mt-1 border border-[#DAC0A3]/30 rounded-xl overflow-hidden bg-white/90">
             {/* Hour Rows Background Grid (Y-Axis = Hours) */}
-            <div className="divide-y divide-[#DAC0A3]/20">
+            <div className="divide-[#DAC0A3]/20 divide-y">
               {analysisHoursRange.map((hour) => {
-                const hourStr = `${hour.toString().padStart(2, '0')}:00 - ${(hour + 1).toString().padStart(2, '0')}:00`;
+                const hourStr = `${hour.toString().padStart(2, '0')}:30 - ${(hour + 1).toString().padStart(2, '0')}:30`;
                 return (
                   <div key={hour} className="flex h-12 items-center hover:bg-[#FAF7F2]/30 transition-colors">
                     {/* Hour Row Label (Y-Axis) */}
@@ -526,9 +545,8 @@ const ManagerWeeklyTimelineChart: React.FC<{
                     {daySchedules.map((sched, idx) => {
                       const emp = employees.find(e => e.name === sched.employeeName);
                       const isFt = emp?.status === '正式夥伴';
-                      const empNameKey = (sched.employeeName || '').trim();
-                      const colorKey = workerColorMap[empNameKey] || getColorFromName(empNameKey);
-                      const theme = COLOR_THEMES[colorKey] || COLOR_THEMES.indigo;
+                      const colorKey = getWorkerColorKey(sched.employeeName);
+                      const theme = COLOR_THEMES[colorKey] || COLOR_THEMES.emerald;
 
                       const [sh, sm] = (sched.startTime || '09:00').split(':').map(Number);
                       const [eh, em] = (sched.endTime || '17:00').split(':').map(Number);
@@ -536,9 +554,9 @@ const ManagerWeeklyTimelineChart: React.FC<{
                       let endVal = (isNaN(eh) ? 17 : eh) + (isNaN(em) ? 0 : em) / 60;
                       if (endVal < startVal) endVal += 24;
 
-                      const clampedStart = Math.max(minHour, Math.min(maxHour, startVal));
-                      const clampedEnd = Math.max(minHour, Math.min(maxHour, endVal));
-                      const topPercent = ((clampedStart - minHour) / totalSpan) * 100;
+                      const clampedStart = Math.max(minHourVal, Math.min(maxHourVal, startVal));
+                      const clampedEnd = Math.max(minHourVal, Math.min(maxHourVal, endVal));
+                      const topPercent = ((clampedStart - minHourVal) / totalSpan) * 100;
                       const heightPercent = Math.max(4, ((clampedEnd - clampedStart) / totalSpan) * 100);
 
                       const slotWidth = count > 1 ? 100 / count : 92;
@@ -568,15 +586,7 @@ const ManagerWeeklyTimelineChart: React.FC<{
                             <span className="text-[9px] font-mono font-extrabold opacity-80 leading-none">{sched.startTime}</span>
                           </div>
 
-                          {/* Center Name (Vertical Text) */}
-                          <div className="flex-1 flex items-center justify-center my-0.5 overflow-hidden">
-                            <span
-                              style={{ writingMode: 'vertical-rl' }}
-                              className="font-extrabold text-xs tracking-wider max-h-full py-0.5 leading-tight select-none text-[#3E2723]"
-                            >
-                              {sched.employeeName}
-                            </span>
-                          </div>
+
 
                           {/* Bottom End Time & Badges */}
                           <div className="flex flex-col items-center gap-0.5 text-center w-full shrink-0">
@@ -604,24 +614,61 @@ const ManagerWeeklyTimelineChart: React.FC<{
       </div>
 
       {/* Chart Legend */}
-      <div className="flex flex-wrap items-center justify-between border-t border-[#DAC0A3]/25 pt-3 text-xs text-[#6D4C41]">
-        <div className="flex items-center gap-4">
-          <span className="font-extrabold text-[#3E2723]">標籤說明:</span>
-          <div className="flex items-center gap-1.5">
-            <span className="px-1.5 py-0.5 rounded text-[10px] bg-[#795548] text-white font-bold">正職</span>
-            <span>正式夥伴</span>
+      <div className="space-y-3 border-t border-[#DAC0A3]/25 pt-3 text-xs text-[#6D4C41]">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-4">
+            <span className="font-extrabold text-[#3E2723]">標籤說明:</span>
+            <div className="flex items-center gap-1.5">
+              <span className="px-1.5 py-0.5 rounded text-[10px] bg-[#795548] text-white font-bold">正職</span>
+              <span>正式夥伴</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="px-1.5 py-0.5 rounded text-[10px] bg-[#EADBC8] text-[#5D4037] font-bold">兼職</span>
+              <span>兼職夥伴</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-extrabold bg-red-500 text-white px-1 rounded">⚠️ 超時</span>
+              <span>扣除休息後工時 &gt; 8 小時</span>
+            </div>
           </div>
-          <div className="flex items-center gap-1.5">
-            <span className="px-1.5 py-0.5 rounded text-[10px] bg-[#EADBC8] text-[#5D4037] font-bold">兼職</span>
-            <span>兼職夥伴</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] font-extrabold bg-red-500 text-white px-1 rounded">⚠️ 超時</span>
-            <span>扣除休息後工時 &gt; 8 小時</span>
+          <div className="text-[11px] text-[#8D6E63] italic">
+            💡 垂直長條頂端與底端精確對應班別起訖，底部圖例僅呈現當前檢視區間內有排班的夥伴。
           </div>
         </div>
-        <div className="text-[11px] text-[#8D6E63] italic">
-          💡 週別以週一為起始日，垂直長條內以直向文字（Vertical Text）完整呈現同仁全名與班別起訖。
+
+        {/* Worker Color Legend Bar */}
+        <div className="border-t border-[#DAC0A3]/20 pt-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="font-extrabold text-xs text-[#3E2723] flex items-center gap-1.5">
+              <span>🎨</span> 當前週別出勤夥伴圖例 (第 {activeWeekIdx + 1} 週):
+            </span>
+            <span className="text-[11px] text-[#8D6E63]">
+              共 <strong className="font-mono text-[#3E2723]">{activeLegendWorkers.length}</strong> 位出勤夥伴
+            </span>
+          </div>
+
+          {activeLegendWorkers.length === 0 ? (
+            <div className="text-xs text-[#8D6E63] italic py-1">此區間暫無夥伴排班出勤紀錄</div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2">
+              {activeLegendWorkers.map(({ name, colorKey, isFt, shiftCount }) => {
+                const theme = COLOR_THEMES[colorKey] || COLOR_THEMES.emerald;
+                return (
+                  <div
+                    key={name}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl border text-xs font-bold ${theme.bg} ${theme.border} ${theme.text} shadow-xs transition-transform hover:scale-[1.03] select-none`}
+                  >
+                    <span className={`w-2.5 h-2.5 rounded-full ${theme.dot} shrink-0`}></span>
+                    <span>{name}</span>
+                    <span className={`text-[9px] font-extrabold px-1 rounded ${isFt ? 'bg-[#795548] text-white' : 'bg-[#EADBC8] text-[#5D4037]'}`}>
+                      {isFt ? '正' : '兼'}
+                    </span>
+                    <span className="text-[10px] font-mono opacity-80 font-semibold">({shiftCount}班)</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
     </div>
