@@ -54,8 +54,11 @@ export function buildAIPromptPayload(options: RunAIScheduleOptions) {
    assign whoever is eligible and leave any remaining gap unfilled. Do not
    invent shifts outside a worker's registered \`time\` window to force coverage.
 
-    3. **Midday cap (09:00–15:00)**
-      Do not exceed the hourly target by more than +1 (max 4 on weekdays, 5 on weekends). Stop assigning once an hour hits its cap — never schedule 6+ overlapping workers.
+    3. **Midday & peak cap (08:00–17:00)**
+       Strictly cap maximum overlapping workers per hour:
+       - **Weekdays (Mon–Fri)**: Max **3 workers** per hour (never schedule 4 or more on weekdays).
+       - **Weekends (Sat–Sun)**: Max **4 workers** per hour (or max 5 during peak rush 10:00–15:00).
+       Stop assigning once an hour hits its cap.
 
     4. **Fair rotation**
       Every registered worker in \`availabilities\` should get shifts when unfilled targets remain for that date. Avoid stacking one worker 8–10 days straight while another gets zero shifts.
@@ -242,22 +245,19 @@ export async function runAIScheduler(options: RunAIScheduleOptions): Promise<Pro
       continue;
     }
 
-    // Guard 2: Strict Over-staffing Cap (Do not allow headcount to exceed target + 1)
+    // Guard 2: Strict Over-staffing Cap (Weekdays max 3, Weekends max 4 or 5 during rush)
     let causesExcessiveOverstaffing = false;
     for (let h = 6; h <= 18; h++) {
       if (isShiftActiveAtHour(item.startTime, item.endTime, h)) {
-        const dateMatch = options.staffingTargets.find(t => t.hour === h && t.date === item.date);
-        const globalMatch = options.staffingTargets.find(t => t.hour === h && !t.date);
-        let target = dateMatch ? dateMatch.targetCount : (globalMatch ? globalMatch.targetCount : 2);
         const isWeekend = new Date(item.date + 'T00:00:00').getDay() === 0 || new Date(item.date + 'T00:00:00').getDay() === 6;
-        if (isWeekend && h >= 10 && h < 15) target += 1;
+        const maxAllowedCap = isWeekend ? (h >= 10 && h < 15 ? 5 : 4) : 3;
 
         const currentHeadcount = activeSchedules.filter(
           s => s.date === item.date && isShiftActiveAtHour(s.startTime, s.endTime, h)
         ).length;
 
-        // Strict Cap: Max allowed headcount at any hour is target + 1
-        if (currentHeadcount >= target + 1) {
+        // Strict Cap: Reject shift if headcount would reach or exceed maxAllowedCap
+        if (currentHeadcount >= maxAllowedCap) {
           causesExcessiveOverstaffing = true;
           break;
         }
@@ -279,9 +279,9 @@ export async function runAIScheduler(options: RunAIScheduleOptions): Promise<Pro
       startTime: item.startTime,
       endTime: item.endTime,
       workplace: item.workplace || origAvail?.workplace || '埔里酒廠門市',
-      notes: `🤖 Gemini AI 智慧排班: ${item.reasoning || '符合最佳人力效益與工時法規'}`,
-      workerNotes: origAvail?.notes || '',
-      managerNotes: `🤖 AI 智慧分析: ${item.reasoning || ''}`,
+      notes: origAvail?.notes ? origAvail.notes.trim() : '',
+      workerNotes: origAvail?.notes ? origAvail.notes.trim() : '',
+      managerNotes: 'AI生成',
       reasoning: item.reasoning
     };
 

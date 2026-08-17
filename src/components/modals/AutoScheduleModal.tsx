@@ -68,7 +68,18 @@ export const AutoScheduleModal: React.FC<AutoScheduleModalProps> = ({
   const combinedPreviewSchedules = useMemo(() => {
     if (!calculationResult) return schedules;
     const selectedProposed = calculationResult.proposedSchedules.filter(p => selectedProposedIds.has(p.availabilityId));
-    const proposedAsWorkSchedules: WorkSchedule[] = selectedProposed.map(p => ({
+
+    // Deduplicate: filter out proposed shifts already present in schedules (e.g. when Firestore/state updates on batch commit)
+    const uncommittedProposed = selectedProposed.filter(p => {
+      const pEmp = p.employeeName.trim().toLowerCase();
+      const isAlreadyInSchedules = schedules.some(s =>
+        (s.availabilityId && s.availabilityId === p.availabilityId) ||
+        (s.employeeName.trim().toLowerCase() === pEmp && s.date === p.date && s.startTime === p.startTime && s.endTime === p.endTime)
+      );
+      return !isAlreadyInSchedules;
+    });
+
+    const proposedAsWorkSchedules: WorkSchedule[] = uncommittedProposed.map(p => ({
       id: p.availabilityId,
       title: p.employeeName,
       employeeName: p.employeeName,
@@ -77,7 +88,7 @@ export const AutoScheduleModal: React.FC<AutoScheduleModalProps> = ({
       startTime: p.startTime,
       endTime: p.endTime,
       color: 'emerald',
-      createdAt: Date.now()
+      createdAt: 0
     }));
     return [...schedules, ...proposedAsWorkSchedules];
   }, [schedules, calculationResult, selectedProposedIds]);
