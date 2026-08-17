@@ -54,7 +54,7 @@ import {
   getWorkerNote,
   compareTimeStrings
 } from './utils/dateUtils';
-import { exportToExcel, generateExcelWorkbook } from './utils/excelExport';
+import { exportToExcel, generateExcelWorkbook, generateExcelBuffer } from './utils/excelExport';
 
 import { ContextMenu } from './components/modals/ContextMenu';
 import { EmployeeModal } from './components/modals/EmployeeModal';
@@ -78,7 +78,6 @@ import { ManagerSystemView } from './components/manager/ManagerSystemView';
 import { ManagerAnalysisView } from './components/manager/ManagerAnalysisView';
 import { ManagerSelectedDateDetail } from './components/manager/ManagerSelectedDateDetail';
 
-import * as XLSX from 'xlsx-js-style';
 declare const google: any;
 
 export interface WorkerAvailConfig {
@@ -1679,7 +1678,7 @@ function App() {
     }
   };
 
-  const handleUploadToStorage = () => {
+  const handleUploadToStorage = async () => {
     const result = generateExcelWorkbook({
       exportStartDate,
       exportEndDate,
@@ -1702,8 +1701,8 @@ function App() {
       return;
     }
 
-    const excelBuffer = XLSX.write(result.wb, { bookType: 'xlsx', type: 'array' });
-    const excelBlob = new Blob([excelBuffer], {
+    const excelBuffer = await generateExcelBuffer(result.wb);
+    const excelBlob = new Blob([excelBuffer.buffer as ArrayBuffer], {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     });
 
