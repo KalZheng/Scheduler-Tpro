@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx-js-style';
+import JSZip from 'jszip';
 import type { WorkSchedule, WorkerAvailability, Employee } from '../services/scheduler';
 import { DAYS_OF_WEEK } from './constants';
 import { formatDateString, getDatesInRange, calculateDuration, getCleanNote, compareTimeStrings } from './dateUtils';
@@ -210,6 +211,13 @@ export const generateExcelWorkbook = ({
       activePane: 'bottomRight'
     }
   ];
+  ws['!freeze'] = {
+    state: 'frozen',
+    xSplit: 1,
+    ySplit: 1,
+    topLeftCell: 'B2',
+    activePane: 'bottomRight'
+  };
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '排班網格表');
@@ -222,9 +230,50 @@ export const generateExcelWorkbook = ({
   };
 };
 
-export const exportToExcel = (params: GenerateExcelParams): void => {
-  const result = generateExcelWorkbook(params);
-  if (result) {
-    XLSX.writeFile(result.wb, result.filename);
+export const generateExcelBuffer = async (
+  wb: XLSX.WorkBook,
+  xSplit: number = 1,
+  ySplit: number = 1
+): Promise<Uint8Array> => {
+  const rawBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  try {
+    const zip = await JSZip.loadAsync(rawBuffer);
+    const sheetFiles = Object.keys(zip.files).filter(name => name.startsWith('xl/worksheets/sheet'));
+    const paneXml = `<pane xSplit="${xSplit}" ySplit="${ySplit}" topLeftCell="B2" activePane="bottomRight" state="frozen"/>`;
+
+    for (const filename of sheetFiles) {
+      const zipFile = zip.file(filename);
+      if (!zipFile) continue;
+      let xml = await zipFile.async('text');
+      if (xml.includes('<sheetView workbookViewId="0"/>')) {
+        xml = xml.replace('<sheetView workbookViewId="0"/>', `<sheetView workbookViewId="0">${paneXml}</sheetView>`);
+      } else if (xml.includes('<sheetView workbookViewId="0">')) {
+        xml = xml.replace('<sheetView workbookViewId="0">', `<sheetView workbookViewId="0">${paneXml}`);
+      } else if (xml.includes('<sheetViews>')) {
+        xml = xml.replace('<sheetViews>', `<sheetViews><sheetView workbookViewId="0">${paneXml}</sheetView>`);
+      }
+      zip.file(filename, xml);
+    }
+    return await zip.generateAsync({ type: 'uint8array' });
+  } catch (error) {
+    console.error('Failed to inject freeze pane XML into XLSX zip:', error);
+    return new Uint8Array(rawBuffer);
   }
 };
+
+export const exportToExcel = async (params: GenerateExcelParams): Promise<void> => {
+  const result = generateExcelWorkbook(params);
+  if (result) {
+    const buffer = await generateExcelBuffer(result.wb, 1, 1);
+    const blob = new Blob([buffer.buffer as ArrayBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = result.filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+};
+
