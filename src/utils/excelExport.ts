@@ -2,7 +2,7 @@ import * as XLSX from 'xlsx-js-style';
 import JSZip from 'jszip';
 import type { WorkSchedule, WorkerAvailability, Employee } from '../services/scheduler';
 import { DAYS_OF_WEEK } from './constants';
-import { formatDateString, getDatesInRange, calculateDuration, getCleanNote, compareTimeStrings } from './dateUtils';
+import { formatDateString, getDatesInRange, calculateDuration, getCleanNote, getManagerNote, compareTimeStrings } from './dateUtils';
 
 interface GenerateExcelParams {
   exportStartDate: string;
@@ -126,9 +126,13 @@ export const generateExcelWorkbook = ({
       }
 
       return empSchedules.map(sched => {
-        const note = getCleanNote(sched.notes);
-        return note
-          ? `${sched.startTime}-${sched.endTime}\n(${note})`
+        const workerNote = (sched.workerNotes !== undefined && sched.workerNotes !== '')
+          ? sched.workerNotes.trim()
+          : getCleanNote(sched.notes);
+        const managerNote = getManagerNote(sched);
+        const combinedNotes = [managerNote, workerNote].filter(Boolean).join('; ');
+        return combinedNotes
+          ? `${sched.startTime}-${sched.endTime}\n(${combinedNotes})`
           : `${sched.startTime}-${sched.endTime}`;
       }).join('\n');
     });
