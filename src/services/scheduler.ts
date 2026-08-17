@@ -771,7 +771,11 @@ export const clearConfirmedSchedulesInRange = async (
   if (!startDateStr || !endDateStr) return { deletedSchedulesCount: 0, resetAvailabilitiesCount: 0 };
 
   const isAiSchedule = (s: WorkSchedule) => {
-    return !!s.availabilityId || (!!s.notes && (s.notes.includes('🤖') || s.notes.includes('AI'))) || (!!s.managerNotes && (s.managerNotes.includes('🤖') || s.managerNotes.includes('AI')));
+    return (
+      !!s.availabilityId ||
+      (!!s.notes && (s.notes.includes('🤖') || s.notes.includes('AI') || s.notes.includes('AI生成') || s.notes.includes('自動排班'))) ||
+      (!!s.managerNotes && (s.managerNotes.includes('🤖') || s.managerNotes.includes('AI') || s.managerNotes.includes('AI生成') || s.managerNotes.includes('自動排班')))
+    );
   };
 
   if (isValidConfig && db) {

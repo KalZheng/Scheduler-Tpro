@@ -268,9 +268,9 @@ export const generateAutoSchedule = (
         workplace: avail.workplace || '咖啡吧檯',
         startTime: bestStartTime,
         endTime: bestEndTime,
-        notes: avail.notes ? `智能自動帶入: ${avail.notes.trim()}` : '智能自動帶入排班',
+        notes: avail.notes ? avail.notes.trim() : '',
         workerNotes: avail.notes ? avail.notes.trim() : '',
-        managerNotes: '智能自動帶入',
+        managerNotes: '',
         color: derivedColor,
         coveredDeficitHoursCount: Math.max(0, bestUsefulHours)
       };

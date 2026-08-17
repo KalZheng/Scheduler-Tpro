@@ -149,35 +149,76 @@ export const isShiftActiveAtHour = (startTime: string, endTime: string, hourInde
 
 export const getCleanNote = (notes?: string): string => {
   if (!notes) return '';
-  const prefix = '由登記可用時間自動排入: ';
-  if (notes.startsWith(prefix)) {
-    return notes.substring(prefix.length).trim();
+  let trimmed = notes.trim();
+
+  const systemPrefixes = [
+    '由登記可用時間自動排入',
+    '智能自動帶入',
+    '🤖 Gemini AI 智慧排班',
+    '🤖 AI 智慧分析',
+    '🤖 AI 排班',
+    '🤖'
+  ];
+
+  for (const prefix of systemPrefixes) {
+    if (trimmed.startsWith(prefix)) {
+      const colonIdx = trimmed.indexOf(': ');
+      if (colonIdx !== -1) {
+        trimmed = trimmed.substring(colonIdx + 2).trim();
+      } else {
+        trimmed = '';
+      }
+      break;
+    }
   }
-  if (notes === '由登記可用時間自動排入') {
+
+  const automatedPhrases = [
+    'Opening shift to meet target',
+    'Closing shift',
+    'Midday shift',
+    '符合最佳人力效益',
+    '智能自動帶入排班'
+  ];
+
+  if (automatedPhrases.some(phrase => trimmed.toLowerCase().includes(phrase.toLowerCase()))) {
     return '';
   }
-  return notes.trim();
+
+  return trimmed;
 };
 
 export const getManagerNote = (sched: WorkSchedule): string => {
-  if (sched.managerNotes !== undefined) return sched.managerNotes;
-  const n = sched.notes || '';
-  if (n.startsWith('由登記可用時間自動排入')) {
+  const note = (sched.managerNotes !== undefined && sched.managerNotes !== '')
+    ? sched.managerNotes
+    : (sched.notes || '');
+  const trimmed = note.trim();
+
+  if (trimmed === 'AI生成' || trimmed === '🤖 AI生成') {
+    return 'AI生成';
+  }
+
+  const automatedPhrases = [
+    'Opening shift',
+    'Closing shift',
+    'Midday shift',
+    'Shift length is',
+    '符合最佳人力效益',
+    '智能自動帶入',
+    '由登記可用時間自動排入',
+    '🤖 AI 智慧',
+    'AI 智慧'
+  ];
+
+  if (automatedPhrases.some(phrase => trimmed.toLowerCase().includes(phrase.toLowerCase()))) {
     return '';
   }
-  return n;
+
+  return trimmed;
 };
 
 export const getWorkerNote = (sched: WorkSchedule): string => {
-  if (sched.workerNotes !== undefined) return sched.workerNotes;
-  const n = sched.notes || '';
-  if (n.startsWith('由登記可用時間自動排入: ')) {
-    return n.substring('由登記可用時間自動排入: '.length);
-  }
-  if (n === '由登記可用時間自動排入') {
-    return '';
-  }
-  return '';
+  if (sched.workerNotes !== undefined && sched.workerNotes !== '') return sched.workerNotes;
+  return getCleanNote(sched.notes);
 };
 
 export const getTooltipAlignment = (dayIndex: number, totalDays: number): string => {
