@@ -1,5 +1,7 @@
 import React from 'react';
 import type { Employee } from '../../services/scheduler';
+import { exportEmployeesToExcel } from '../../utils/excelExport';
+import { ALL_POSITIONS } from '../../utils/constants';
 
 interface ManagerEmployeeViewProps {
   employees: Employee[];
@@ -33,6 +35,24 @@ export const ManagerEmployeeView: React.FC<ManagerEmployeeViewProps> = ({
     return matchesSearch && matchesStatus && matchesActive;
   });
 
+  const handleExport = (exportAll: boolean = false) => {
+    const listToExport = exportAll ? employees : filteredEmployees;
+    if (listToExport.length === 0) {
+      alert('無符合條件之員工名單可匯出。');
+      return;
+    }
+
+    const filterTags: string[] = [];
+    if (!exportAll) {
+      if (empSearch) filterTags.push(`搜尋: "${empSearch}"`);
+      if (empActiveFilter !== 'all') filterTags.push(empActiveFilter === 'active' ? '在職' : '離職');
+      if (empStatusFilter !== 'all') filterTags.push(empStatusFilter);
+    }
+    const filterDesc = filterTags.length > 0 ? filterTags.join(', ') : '全部員工';
+
+    exportEmployeesToExcel(listToExport, filterDesc);
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Employee Management Header Card */}
@@ -46,15 +66,28 @@ export const ManagerEmployeeView: React.FC<ManagerEmployeeViewProps> = ({
             在此管理店內夥伴的培訓進度與在職狀態。培訓完成餐吧、POS機、後吧、收班、開早後將自動晉升為正式夥伴。
           </p>
         </div>
-        <button
-          onClick={() => handleOpenEmployeeModal()}
-          className="w-full sm:w-auto bg-[#795548] hover:bg-[#6D4C41] text-white font-bold px-5 py-2.5 rounded-xl transition-all shadow-md shadow-[#795548]/10 hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center gap-1.5 cursor-pointer text-sm"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
-          </svg>
-          新增員工資料
-        </button>
+        <div className="flex items-center gap-2.5 w-full sm:w-auto flex-wrap">
+          <button
+            onClick={() => handleExport(false)}
+            className="flex-1 sm:flex-initial bg-white hover:bg-[#FAF7F2] text-[#5D4037] border border-[#DAC0A3]/80 hover:border-[#8D6E63] font-bold px-4 py-2.5 rounded-xl transition-all shadow-xs hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center gap-1.5 cursor-pointer text-sm"
+            title={`匯出員工名單 (${filteredEmployees.length} 位夥伴) 至 Excel`}
+          >
+            <svg className="w-4 h-4 text-emerald-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            <span>匯出名單 ({filteredEmployees.length})</span>
+          </button>
+
+          <button
+            onClick={() => handleOpenEmployeeModal()}
+            className="flex-1 sm:flex-initial bg-[#795548] hover:bg-[#6D4C41] text-white font-bold px-5 py-2.5 rounded-xl transition-all shadow-md shadow-[#795548]/10 hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center gap-1.5 cursor-pointer text-sm"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+            </svg>
+            新增員工資料
+          </button>
+        </div>
       </div>
 
       {/* Filters Row */}
@@ -146,9 +179,10 @@ export const ManagerEmployeeView: React.FC<ManagerEmployeeViewProps> = ({
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredEmployees.map(emp => {
-            const isTraining = emp.trainingPosition || (emp.trainedPositions && emp.trainedPositions.length < 3);
+            const totalPositionsCount = ALL_POSITIONS.length;
+            const isTraining = emp.trainingPosition || (emp.trainedPositions && emp.trainedPositions.length < totalPositionsCount);
             const trainedCount = emp.trainedPositions ? emp.trainedPositions.length : 0;
-            const progressPercent = Math.round((trainedCount / 3) * 100);
+            const progressPercent = Math.min(100, Math.round((trainedCount / totalPositionsCount) * 100));
 
             return (
               <div
@@ -216,7 +250,7 @@ export const ManagerEmployeeView: React.FC<ManagerEmployeeViewProps> = ({
                     <div className="space-y-1">
                       <div className="flex justify-between items-center text-[10px] font-bold text-[#6D4C41]">
                         <span>合格進度</span>
-                        <span>{trainedCount}/3 ({progressPercent}%)</span>
+                        <span>{trainedCount}/{totalPositionsCount} ({progressPercent}%)</span>
                       </div>
                       <div className="w-full bg-[#EADBC8]/40 h-2 rounded-full overflow-hidden">
                         <div

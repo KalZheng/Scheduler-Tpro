@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx-js-style';
 import JSZip from 'jszip';
 import type { WorkSchedule, WorkerAvailability, Employee } from '../services/scheduler';
-import { DAYS_OF_WEEK } from './constants';
+import { DAYS_OF_WEEK, ALL_POSITIONS } from './constants';
 import { formatDateString, getDatesInRange, calculateDuration, getCleanNote, getManagerNote, compareTimeStrings } from './dateUtils';
 
 interface GenerateExcelParams {
@@ -279,5 +279,206 @@ export const exportToExcel = async (params: GenerateExcelParams): Promise<void> 
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   }
+};
+
+export const exportEmployeesToExcel = async (
+  employees: Employee[],
+  filterDescription?: string
+): Promise<void> => {
+  if (!employees || employees.length === 0) {
+    alert('尚無員工資料可供匯出。');
+    return;
+  }
+
+  const wb = XLSX.utils.book_new();
+
+  const titleRow = [
+    { v: '埔里酒廠門市 - 員工名單與在職狀態總表', t: 's', s: { font: { bold: true, sz: 14, color: { rgb: '3E2723' } } } }
+  ];
+
+  const now = new Date();
+  const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  const subTitleRow = [
+    { v: `匯出時間: ${dateStr}${filterDescription ? ` | 篩選條件: ${filterDescription}` : ''} | 總計: ${employees.length} 位夥伴`, t: 's', s: { font: { sz: 10, italic: true, color: { rgb: '6D4C41' } } } }
+  ];
+
+  const headers = [
+    '序號',
+    '姓名',
+    '在職狀態',
+    '身分',
+    '新進人員',
+    '聯絡電話',
+    '正在培訓崗位',
+    '已受訓合格崗位',
+    '合格進度',
+    '持有證照',
+    '建立日期'
+  ];
+
+  const headerRow = headers.map(h => ({
+    v: h,
+    t: 's',
+    s: {
+      fill: { fgColor: { rgb: '795548' } },
+      font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 11 },
+      alignment: { horizontal: 'center', vertical: 'center' },
+      border: {
+        top: { style: 'thin', color: { rgb: 'DAC0A3' } },
+        bottom: { style: 'medium', color: { rgb: '3E2723' } },
+        left: { style: 'thin', color: { rgb: 'DAC0A3' } },
+        right: { style: 'thin', color: { rgb: 'DAC0A3' } }
+      }
+    }
+  }));
+
+  const dataRows = employees.map((emp, index) => {
+    const isActive = emp.active !== false;
+    const isNewcomer = !!emp.isNewcomer;
+    const trainedCount = emp.trainedPositions ? emp.trainedPositions.length : 0;
+    const trainedStr = emp.trainedPositions && emp.trainedPositions.length > 0
+      ? emp.trainedPositions.join('、')
+      : '無';
+    const certsStr = emp.certificates && emp.certificates.length > 0
+      ? emp.certificates.join('、')
+      : '無';
+    const createdDateStr = emp.createdAt ? new Date(emp.createdAt).toLocaleDateString('zh-TW') : '-';
+    const isEven = index % 2 === 1;
+    const rowBg = isEven ? 'FAF7F2' : 'FFFFFF';
+
+    const cellBaseStyle = {
+      fill: { fgColor: { rgb: rowBg } },
+      font: { sz: 10, color: { rgb: isActive ? '3E2723' : '8D6E63' } },
+      alignment: { vertical: 'center' },
+      border: {
+        top: { style: 'thin', color: { rgb: 'EADBC8' } },
+        bottom: { style: 'thin', color: { rgb: 'EADBC8' } },
+        left: { style: 'thin', color: { rgb: 'EADBC8' } },
+        right: { style: 'thin', color: { rgb: 'EADBC8' } }
+      }
+    };
+
+    return [
+      { v: index + 1, t: 'n', s: { ...cellBaseStyle, alignment: { horizontal: 'center', vertical: 'center' } } },
+      { v: emp.name, t: 's', s: { ...cellBaseStyle, font: { ...cellBaseStyle.font, bold: true } } },
+      {
+        v: isActive ? '在職' : '離職',
+        t: 's',
+        s: {
+          ...cellBaseStyle,
+          font: { ...cellBaseStyle.font, bold: true, color: { rgb: isActive ? '2E7D32' : 'C62828' } },
+          alignment: { horizontal: 'center', vertical: 'center' }
+        }
+      },
+      {
+        v: emp.status,
+        t: 's',
+        s: {
+          ...cellBaseStyle,
+          font: { ...cellBaseStyle.font, bold: true, color: { rgb: emp.status === '正式夥伴' ? '1565C0' : '6A1B9A' } },
+          alignment: { horizontal: 'center', vertical: 'center' }
+        }
+      },
+      {
+        v: isNewcomer ? '是' : '否',
+        t: 's',
+        s: {
+          ...cellBaseStyle,
+          font: { ...cellBaseStyle.font, color: { rgb: isNewcomer ? 'E91E63' : '8D6E63' }, bold: isNewcomer },
+          alignment: { horizontal: 'center', vertical: 'center' }
+        }
+      },
+      { v: emp.phone || '無', t: 's', s: { ...cellBaseStyle, alignment: { horizontal: 'center', vertical: 'center' } } },
+      { v: emp.trainingPosition || '無', t: 's', s: { ...cellBaseStyle, alignment: { horizontal: 'center', vertical: 'center' } } },
+      { v: trainedStr, t: 's', s: { ...cellBaseStyle, alignment: { horizontal: 'left', vertical: 'center' } } },
+      {
+        v: `${trainedCount}/${ALL_POSITIONS.length} (${Math.round((trainedCount / ALL_POSITIONS.length) * 100)}%)`,
+        t: 's',
+        s: { ...cellBaseStyle, alignment: { horizontal: 'center', vertical: 'center' } }
+      },
+      { v: certsStr, t: 's', s: { ...cellBaseStyle, alignment: { horizontal: 'left', vertical: 'center' } } },
+      { v: createdDateStr, t: 's', s: { ...cellBaseStyle, alignment: { horizontal: 'center', vertical: 'center' } } }
+    ];
+  });
+
+  const wsData = [
+    titleRow,
+    subTitleRow,
+    [],
+    headerRow,
+    ...dataRows
+  ];
+
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+  ws['!cols'] = [
+    { wch: 6 },
+    { wch: 14 },
+    { wch: 10 },
+    { wch: 12 },
+    { wch: 10 },
+    { wch: 15 },
+    { wch: 14 },
+    { wch: 24 },
+    { wch: 14 },
+    { wch: 18 },
+    { wch: 14 }
+  ];
+
+  ws['!rows'] = [
+    { hpt: 26 },
+    { hpt: 18 },
+    { hpt: 8 },
+    { hpt: 24 },
+    ...employees.map(() => ({ hpt: 22 }))
+  ];
+
+  ws['!merges'] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: 10 } },
+    { s: { r: 1, c: 0 }, e: { r: 1, c: 10 } }
+  ];
+
+  XLSX.utils.book_append_sheet(wb, ws, '員工名單與狀態');
+
+  const rawBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  let finalBuffer: Uint8Array = new Uint8Array(rawBuffer);
+
+  try {
+    const zip = await JSZip.loadAsync(rawBuffer);
+    const sheetFiles = Object.keys(zip.files).filter(name => name.startsWith('xl/worksheets/sheet'));
+    const paneXml = `<pane ySplit="4" topLeftCell="A5" activePane="bottomLeft" state="frozen"/>`;
+
+    for (const filename of sheetFiles) {
+      const zipFile = zip.file(filename);
+      if (!zipFile) continue;
+      let xml = await zipFile.async('text');
+      if (xml.includes('<sheetView workbookViewId="0"/>')) {
+        xml = xml.replace('<sheetView workbookViewId="0"/>', `<sheetView workbookViewId="0">${paneXml}</sheetView>`);
+      } else if (xml.includes('<sheetView workbookViewId="0">')) {
+        xml = xml.replace('<sheetView workbookViewId="0">', `<sheetView workbookViewId="0">${paneXml}`);
+      } else if (xml.includes('<sheetViews>')) {
+        xml = xml.replace('<sheetViews>', `<sheetViews><sheetView workbookViewId="0">${paneXml}</sheetView>`);
+      }
+      zip.file(filename, xml);
+    }
+    finalBuffer = await zip.generateAsync({ type: 'uint8array' });
+  } catch (err) {
+    console.error('Failed to inject freeze pane in employee export:', err);
+  }
+
+  const ymd = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+  const filename = `員工名單與狀態表_${ymd}.xlsx`;
+
+  const blob = new Blob([finalBuffer.buffer as ArrayBuffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 };
 
