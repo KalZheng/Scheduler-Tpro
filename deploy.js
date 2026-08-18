@@ -4,6 +4,7 @@
 
 import { Client } from "basic-ftp";
 import dotenv from "dotenv";
+import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -45,6 +46,14 @@ async function deploy() {
         });
 
         // --- UPLOAD PHASE (slow, but doesn't touch anything live yet) ---
+
+        // Upload .htaccess if present
+        const htaccessPath = path.join(LOCAL_DIST_DIR, ".htaccess");
+        if (fs.existsSync(htaccessPath)) {
+            console.log("⚙️ Uploading .htaccess to remote root...");
+            await client.cd(REMOTE_ROOT);
+            await client.uploadFrom(htaccessPath, ".htaccess");
+        }
 
         console.log("📄 Uploading index.html to a temp file...");
         await client.cd(REMOTE_ROOT);

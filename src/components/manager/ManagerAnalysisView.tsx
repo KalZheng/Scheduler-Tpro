@@ -423,6 +423,11 @@ const ManagerWeeklyTimelineChart: React.FC<{
   const maxHourVal = maxHour + 0.5;
   const totalSpan = Math.max(1, maxHourVal - minHourVal);
 
+  const topPercent10 = ((10.5 - minHourVal) / totalSpan) * 100;
+  const topPercent14 = ((14.5 - minHourVal) / totalSpan) * 100;
+  const showLine10 = 10.5 >= minHourVal && 10.5 <= maxHourVal;
+  const showLine14 = 14.5 >= minHourVal && 14.5 <= maxHourVal;
+
   const activeLegendWorkers = React.useMemo(() => {
     const activeDateStrs = new Set(displayDays.map(d => formatDateString(d)));
     const activeSchedules = schedules.filter(s => activeDateStrs.has(s.date));
@@ -500,7 +505,7 @@ const ManagerWeeklyTimelineChart: React.FC<{
                 const hasSchedules = schedules.some(s => s.date === dateStr);
 
                 return (
-                  <div key={dNum} className={`flex-1 text-center flex flex-col items-center min-w-[70px] border-r border-[#DAC0A3]/20 last:border-r-0 ${isWeekend ? 'text-red-650 font-bold' : 'text-[#6D4C41]'}`}>
+                  <div key={dNum} className={`flex-1 text-center flex flex-col items-center min-w-[70px] border-r border-black/40 last:border-r-0 ${isWeekend ? 'text-red-650 font-bold' : 'text-[#6D4C41]'}`}>
                     <span className={`text-[14px] font-mono font-extrabold leading-none ${hasSchedules ? 'text-[#3E2723]' : 'opacity-70'}`}>{dNum}</span>
                     <span className="text-[11px] font-extrabold mt-0.5 opacity-90">{dayName}</span>
                   </div>
@@ -525,7 +530,7 @@ const ManagerWeeklyTimelineChart: React.FC<{
                     {/* Columns Background Guidelines */}
                     <div className="flex flex-1 justify-around h-full">
                       {displayDays.map((dateObj) => (
-                        <div key={dateObj.getDate()} className="flex-1 min-w-[70px] border-r border-[#DAC0A3]/15 last:border-r-0 h-full"></div>
+                        <div key={dateObj.getDate()} className="flex-1 min-w-[70px] border-r border-black/50 last:border-r-0 h-full"></div>
                       ))}
                     </div>
                   </div>
@@ -609,6 +614,82 @@ const ManagerWeeklyTimelineChart: React.FC<{
                 );
               })}
             </div>
+
+            {/* Horizontal Fixed Reference Lines at 10:30 & 14:30 (Covering the bars) */}
+            {showLine10 && (
+              <div
+                className="absolute left-0 right-0 z-20 pointer-events-none flex items-center"
+                style={{ top: `${topPercent10}%`, transform: 'translateY(-50%)' }}
+              >
+                <div className="w-36 shrink-0 flex items-center justify-end pr-2">
+                  <span className="bg-[#D32F2F] text-white text-[10px] font-mono font-extrabold px-2 py-0.5 rounded-full shadow-sm">
+                    10:30
+                  </span>
+                </div>
+                <div className="flex-1 h-[2px] bg-[#D32F2F] shadow-sm"></div>
+              </div>
+            )}
+
+            {showLine14 && (
+              <div
+                className="absolute left-0 right-0 z-20 pointer-events-none flex items-center"
+                style={{ top: `${topPercent14}%`, transform: 'translateY(-50%)' }}
+              >
+                <div className="w-36 shrink-0 flex items-center justify-end pr-2">
+                  <span className="bg-[#E65100] text-white text-[10px] font-mono font-extrabold px-2 py-0.5 rounded-full shadow-sm">
+                    14:30
+                  </span>
+                </div>
+                <div className="flex-1 h-[2px] bg-[#E65100] shadow-sm"></div>
+              </div>
+            )}
+          </div>
+
+          {/* Footer Row: Daily Total Work Hours */}
+          <div className="flex border-t border-[#DAC0A3]/40 pt-2.5 mt-2.5 items-center bg-[#FAF7F2]/60 rounded-xl p-2 border border-[#DAC0A3]/30">
+            <div className="w-36 shrink-0 flex flex-col justify-center pl-2">
+              <span className="text-xs font-extrabold text-[#3E2723] flex items-center gap-1.5">
+                <span>⏱️ 當日總工時</span>
+              </span>
+              <span className="text-[10px] text-[#8D6E63] font-mono font-bold mt-0.5">
+                週累計: {displayDays.reduce((acc, d) => {
+                  const dStr = formatDateString(d);
+                  return acc + schedules.filter(s => s.date === dStr).reduce((sum, s) => sum + calculateDuration(s.startTime, s.endTime), 0);
+                }, 0).toFixed(1)}h
+              </span>
+            </div>
+
+            <div className="flex flex-1 justify-around">
+              {displayDays.map((dateObj) => {
+                const dateStr = formatDateString(dateObj);
+                const daySchedules = schedules.filter(s => s.date === dateStr);
+                const totalHours = daySchedules.reduce((sum, s) => sum + calculateDuration(s.startTime, s.endTime), 0);
+                const isWeekend = dateObj.getDay() === 0 || dateObj.getDay() === 6;
+
+                return (
+                  <div
+                    key={dateStr}
+                    className="flex-1 text-center flex flex-col items-center justify-center min-w-[70px] border-r border-black/40 last:border-r-0 px-1"
+                  >
+                    {daySchedules.length > 0 ? (
+                      <div className="space-y-0.5">
+                        <span className={`font-mono text-xs font-extrabold px-2.5 py-0.5 rounded-lg inline-block border ${isWeekend
+                          ? 'bg-red-50 text-red-750 border-red-200'
+                          : 'bg-[#EADBC8]/60 text-[#3E2723] border-[#DAC0A3]/60'
+                          }`}>
+                          {totalHours % 1 === 0 ? totalHours : totalHours.toFixed(1)}h
+                        </span>
+                        <span className="text-[10px] text-[#8D6E63] font-bold block">
+                          {daySchedules.length} 人出勤
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-xs font-mono text-[#8D6E63]/40 font-bold">-</span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       </div>
@@ -616,7 +697,7 @@ const ManagerWeeklyTimelineChart: React.FC<{
       {/* Chart Legend */}
       <div className="space-y-3 border-t border-[#DAC0A3]/25 pt-3 text-xs text-[#6D4C41]">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 flex-wrap">
             <span className="font-extrabold text-[#3E2723]">標籤說明:</span>
             <div className="flex items-center gap-1.5">
               <span className="px-1.5 py-0.5 rounded text-[10px] bg-[#795548] text-white font-bold">正職</span>
@@ -630,9 +711,15 @@ const ManagerWeeklyTimelineChart: React.FC<{
               <span className="text-[10px] font-extrabold bg-red-500 text-white px-1 rounded">⚠️ 超時</span>
               <span>扣除休息後工時 &gt; 8 小時</span>
             </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-[2px] bg-[#D32F2F] rounded"></span>
+              <span className="text-[10px] font-bold text-[#D32F2F]">10:30</span>
+              <span className="w-3 h-[2px] bg-[#E65100] rounded ml-1"></span>
+              <span className="text-[10px] font-bold text-[#E65100]">14:30 基準線</span>
+            </div>
           </div>
           <div className="text-[11px] text-[#8D6E63] italic">
-            💡 垂直長條頂端與底端精確對應班別起訖，底部圖例僅呈現當前檢視區間內有排班的夥伴。
+            💡 垂直長條頂端與底端精確對應班別起訖，紅/橘實線為 10:30 與 14:30 參考基準線。
           </div>
         </div>
 
