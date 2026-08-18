@@ -101,20 +101,81 @@ function App() {
   const [passcodeInput, setPasscodeInput] = useState('');
   const [loginError, setLoginError] = useState('');
 
-  // Hash-based routing to separate Worker and Manager views
+  // Helper for uniform SPA paths (/manager, /worker)
+  const getAppPath = (subPath: 'manager' | 'worker') => {
+    const base = import.meta.env.BASE_URL || '/';
+    const cleanBase = base.endsWith('/') ? base.slice(0, -1) : base;
+    return `${cleanBase}/${subPath}`;
+  };
+
+  const navigateToRole = (role: 'manager' | 'worker') => {
+    const targetPath = getAppPath(role);
+    window.history.pushState(null, '', targetPath);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  };
+
+  // Path, Hash & Query-based routing with automatic URL normalization & ?i=1 cleanup
   useEffect(() => {
-    const handleHashChange = () => {
+    const handleRouteChange = () => {
       const hash = window.location.hash;
-      if (hash === '#/manager') {
+      const pathname = window.location.pathname;
+      const searchParams = new URLSearchParams(window.location.search);
+      const hasSecurityParam = searchParams.has('i'); // InfinityFree ?i=1 challenge param
+
+      const isManager =
+        hash.includes('manager') ||
+        pathname.endsWith('/manager') ||
+        pathname.endsWith('/manager/') ||
+        searchParams.get('role') === 'manager';
+
+      const isWorker =
+        hash.includes('worker') ||
+        pathname.endsWith('/worker') ||
+        pathname.endsWith('/worker/') ||
+        searchParams.get('role') === 'worker';
+
+      const savedRole = sessionStorage.getItem('last_role');
+      const isAuth = sessionStorage.getItem('manager_auth') === 'true';
+
+      if (isManager || (hasSecurityParam && savedRole === 'manager')) {
         setActiveRole('manager');
-      } else {
+        sessionStorage.setItem('last_role', 'manager');
+        const targetPath = getAppPath('manager');
+        if (window.location.pathname !== targetPath || window.location.hash || hasSecurityParam || searchParams.has('role')) {
+          window.history.replaceState(null, '', targetPath);
+        }
+      } else if (isWorker) {
         setActiveRole('worker');
+        sessionStorage.setItem('last_role', 'worker');
+        const targetPath = getAppPath('worker');
+        if (window.location.pathname !== targetPath || window.location.hash || hasSecurityParam || searchParams.has('role')) {
+          window.history.replaceState(null, '', targetPath);
+        }
+      } else {
+        // Fallback: If authenticated as manager or remembered from session
+        if (savedRole === 'manager' || (isAuth && !hash && !isWorker)) {
+          setActiveRole('manager');
+          const targetPath = getAppPath('manager');
+          if (window.location.pathname !== targetPath || window.location.hash || hasSecurityParam) {
+            window.history.replaceState(null, '', targetPath);
+          }
+        } else {
+          setActiveRole('worker');
+          if (hasSecurityParam || (hash && hash !== '#/worker')) {
+            const targetPath = getAppPath('worker');
+            window.history.replaceState(null, '', targetPath);
+          }
+        }
       }
     };
 
-    handleHashChange();
-    window.addEventListener('hashchange', handleHashChange);
-    return () => window.removeEventListener('hashchange', handleHashChange);
+    handleRouteChange();
+    window.addEventListener('hashchange', handleRouteChange);
+    window.addEventListener('popstate', handleRouteChange);
+    return () => {
+      window.removeEventListener('hashchange', handleRouteChange);
+      window.removeEventListener('popstate', handleRouteChange);
+    };
   }, []);
 
   // Handle Login authentication
@@ -136,7 +197,7 @@ function App() {
     setIsAuthenticated(false);
     sessionStorage.removeItem('manager_auth');
     setPasscodeInput('');
-    window.location.hash = '#/worker';
+    navigateToRole('worker');
   };
 
   // Manager view sub-mode
@@ -1881,7 +1942,7 @@ function App() {
           <div className="flex justify-center">
             <div className="bg-white/60 p-1.5 rounded-2xl border border-[#DAC0A3]/50 backdrop-blur-md flex gap-2 shadow-sm">
               <button
-                onClick={() => { window.location.hash = '#/worker'; }}
+                onClick={() => navigateToRole('worker')}
                 className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 cursor-pointer ${activeRole === 'worker'
                   ? 'bg-[#6D4C41] text-white shadow-md shadow-[#6D4C41]/15'
                   : 'text-[#8D6E63] hover:text-[#5D4037] hover:bg-[#F5EBE6]/60'
@@ -1893,7 +1954,7 @@ function App() {
                 員工：登記可用時間
               </button>
               <button
-                onClick={() => { window.location.hash = '#/manager'; }}
+                onClick={() => navigateToRole('manager')}
                 className={`px-6 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 cursor-pointer ${activeRole === 'manager'
                   ? 'bg-[#6D4C41] text-white shadow-md shadow-[#6D4C41]/15'
                   : 'text-[#8D6E63] hover:text-[#5D4037] hover:bg-[#F5EBE6]/60'
