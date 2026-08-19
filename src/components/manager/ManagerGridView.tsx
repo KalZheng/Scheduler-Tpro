@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import type { WorkSchedule, WorkerAvailability, Employee } from '../../services/scheduler';
 import { DAYS_OF_WEEK } from '../../utils/constants';
 import workplaces from '../../config/workplaces.json';
@@ -78,6 +78,56 @@ export const ManagerGridView: React.FC<ManagerGridViewProps> = ({
   erpDays = [1, 3, 5]
 }) => {
   const [gridSubTab, setGridSubTab] = useState<'schedules' | 'availabilities'>('schedules');
+  const [dateRangePart, setDateRangePart] = useState<'part1' | 'part2' | 'all'>('part1');
+
+  const lastDayNum = useMemo(() => {
+    return gridDates.length > 0 ? gridDates[gridDates.length - 1].getDate() : 31;
+  }, [gridDates]);
+
+  // Automatically switch tab if selectedDateStr changes outside current tab range
+  useEffect(() => {
+    if (selectedDateStr) {
+      const parts = selectedDateStr.split('-');
+      if (parts.length >= 3) {
+        const day = parseInt(parts[2], 10);
+        if (!isNaN(day)) {
+          if (day <= 15 && dateRangePart === 'part2') {
+            setDateRangePart('part1');
+          } else if (day >= 16 && dateRangePart === 'part1') {
+            setDateRangePart('part2');
+          }
+        }
+      }
+    }
+  }, [selectedDateStr]);
+
+  const displayedDates = useMemo(() => {
+    if (dateRangePart === 'part1') {
+      return gridDates.filter(d => d.getDate() <= 15);
+    }
+    if (dateRangePart === 'part2') {
+      return gridDates.filter(d => d.getDate() >= 16);
+    }
+    return gridDates;
+  }, [gridDates, dateRangePart]);
+
+  // Ensure horizontal wheel scrolling works across all tab selections (1-15, 16-end, all)
+  useEffect(() => {
+    const container = gridContainerRef.current;
+    if (!container) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      if (e.deltaY !== 0 && (container.scrollWidth > container.clientWidth || e.shiftKey)) {
+        e.preventDefault();
+        container.scrollLeft += e.deltaY;
+      }
+    };
+
+    container.addEventListener('wheel', handleWheel, { passive: false });
+    return () => {
+      container.removeEventListener('wheel', handleWheel);
+    };
+  }, [gridContainerRef, dateRangePart, gridSubTab, displayedDates]);
 
   const getDateAvailSummary = (dateStr: string) => {
     const dayAvails = availabilities.filter(a => a.date === dateStr);
@@ -94,8 +144,9 @@ export const ManagerGridView: React.FC<ManagerGridViewProps> = ({
   };
 
   const getEmployeeAvailSummary = (empName: string) => {
+    const displayedDateStrSet = new Set(displayedDates.map(d => formatDateString(d)));
     const empAvails = availabilities.filter(
-      a => a.employeeName.trim().toLowerCase() === empName.toLowerCase()
+      a => a.employeeName.trim().toLowerCase() === empName.toLowerCase() && displayedDateStrSet.has(a.date)
     );
     let workDays = 0;
     let leaveDays = 0;
@@ -111,40 +162,91 @@ export const ManagerGridView: React.FC<ManagerGridViewProps> = ({
 
   return (
     <main className="glass-panel rounded-2xl overflow-hidden border border-[#DAC0A3]/50 shadow-sm animate-scale-in flex flex-col">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between px-4 py-3 border-b border-[#DAC0A3]/50 bg-[#F5EBE6]/80 gap-3">
-        <div className="flex items-center gap-1.5 bg-white/90 p-1 rounded-xl border border-[#DAC0A3]/60 shadow-xs">
-          <button
-            onClick={() => setGridSubTab('schedules')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${gridSubTab === 'schedules'
-              ? 'bg-[#795548] text-white shadow-xs'
-              : 'text-[#6D4C41] hover:text-[#3E2723] hover:bg-[#FAF7F2]'
-              }`}
-          >
-            <span>📅 正式排班網格</span>
-            <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${gridSubTab === 'schedules' ? 'bg-white/20 text-white' : 'bg-[#795548]/10 text-[#5D4037]'}`}>
-              {schedules.length} 班次
-            </span>
-          </button>
+      <div className="flex flex-col xl:flex-row items-start xl:items-center justify-between px-4 py-3 border-b border-[#DAC0A3]/50 bg-[#F5EBE6]/80 gap-3">
+        <div className="flex flex-wrap items-center gap-2.5">
+          {/* Main Grid View Sub-Tab */}
+          <div className="flex items-center gap-1 bg-white/90 p-1 rounded-xl border border-[#DAC0A3]/60 shadow-xs">
+            <button
+              onClick={() => setGridSubTab('schedules')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${gridSubTab === 'schedules'
+                ? 'bg-[#795548] text-white shadow-xs'
+                : 'text-[#6D4C41] hover:text-[#3E2723] hover:bg-[#FAF7F2]'
+                }`}
+            >
+              <span>📅 正式排班網格</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${gridSubTab === 'schedules' ? 'bg-white/20 text-white' : 'bg-[#795548]/10 text-[#5D4037]'}`}>
+                {schedules.length} 班次
+              </span>
+            </button>
 
-          <button
-            onClick={() => setGridSubTab('availabilities')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${gridSubTab === 'availabilities'
-              ? 'bg-[#2E7D32] text-white shadow-xs'
-              : 'text-[#6D4C41] hover:text-[#2E7D32] hover:bg-[#E8F5E9]/60'
-              }`}
-          >
-            <span>📋 夥伴登記時段網格 (可用時間)</span>
-            <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${gridSubTab === 'availabilities' ? 'bg-white/20 text-white' : 'bg-emerald-600/10 text-emerald-800'}`}>
-              {availabilities.length} 筆登記
+            <button
+              onClick={() => setGridSubTab('availabilities')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${gridSubTab === 'availabilities'
+                ? 'bg-[#2E7D32] text-white shadow-xs'
+                : 'text-[#6D4C41] hover:text-[#2E7D32] hover:bg-[#E8F5E9]/60'
+                }`}
+            >
+              <span>📋 夥伴登記時段網格</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${gridSubTab === 'availabilities' ? 'bg-white/20 text-white' : 'bg-emerald-600/10 text-emerald-800'}`}>
+                {availabilities.length} 筆登記
+              </span>
+            </button>
+          </div>
+
+          {/* Date Split Tabs: 1~15 vs 16~月底 vs 全月 */}
+          <div className="flex items-center gap-1 bg-white/90 p-1 rounded-xl border border-[#DAC0A3]/60 shadow-xs">
+            <span className="text-[11px] font-bold text-[#8D6E63] pl-2 pr-1 select-none flex items-center gap-1">
+              <span>🗓️</span>
+              <span className="hidden sm:inline">日期範圍:</span>
             </span>
-          </button>
+
+            <button
+              type="button"
+              onClick={() => setDateRangePart('part1')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${dateRangePart === 'part1'
+                ? 'bg-[#8D6E63] text-white shadow-xs font-black'
+                : 'text-[#6D4C41] hover:text-[#3E2723] hover:bg-[#FAF7F2]'
+                }`}
+            >
+              <span>1 ~ 15 日</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-md ${dateRangePart === 'part1' ? 'bg-white/20 text-white' : 'bg-[#8D6E63]/10 text-[#6D4C41]'}`}>
+                上半月
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setDateRangePart('part2')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${dateRangePart === 'part2'
+                ? 'bg-[#8D6E63] text-white shadow-xs font-black'
+                : 'text-[#6D4C41] hover:text-[#3E2723] hover:bg-[#FAF7F2]'
+                }`}
+            >
+              <span>16 ~ {lastDayNum} 日</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-md ${dateRangePart === 'part2' ? 'bg-white/20 text-white' : 'bg-[#8D6E63]/10 text-[#6D4C41]'}`}>
+                下半月
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setDateRangePart('all')}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${dateRangePart === 'all'
+                ? 'bg-[#8D6E63] text-white shadow-xs font-black'
+                : 'text-[#6D4C41] hover:text-[#3E2723] hover:bg-[#FAF7F2]'
+                }`}
+              title="顯示整月全部日期"
+            >
+              <span>全月</span>
+            </button>
+          </div>
         </div>
 
         <div className="text-xs text-[#6D4C41]">
           {gridSubTab === 'availabilities' ? (
             <div className="bg-emerald-50 text-emerald-800 border border-emerald-200/80 px-3 py-1.5 rounded-xl text-[11px] font-medium flex items-center gap-1.5">
               <span>💡</span>
-              <span>此網格純粹呈現每位夥伴<b>原始登記之可用時段與備註</b>，方便在排班前後查閱出勤意願。</span>
+              <span>呈現每位夥伴<b>原始登記之可用時段與備註</b>，方便在排班前後查閱出勤意願。</span>
             </div>
           ) : (
             <div className="bg-white/70 text-[#5D4037] border border-[#DAC0A3]/50 px-3 py-1.5 rounded-xl text-[11px] font-medium flex items-center gap-1.5">
@@ -156,13 +258,13 @@ export const ManagerGridView: React.FC<ManagerGridViewProps> = ({
       </div>
 
       <div ref={gridContainerRef} className="overflow-x-auto max-w-full flex-1">
-        <table className="w-full border-collapse text-left select-none table-fixed">
+        <table className="min-w-max w-full border-collapse text-left select-none table-fixed">
           <thead>
             <tr className="border-b border-[#DAC0A3]/50 bg-[#F5EBE6]/60">
-              <th rowSpan={3} className="sticky left-0 z-20 bg-[#F5EBE6] px-4 py-4 text-xs font-black text-[#3E2723] border-r border-b border-[#DAC0A3]/50 w-[145px] shadow-[4px_0_8px_-4px_rgba(100,70,50,0.15)]">
+              <th rowSpan={3} className="sticky left-0 z-20 bg-[#F5EBE6] px-4 py-4 text-xs font-black text-[#3E2723] border-r border-b border-[#DAC0A3]/50 w-[145px] min-w-[145px] shadow-[4px_0_8px_-4px_rgba(100,70,50,0.15)]">
                 人員姓名
               </th>
-              {gridDates.map(dateObj => {
+              {displayedDates.map(dateObj => {
                 const dateStr = formatDateString(dateObj);
                 const isToday = dateStr === todayStr;
                 const isSelected = dateStr === selectedDateStr;
@@ -177,7 +279,7 @@ export const ManagerGridView: React.FC<ManagerGridViewProps> = ({
                   <th
                     key={dateStr}
                     onClick={() => setSelectedDateStr(dateStr)}
-                    className={`px-2 py-2 text-center text-xs font-bold border-r border-b border-[#DAC0A3]/50 w-[100px] cursor-pointer transition-colors ${isSelected
+                    className={`px-2 py-2 text-center text-xs font-bold border-r border-b border-[#DAC0A3]/50 w-[100px] min-w-[100px] cursor-pointer transition-colors ${isSelected
                       ? 'bg-[#8D6E63]/15 text-[#3E2723]'
                       : isToday
                         ? 'bg-[#F5EBE6] text-[#3E2723] font-black'
@@ -214,12 +316,14 @@ export const ManagerGridView: React.FC<ManagerGridViewProps> = ({
                   </th>
                 );
               })}
-              <th rowSpan={3} className="px-3 py-4 text-center text-xs font-black text-[#3E2723] border-b border-[#DAC0A3]/50 w-[95px] bg-[#F5EBE6]/70">
-                {gridSubTab === 'schedules' ? '總工時(hrs)' : '總登記統計'}
+              <th rowSpan={3} className="px-3 py-4 text-center text-xs font-black text-[#3E2723] border-b border-[#DAC0A3]/50 w-[95px] min-w-[95px] bg-[#F5EBE6]/70">
+                {gridSubTab === 'schedules'
+                  ? (dateRangePart === 'all' ? '總工時(hrs)' : '本期工時(hrs)')
+                  : (dateRangePart === 'all' ? '總登記統計' : '本期登記統計')}
               </th>
             </tr>
             <tr className="border-b border-[#DAC0A3]/50 bg-[#F5EBE6]/60">
-              {gridDates.map(dateObj => {
+              {displayedDates.map(dateObj => {
                 const dateStr = formatDateString(dateObj);
                 const isToday = dateStr === todayStr;
                 const isSelected = dateStr === selectedDateStr;
@@ -231,7 +335,7 @@ export const ManagerGridView: React.FC<ManagerGridViewProps> = ({
                   <th
                     key={dateStr + '-erp'}
                     onClick={() => setSelectedDateStr(dateStr)}
-                    className={`px-2 py-1 text-center border-r border-b border-[#DAC0A3]/50 w-[100px] cursor-pointer transition-colors ${isSelected
+                    className={`px-2 py-1 text-center border-r border-b border-[#DAC0A3]/50 w-[100px] min-w-[100px] cursor-pointer transition-colors ${isSelected
                       ? 'bg-[#8D6E63]/15 text-[#3E2723]'
                       : isToday
                         ? 'bg-[#F5EBE6] text-[#3E2723] font-black'
@@ -250,7 +354,7 @@ export const ManagerGridView: React.FC<ManagerGridViewProps> = ({
               })}
             </tr>
             <tr className="border-b border-[#DAC0A3]/50 bg-[#F5EBE6]/40">
-              {gridDates.map(dateObj => {
+              {displayedDates.map(dateObj => {
                 const dateStr = formatDateString(dateObj);
                 const isToday = dateStr === todayStr;
                 const isSelected = dateStr === selectedDateStr;
@@ -259,7 +363,7 @@ export const ManagerGridView: React.FC<ManagerGridViewProps> = ({
                 return (
                   <th
                     key={dateStr + '-note'}
-                    className={`px-1 py-1.5 text-center border-r border-b border-[#DAC0A3]/50 w-[100px] transition-colors relative group/note ${isSelected
+                    className={`px-1 py-1.5 text-center border-r border-b border-[#DAC0A3]/50 w-[100px] min-w-[100px] transition-colors relative group/note ${isSelected
                       ? 'bg-[#8D6E63]/10 text-[#3E2723]'
                       : isToday
                         ? 'bg-[#FAF7F2]'
@@ -301,18 +405,19 @@ export const ManagerGridView: React.FC<ManagerGridViewProps> = ({
           <tbody className="divide-y divide-[#DAC0A3]/30 bg-white/40">
             {allEmployees.length === 0 ? (
               <tr>
-                <td colSpan={gridDates.length + 2} className="py-12 text-center text-xs text-[#8D6E63] font-medium">
+                <td colSpan={displayedDates.length + 2} className="py-12 text-center text-xs text-[#8D6E63] font-medium">
                   尚無員工資料，請先至員工管理新增夥伴。
                 </td>
               </tr>
             ) : (
               allEmployees.map((empName, index) => {
                 const matchingEmp = employees.find(e => e.name.trim().toLowerCase() === empName.toLowerCase());
-                const empMonthSchedules = schedules.filter(
-                  s => s.employeeName.trim().toLowerCase() === empName.toLowerCase()
+                const displayedDateStrSet = new Set(displayedDates.map(d => formatDateString(d)));
+                const empPeriodSchedules = schedules.filter(
+                  s => s.employeeName.trim().toLowerCase() === empName.toLowerCase() && displayedDateStrSet.has(s.date)
                 );
                 let empTotalHours = 0;
-                empMonthSchedules.forEach(s => {
+                empPeriodSchedules.forEach(s => {
                   if (s.startTime && s.endTime) {
                     const [sH, sM] = s.startTime.split(':').map(Number);
                     const [eH, eM] = s.endTime.split(':').map(Number);
@@ -326,7 +431,7 @@ export const ManagerGridView: React.FC<ManagerGridViewProps> = ({
 
                 return (
                   <tr key={empName} className="hover:bg-[#FAF7F2]/60 transition-colors group">
-                    <td className={`sticky left-0 z-10 px-3.5 py-1 text-sm font-extrabold border-r-2 border-solid border-b border-dotted border-[#DAC0A3]/90 shadow-[4px_0_8px_-4px_rgba(100,70,50,0.1)] w-[145px] h-[52px] align-middle transition-colors ${isNewcomer
+                    <td className={`sticky left-0 z-10 px-3.5 py-1 text-sm font-extrabold border-r-2 border-solid border-b border-dotted border-[#DAC0A3]/90 shadow-[4px_0_8px_-4px_rgba(100,70,50,0.1)] w-[145px] min-w-[145px] h-[52px] align-middle transition-colors ${isNewcomer
                       ? 'bg-pink-100/85 group-hover:bg-pink-200/90 text-pink-700'
                       : 'bg-[#FAF7F2]/95 group-hover:bg-[#F5EBE6] text-[#3E2723]'
                       }`}>
@@ -369,7 +474,7 @@ export const ManagerGridView: React.FC<ManagerGridViewProps> = ({
                       </div>
                     </td>
 
-                    {gridDates.map(dateObj => {
+                    {displayedDates.map(dateObj => {
                       const dateStr = formatDateString(dateObj);
                       const isSelected = dateStr === selectedDateStr;
 
@@ -387,7 +492,7 @@ export const ManagerGridView: React.FC<ManagerGridViewProps> = ({
 
                       if (gridSubTab === 'availabilities') {
                         return (
-                          <td key={dateStr} onClick={() => setSelectedDateStr(dateStr)} className={`p-1 border-r border-solid border-b border-dotted border-[#DAC0A3]/40 text-center w-[100px] h-[52px] relative align-middle transition-colors ${isSelected ? 'bg-[#8D6E63]/10' : ''}`}>
+                          <td key={dateStr} onClick={() => setSelectedDateStr(dateStr)} className={`p-1 border-r border-solid border-b border-dotted border-[#DAC0A3]/40 text-center w-[100px] min-w-[100px] h-[52px] relative align-middle transition-colors ${isSelected ? 'bg-[#8D6E63]/10' : ''}`}>
                             {allEmpAvails.length > 0 ? (
                               <div className="space-y-1">
                                 {allEmpAvails.map(avail => {
@@ -419,7 +524,7 @@ export const ManagerGridView: React.FC<ManagerGridViewProps> = ({
                       }
 
                       return (
-                        <td key={dateStr} onClick={() => setSelectedDateStr(dateStr)} onContextMenu={(e) => { if (e.target === e.currentTarget || empSchedules.length === 0) { e.preventDefault(); e.stopPropagation(); setContextMenu({ x: e.clientX, y: e.clientY, emptyCell: { employeeName: empName, dateStr } }); } }} className={`p-0.5 pt-1 pb-1 border-r border-solid border-b border-dotted border-[#DAC0A3]/40 text-center w-[100px] h-[48px] relative align-middle transition-colors ${isSelected ? 'bg-[#8D6E63]/5' : ''} ${isCellMarkedBlue ? '!bg-[#93C5FD]/40' : ''}`}>
+                        <td key={dateStr} onClick={() => setSelectedDateStr(dateStr)} onContextMenu={(e) => { if (e.target === e.currentTarget || empSchedules.length === 0) { e.preventDefault(); e.stopPropagation(); setContextMenu({ x: e.clientX, y: e.clientY, emptyCell: { employeeName: empName, dateStr } }); } }} className={`p-0.5 pt-1 pb-1 border-r border-solid border-b border-dotted border-[#DAC0A3]/40 text-center w-[100px] min-w-[100px] h-[48px] relative align-middle transition-colors ${isSelected ? 'bg-[#8D6E63]/5' : ''} ${isCellMarkedBlue ? '!bg-[#93C5FD]/40' : ''}`}>
                           {empSchedules.length > 0 || unconfirmedEmpAvails.length > 0 ? (
                             <div className="space-y-0.5">
                               {empSchedules.map(sched => {
@@ -466,7 +571,7 @@ export const ManagerGridView: React.FC<ManagerGridViewProps> = ({
                         </td>
                       );
                     })}
-                    <td className="px-2 py-2 text-center text-xs font-mono font-bold text-[#5D4037] border-b border-[#DAC0A3]/50 w-[95px] bg-[#F5EBE6]/30">
+                    <td className="px-2 py-2 text-center text-xs font-mono font-bold text-[#5D4037] border-b border-[#DAC0A3]/50 w-[95px] min-w-[95px] bg-[#F5EBE6]/30">
                       {gridSubTab === 'schedules' ? (
                         empTotalHours > 0 ? (
                           <span className="text-[#3E2723] font-black text-sm">{Math.round(empTotalHours * 10) / 10}h</span>
