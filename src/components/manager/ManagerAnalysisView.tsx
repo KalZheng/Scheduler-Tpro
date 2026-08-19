@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import type { WorkSchedule, Employee } from '../../services/scheduler';
 import { DAYS_OF_WEEK, COLOR_THEMES } from '../../utils/constants';
 import {
@@ -32,6 +32,48 @@ export const ManagerAnalysisView: React.FC<ManagerAnalysisViewProps> = ({
   getStaffingTargetForHour
 }) => {
   const daysInMonth = getDaysInMonth(currentMonthStart);
+
+  const weeklyStats = useMemo(() => {
+    const weeks: { weekNum: number; label: string; dateRange: string; totalHours: number }[] = [];
+    if (!daysInMonth || daysInMonth.length === 0) return weeks;
+
+    let currentWeekDates: Date[] = [];
+    let weekIndex = 1;
+
+    daysInMonth.forEach((d, idx) => {
+      currentWeekDates.push(d);
+      // Sunday is day 0 in JS -> marks end of standard Mon-Sun week
+      const isSunday = d.getDay() === 0;
+      const isLastDay = idx === daysInMonth.length - 1;
+
+      if (isSunday || isLastDay) {
+        const startDate = currentWeekDates[0];
+        const endDate = currentWeekDates[currentWeekDates.length - 1];
+        const dateRange = `${startDate.getMonth() + 1}/${startDate.getDate()}~${endDate.getMonth() + 1}/${endDate.getDate()}`;
+        const dateSet = new Set(currentWeekDates.map(dateObj => formatDateString(dateObj)));
+
+        let weekHours = 0;
+        schedules.forEach(s => {
+          if (dateSet.has(s.date) && s.startTime && s.endTime) {
+            const dur = calculateDuration(s.startTime, s.endTime);
+            if (dur > 0) weekHours += dur;
+          }
+        });
+
+        weeks.push({
+          weekNum: weekIndex,
+          label: `第 ${weekIndex} 週`,
+          dateRange,
+          totalHours: Math.round(weekHours * 10) / 10
+        });
+
+        weekIndex++;
+        currentWeekDates = [];
+      }
+    });
+
+    return weeks;
+  }, [daysInMonth, schedules]);
 
   return (
     <div className="space-y-6 animate-fade-in bg-white/40 p-6 rounded-2xl border border-[#DAC0A3]/50">
@@ -203,15 +245,40 @@ export const ManagerAnalysisView: React.FC<ManagerAnalysisViewProps> = ({
 
       {/* Summary statistics card */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 animate-fade-in">
-        {/* Stat 1 */}
-        <div className="glass-panel p-4.5 rounded-xl border border-[#DAC0A3]/50 bg-white/70 shadow-sm flex flex-col justify-between">
-          <div className="text-[11px] font-bold text-[#8D6E63] uppercase tracking-wider">本月總工時</div>
-          <div className="mt-1 flex items-baseline gap-1.5">
-            <span className="text-2xl font-extrabold text-[#3E2723] font-mono">{Math.round(totalHours * 10) / 10}</span>
-            <span className="text-xs text-[#6D4C41]">小時</span>
+        {/* Stat 1: Weekly Total Hours Breakdown */}
+        <div className="glass-panel p-4 rounded-xl border border-[#DAC0A3]/50 bg-white/70 shadow-sm flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between border-b border-[#DAC0A3]/30 pb-2 mb-2">
+              <div className="text-[11px] font-bold text-[#8D6E63] uppercase tracking-wider flex items-center gap-1">
+                <span>📅</span> 每週總工時統計
+              </div>
+              <span className="text-[10px] px-1.5 py-0.5 rounded-md font-mono font-black bg-[#795548]/10 text-[#5D4037]" title="本月全月總工時">
+                總計 {Math.round(totalHours * 10) / 10}h
+              </span>
+            </div>
+
+            <div className="space-y-1.5 divide-y divide-[#DAC0A3]/20">
+              {weeklyStats.length === 0 ? (
+                <div className="text-xs text-[#8D6E63] italic py-2 text-center">尚無排班資料</div>
+              ) : (
+                weeklyStats.map(w => (
+                  <div key={w.weekNum} className="pt-1.5 first:pt-0 flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="font-black text-[#3E2723] font-mono text-[11px] shrink-0">{w.label}</span>
+                      <span className="text-[10px] text-[#8D6E63] font-mono truncate">({w.dateRange})</span>
+                    </div>
+                    <div className="flex items-baseline gap-0.5 font-mono font-extrabold text-[#795548] shrink-0">
+                      <span className="text-sm font-black">{w.totalHours}</span>
+                      <span className="text-[10px] text-[#6D4C41]">小時</span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
-          <p className="text-[10px] text-[#8D6E63] mt-1.5 leading-normal">
-            所有夥伴本月已排定確認的有效工時總計（扣除休息時間）。
+
+          <p className="text-[10px] text-[#8D6E63] mt-2 pt-1.5 border-t border-[#DAC0A3]/25 leading-normal">
+            依週曆（週一至週日）計算各週已確認排班工時。
           </p>
         </div>
 

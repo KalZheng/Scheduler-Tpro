@@ -119,95 +119,6 @@ export const ManagerSelectedDateDetail: React.FC<ManagerSelectedDateDetailProps>
 
   return (
     <div className="space-y-6 animate-fade-in pt-2">
-      {/* Selected Date Detail Block */}
-      <section className="glass-panel p-5 rounded-2xl border border-[#DAC0A3]/50 shadow-sm space-y-4">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-[#DAC0A3]/35 pb-3">
-          <div>
-            <h3 className="text-base font-bold text-[#3E2723] flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-[#795548]"></span>
-              {selectedDateStr} ({selectedDayInfo.name}) 已排定班次 ({selectedDateShifts.length}人)
-            </h3>
-            <p className="text-xs text-[#6D4C41] mt-0.5 font-medium">
-              點擊班次卡片可進行編輯，或點擊右側按鈕進行管理。
-            </p>
-          </div>
-          <button
-            onClick={() => {
-              setModalMode('create');
-              setEditingId(null);
-              setEmployeeName('');
-              setWorkplace('咖啡吧檯');
-              setStartTime('09:00');
-              setEndTime('17:00');
-              setNotes('');
-              setSelectedDates([selectedDateStr]);
-              setFormOriginalStartTime(null);
-              setFormOriginalEndTime(null);
-              setIsModalOpen(true);
-            }}
-            className="text-xs bg-[#795548] hover:bg-[#6D4C41] text-white font-bold px-3 py-1.5 rounded-lg transition-all flex items-center gap-1 shadow-sm cursor-pointer"
-          >
-            <span>➕</span> 新增此日班次
-          </button>
-        </div>
-
-        {selectedDateShifts.length === 0 ? (
-          <div className="py-8 text-center border-2 border-dashed border-[#DAC0A3]/45 rounded-xl">
-            <p className="text-xs text-[#6D4C41]/80 font-medium">此日期目前尚無排定班次</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-            {selectedDateShifts.map(schedule => {
-              const theme = getScheduleTheme(schedule);
-              const managerNote = getManagerNote(schedule);
-              return (
-                <div
-                  key={schedule.id}
-                  onClick={(e) => handleOpenEditModal(schedule, e)}
-                  className={`glass-card p-3.5 rounded-xl border flex flex-col justify-between gap-3 cursor-pointer transition-all hover:scale-[1.01] ${theme.bg} ${theme.border}`}
-                >
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <span className={`text-[10px] font-bold flex items-center gap-1 ${theme.text} font-mono`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${theme.dot}`}></span>
-                        {schedule.startTime} - {schedule.endTime}
-                      </span>
-                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-white/80 text-[#5D4037] border border-[#DAC0A3]/40 font-bold">
-                        📍 {schedule.workplace || '咖啡吧檯'}
-                      </span>
-                    </div>
-                    <h4 className="font-extrabold text-[#3E2723] text-sm flex items-center justify-between">
-                      <span>👤 {schedule.employeeName}</span>
-                      {schedule.markedBlue && <span className="text-xs">🔵</span>}
-                    </h4>
-                    {managerNote && (
-                      <p className="text-[10px] text-[#5D4037] bg-white/60 p-1.5 rounded border border-[#DAC0A3]/40 border-dashed truncate">
-                        📝 {managerNote}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="flex justify-end items-center gap-2 pt-1 border-t border-[#DAC0A3]/25">
-                    <button
-                      onClick={(e) => handleOpenEditModal(schedule, e)}
-                      className="text-[10px] px-2 py-1 bg-white hover:bg-[#FAF7F2] border border-[#DAC0A3]/60 text-[#5D4037] rounded-md font-bold transition-colors cursor-pointer"
-                    >
-                      編輯
-                    </button>
-                    <button
-                      onClick={(e) => handleDelete(schedule.id, e)}
-                      className="text-[10px] px-2 py-1 bg-red-50 hover:bg-red-100 border border-red-200 text-red-650 rounded-md font-bold transition-colors cursor-pointer"
-                    >
-                      刪除
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </section>
-
       {/* Today's Available Workers Panel */}
       <section className="glass-panel p-5 rounded-2xl border border-[#DAC0A3]/50 shadow-sm space-y-4">
         <div>
@@ -311,6 +222,95 @@ export const ManagerSelectedDateDetail: React.FC<ManagerSelectedDateDetailProps>
                 </div>
               ))}
             </div>
+          </div>
+        )}
+      </section>
+
+      {/* Selected Date Detail Block */}
+      <section className="glass-panel p-5 rounded-2xl border border-[#DAC0A3]/50 shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-[#DAC0A3]/35 pb-3">
+          <div>
+            <h3 className="text-base font-bold text-[#3E2723] flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-[#795548]"></span>
+              {selectedDateStr} ({selectedDayInfo.name}) 已排定班次 ({selectedDateShifts.length}人)
+            </h3>
+            <p className="text-xs text-[#6D4C41] mt-0.5 font-medium">
+              點擊班次卡片可進行編輯，或點擊右側按鈕進行管理。
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              setModalMode('create');
+              setEditingId(null);
+              setEmployeeName('');
+              setWorkplace('咖啡吧檯');
+              setStartTime('09:00');
+              setEndTime('17:00');
+              setNotes('');
+              setSelectedDates([selectedDateStr]);
+              setFormOriginalStartTime(null);
+              setFormOriginalEndTime(null);
+              setIsModalOpen(true);
+            }}
+            className="text-xs bg-[#795548] hover:bg-[#6D4C41] text-white font-bold px-3 py-1.5 rounded-lg transition-all flex items-center gap-1 shadow-sm cursor-pointer"
+          >
+            <span>➕</span> 新增此日班次
+          </button>
+        </div>
+
+        {selectedDateShifts.length === 0 ? (
+          <div className="py-8 text-center border-2 border-dashed border-[#DAC0A3]/45 rounded-xl">
+            <p className="text-xs text-[#6D4C41]/80 font-medium">此日期目前尚無排定班次</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+            {selectedDateShifts.map(schedule => {
+              const theme = getScheduleTheme(schedule);
+              const managerNote = getManagerNote(schedule);
+              return (
+                <div
+                  key={schedule.id}
+                  onClick={(e) => handleOpenEditModal(schedule, e)}
+                  className={`glass-card p-3.5 rounded-xl border flex flex-col justify-between gap-3 cursor-pointer transition-all hover:scale-[1.01] ${theme.bg} ${theme.border}`}
+                >
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className={`text-[10px] font-bold flex items-center gap-1 ${theme.text} font-mono`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${theme.dot}`}></span>
+                        {schedule.startTime} - {schedule.endTime}
+                      </span>
+                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-white/80 text-[#5D4037] border border-[#DAC0A3]/40 font-bold">
+                        📍 {schedule.workplace || '咖啡吧檯'}
+                      </span>
+                    </div>
+                    <h4 className="font-extrabold text-[#3E2723] text-sm flex items-center justify-between">
+                      <span>👤 {schedule.employeeName}</span>
+                      {schedule.markedBlue && <span className="text-xs">🔵</span>}
+                    </h4>
+                    {managerNote && (
+                      <p className="text-[10px] text-[#5D4037] bg-white/60 p-1.5 rounded border border-[#DAC0A3]/40 border-dashed truncate">
+                        📝 {managerNote}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex justify-end items-center gap-2 pt-1 border-t border-[#DAC0A3]/25">
+                    <button
+                      onClick={(e) => handleOpenEditModal(schedule, e)}
+                      className="text-[10px] px-2 py-1 bg-white hover:bg-[#FAF7F2] border border-[#DAC0A3]/60 text-[#5D4037] rounded-md font-bold transition-colors cursor-pointer"
+                    >
+                      編輯
+                    </button>
+                    <button
+                      onClick={(e) => handleDelete(schedule.id, e)}
+                      className="text-[10px] px-2 py-1 bg-red-50 hover:bg-red-100 border border-red-200 text-red-650 rounded-md font-bold transition-colors cursor-pointer"
+                    >
+                      刪除
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </section>
