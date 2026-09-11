@@ -20,6 +20,8 @@ export interface ProposedSchedule {
   managerNotes: string;
   color: string;
   coveredDeficitHoursCount: number;
+  shiftType?: '開早班' | '收班班' | '中段班' | '自訂班';
+  reasoning?: string;
 }
 
 export interface AutoScheduleResult {
@@ -29,12 +31,37 @@ export interface AutoScheduleResult {
   coveredDeficitHoursTotal: number;
 }
 
+/**
+ * Helper to convert "HH:MM" string to minutes from 00:00
+ */
+function timeToMinutes(t: string): number {
+  if (!t || !t.includes(':')) return 0;
+  const [h, m] = t.split(':').map(Number);
+  return (h || 0) * 60 + (m || 0);
+}
+
+/**
+ * Helper to convert minutes from 00:00 back to "HH:MM"
+ */
+function minutesToTime(mins: number): string {
+  const h = Math.floor(mins / 60) % 24;
+  const m = mins % 60;
+  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+}
+
+/**
+ * Pure deterministic rule-based automatic scheduler implementing 4 core logics:
+ * 1. 開早保障 (Opening 06:00-08:00, target 2 workers, starts at 06:30)
+ * 2. 晚班與收班保障 (Closing 17:00-20:00, target 2 workers)
+ * 3. 尖峰與中段人數嚴格上限 (Weekdays max 3/hr, Weekends max 4-5/hr)
+ * 4. 勞基法一例一休檢核 (No 7 consecutive work days, 4-9h bounds, fair rotation)
+ */
 export const generateAutoSchedule = (
   availabilities: WorkerAvailability[] = [],
   existingSchedules: WorkSchedule[] = [],
   employees: Employee[] = [],
   staffingTargets: StaffingTarget[] = [],
-  analysisHoursRange: number[] = [],
+  _analysisHoursRange: number[] = [],
   shiftPresets: ShiftPreset[] = [],
   options: AutoScheduleOptions
 ): AutoScheduleResult => {
@@ -42,21 +69,25 @@ export const generateAutoSchedule = (
   const safeSchedules = existingSchedules || [];
   const safeEmployees = employees || [];
   const safeStaffingTargets = staffingTargets || [];
-  const safeHoursRange = (analysisHoursRange && analysisHoursRange.length > 0)
-    ? analysisHoursRange
-    : Array.from({ length: 14 }, (_, i) => i + 6);
   const safeShiftPresets = shiftPresets || [];
 
-  const { dateRange = [], prioritizeFullTime = true, maxHoursPerShift = 8, onlyFillDeficits = false } = options || {};
+  const {
+    dateRange = [],
+    prioritizeFullTime = true,
+    maxHoursPerShift = 8,
+    onlyFillDeficits = false
+  } = options || {};
 
   const proposedSchedules: ProposedSchedule[] = [];
   let unassignedAvailabilitiesCount = 0;
   let coveredDeficitHoursTotal = 0;
 
-  // Track assigned schedule dates per employee to check 7-consecutive-days rule dynamically
+  // Track assigned schedule dates per employee for the 7-consecutive-days rule
   const empAssignedDates: Record<string, Set<string>> = {};
-  
-  // Initialize empAssignedDates with existing schedules
+  // Track assigned shift counts per employee across this calculation for fair rotation
+  const empShiftCounts: Record<string, number> = {};
+
+  // Initialize tracking from existing confirmed schedules
   safeSchedules.forEach(s => {
     if (!s || !s.employeeName) return;
     const key = s.employeeName.trim().toLowerCase();
@@ -64,238 +95,448 @@ export const generateAutoSchedule = (
       empAssignedDates[key] = new Set();
     }
     empAssignedDates[key].add(s.date);
+    empShiftCounts[key] = (empShiftCounts[key] || 0) + 1;
   });
 
   // Track virtual active schedules during auto-scheduling
   const virtualSchedules: WorkSchedule[] = [...safeSchedules];
 
-  const getStaffingTargetForHour = (hour: number, dateStr: string): number => {
-    let baseTarget = 2;
+  // Helper: Get hourly staffing maximum cap (Rule 3)
+  // Weekday: max 3 workers per hour. Weekend: strictly max 4 workers per hour (never 5)
+  const getHourMaxCap = (_hour: number, isWeekend: boolean): number => {
+    if (isWeekend) {
+      return 4;
+    }
+    return 3;
+  };
+
+  // Helper: Get target count for a given hour on dateStr
+  const getStaffingTarget = (hour: number, dateStr: string, isWeekend: boolean): number => {
+    let base = 2;
     const dateMatch = safeStaffingTargets.find(t => t.hour === hour && t.date === dateStr);
     if (dateMatch) {
-      baseTarget = dateMatch.targetCount;
+      base = dateMatch.targetCount;
     } else {
       const globalMatch = safeStaffingTargets.find(t => t.hour === hour && !t.date);
-      if (globalMatch) baseTarget = globalMatch.targetCount;
+      if (globalMatch) base = globalMatch.targetCount;
     }
 
-    // Weekend (Saturday & Sunday) peak hours (10:00 - 15:00, hours 10-14) get +1 extra worker target
-    if (dateStr) {
-      const d = new Date(dateStr + 'T00:00:00');
-      const dayOfWeek = d.getDay();
-      if ((dayOfWeek === 0 || dayOfWeek === 6) && hour >= 10 && hour < 15) {
-        baseTarget += 1;
+    if (isWeekend && hour >= 10 && hour < 15) {
+      base += 1;
+    }
+
+    return Math.min(base, getHourMaxCap(hour, isWeekend));
+  };
+
+  // Helper: Count active workers in a given hour on dateStr
+  const getActiveWorkersInHour = (dateStr: string, hour: number): number => {
+    return virtualSchedules.filter(
+      s => s && s.date === dateStr && isShiftActiveAtHour(s.startTime, s.endTime, hour)
+    ).length;
+  };
+
+  // Helper: Check if a candidate shift [candStart, candEnd] violates the hour cap
+  const wouldExceedCap = (
+    candStart: string,
+    candEnd: string,
+    dateStr: string,
+    isWeekend: boolean
+  ): boolean => {
+    for (let h = 0; h < 24; h++) {
+      if (isShiftActiveAtHour(candStart, candEnd, h)) {
+        const current = getActiveWorkersInHour(dateStr, h);
+        const cap = getHourMaxCap(h, isWeekend);
+        if (current + 1 > cap) {
+          return true;
+        }
       }
     }
+    return false;
+  };
 
-    return baseTarget;
+  // Helper: Count how many deficit hours [candStart, candEnd] covers
+  const countCoveredDeficitHours = (
+    candStart: string,
+    candEnd: string,
+    dateStr: string,
+    isWeekend: boolean
+  ): number => {
+    let covered = 0;
+    for (let h = 0; h < 24; h++) {
+      if (isShiftActiveAtHour(candStart, candEnd, h)) {
+        const current = getActiveWorkersInHour(dateStr, h);
+        const target = getStaffingTarget(h, dateStr, isWeekend);
+        if (current < target) {
+          covered++;
+        }
+      }
+    }
+    return covered;
+  };
+
+  // Helper: Commit a proposed shift
+  const commitShift = (
+    avail: WorkerAvailability,
+    startTime: string,
+    endTime: string,
+    shiftType: '開早班' | '收班班' | '中段班',
+    reasoning: string,
+    usefulHours: number
+  ) => {
+    const derivedColor = getColorFromName(avail.employeeName);
+    const proposed: ProposedSchedule = {
+      availabilityId: avail.id,
+      employeeName: avail.employeeName.trim(),
+      date: avail.date,
+      workplace: avail.workplace || '咖啡吧檯',
+      startTime,
+      endTime,
+      notes: avail.notes ? avail.notes.trim() : '',
+      workerNotes: avail.notes ? avail.notes.trim() : '',
+      managerNotes: `由規則排班演算法自動指派 (${shiftType})`,
+      color: derivedColor,
+      coveredDeficitHoursCount: usefulHours,
+      shiftType,
+      reasoning
+    };
+
+    proposedSchedules.push(proposed);
+    coveredDeficitHoursTotal += usefulHours;
+
+    const empKey = avail.employeeName.trim().toLowerCase();
+    if (!empAssignedDates[empKey]) empAssignedDates[empKey] = new Set();
+    empAssignedDates[empKey].add(avail.date);
+    empShiftCounts[empKey] = (empShiftCounts[empKey] || 0) + 1;
+
+    virtualSchedules.push({
+      id: `virtual-auto-${proposed.availabilityId}`,
+      title: proposed.employeeName,
+      employeeName: proposed.employeeName,
+      date: proposed.date,
+      workplace: proposed.workplace,
+      startTime: proposed.startTime,
+      endTime: proposed.endTime,
+      color: proposed.color,
+      createdAt: Date.now(),
+      availabilityId: proposed.availabilityId
+    });
+  };
+
+  // Helper: Check if worker can work on this date (not already scheduled, no consecutive 7 days)
+  const canWorkerWorkOnDate = (empName: string, dateStr: string): boolean => {
+    const empKey = empName.trim().toLowerCase();
+
+    // Already scheduled on this date?
+    const alreadyScheduled = virtualSchedules.some(
+      s => s && s.date === dateStr && s.employeeName && s.employeeName.trim().toLowerCase() === empKey
+    );
+    if (alreadyScheduled) return false;
+
+    // Consecutive 7 days check
+    const currentDates = Array.from(empAssignedDates[empKey] || new Set<string>());
+    const prospective = Array.from(new Set([...currentDates, dateStr]));
+    if (hasSevenConsecutiveDays(prospective)) {
+      return false;
+    }
+
+    return true;
   };
 
   // Sort dates chronologically
   const sortedDates = [...dateRange].sort();
 
   for (const dateStr of sortedDates) {
-    // Unconfirmed availabilities for this date
+    const d = new Date(dateStr + 'T00:00:00');
+    const dayOfWeek = d.getDay();
+    const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
+
+    // Get unconfirmed, non-off-day availabilities for this date
     const dateAvails = safeAvailabilities.filter(
       a => a && a.date === dateStr && a.confirmed !== true && !(a.startTime === '00:00' && a.endTime === '00:00')
     );
 
-    // Sort workers: Full-time first (if option enabled), then by earliest startTime
-    const sortedAvails = [...dateAvails].sort((a, b) => {
-      const empA = safeEmployees.find(e => e.name && e.name.trim().toLowerCase() === (a.employeeName || '').trim().toLowerCase());
-      const empB = safeEmployees.find(e => e.name && e.name.trim().toLowerCase() === (b.employeeName || '').trim().toLowerCase());
+    // Filter out workers who are inactive or already disqualified by 7-day rule
+    const availablePool = dateAvails.filter(a => {
+      const emp = safeEmployees.find(e => e.name && e.name.trim().toLowerCase() === (a.employeeName || '').trim().toLowerCase());
+      if (emp && emp.active === false) return false;
+      return canWorkerWorkOnDate(a.employeeName, dateStr);
+    });
+
+    let remainingAvails = [...availablePool];
+
+    // =========================================================================
+    // PHASE 1: 開早保障 (Opening 06:00–08:00, target = 2)
+    // =========================================================================
+    const activeHour6 = getActiveWorkersInHour(dateStr, 6);
+    const activeHour7 = getActiveWorkersInHour(dateStr, 7);
+    const currentOpening = Math.min(activeHour6, activeHour7);
+    const openingTarget = 2;
+    const openingNeeded = Math.max(0, openingTarget - currentOpening);
+
+    if (openingNeeded > 0) {
+      // Find candidates who can start at or before 06:30 and have >= 4h availability
+      const openingCandidates = remainingAvails.filter(a => {
+        const sMins = timeToMinutes(a.startTime);
+        const eMins = timeToMinutes(a.endTime);
+        // Can cover 06:30 opening
+        return sMins <= timeToMinutes('06:30') && (eMins - timeToMinutes('06:30')) >= 4 * 60;
+      });
+
+      let assignedOpening = 0;
+      for (let slot = 1; slot <= openingNeeded; slot++) {
+        const pool = openingCandidates.filter(a => remainingAvails.some(r => r.id === a.id));
+        if (pool.length === 0) break;
+
+        // Sort: slot 1 prefers FT; slot 2 on weekdays prefers PT to allow staggered 5.5h shift and free up afternoon!
+        pool.sort((a, b) => {
+          const empA = safeEmployees.find(e => e.name.trim().toLowerCase() === a.employeeName.trim().toLowerCase());
+          const empB = safeEmployees.find(e => e.name.trim().toLowerCase() === b.employeeName.trim().toLowerCase());
+          const isFTA = empA?.status === '正式夥伴';
+          const isFTB = empB?.status === '正式夥伴';
+
+          if (slot === 1 || isWeekend) {
+            if (prioritizeFullTime && isFTA !== isFTB) return isFTA ? -1 : 1;
+          } else {
+            // Slot 2 on weekdays: prefer PT so PT can work 5.5h (06:30-12:00, >= 4h), freeing afternoon for closing!
+            if (isFTA !== isFTB) return isFTA ? 1 : -1;
+          }
+
+          const countA = empShiftCounts[a.employeeName.trim().toLowerCase()] || 0;
+          const countB = empShiftCounts[b.employeeName.trim().toLowerCase()] || 0;
+          if (countA !== countB) return countA - countB;
+
+          return compareTimeStrings(a.startTime, b.startTime);
+        });
+
+        const cand = pool[0];
+        if (!cand) break;
+        if (!canWorkerWorkOnDate(cand.employeeName, dateStr)) continue;
+
+        const emp = safeEmployees.find(e => e.name.trim().toLowerCase() === cand.employeeName.trim().toLowerCase());
+        const isFT = emp?.status === '正式夥伴';
+
+        const openStart = '06:30';
+        const openStartMins = timeToMinutes(openStart);
+        const candEndMins = timeToMinutes(cand.endTime);
+
+        let targetDurationMins = Math.min(maxHoursPerShift * 60, candEndMins - openStartMins);
+        // Part-time 2nd opening worker on weekdays can work 5.5h (06:30-12:00, >= 4h) to avoid blocking afternoon closing
+        if (slot >= 2 && !isFT && !isWeekend) {
+          targetDurationMins = Math.min(targetDurationMins, 5.5 * 60);
+        }
+
+        const maxShiftEndMins = openStartMins + targetDurationMins;
+
+        // Try candidate end times stepping down by 30 mins to avoid exceeding cap
+        let bestEndMins = -1;
+        for (let endM = maxShiftEndMins; endM >= openStartMins + 4 * 60; endM -= 30) {
+          const endStr = minutesToTime(endM);
+          if (!wouldExceedCap(openStart, endStr, dateStr, isWeekend)) {
+            bestEndMins = endM;
+            break;
+          }
+        }
+
+        if (bestEndMins !== -1) {
+          const finalEnd = minutesToTime(bestEndMins);
+          const useful = countCoveredDeficitHours(openStart, finalEnd, dateStr, isWeekend);
+          commitShift(cand, openStart, finalEnd, '開早班', '滿足 06:30 開早雙人守備需求', useful);
+          remainingAvails = remainingAvails.filter(a => a.id !== cand.id);
+          assignedOpening++;
+        }
+      }
+    }
+
+    // =========================================================================
+    // PHASE 2: 晚班與收班打烊保障 (Closing 17:00–20:00, target = 2)
+    // =========================================================================
+    const activeHour17 = getActiveWorkersInHour(dateStr, 17);
+    const activeHour18 = getActiveWorkersInHour(dateStr, 18);
+    const currentClosing = Math.min(activeHour17, activeHour18);
+    const closingTarget = 2;
+    const closingNeeded = Math.max(0, closingTarget - currentClosing);
+
+    if (closingNeeded > 0) {
+      // Find candidates who can work until 17:00 or later with >= 4h availability
+      const closingCandidates = remainingAvails.filter(a => {
+        const eMins = timeToMinutes(a.endTime);
+        const sMins = timeToMinutes(a.startTime);
+        return eMins >= timeToMinutes('17:00') && (eMins - sMins) >= 4 * 60;
+      });
+
+      // Sort closing candidates: FT first, then fewest shifts (fairness), then latest end time
+      closingCandidates.sort((a, b) => {
+        const empA = safeEmployees.find(e => e.name.trim().toLowerCase() === a.employeeName.trim().toLowerCase());
+        const empB = safeEmployees.find(e => e.name.trim().toLowerCase() === b.employeeName.trim().toLowerCase());
+        const isFTA = empA?.status === '正式夥伴';
+        const isFTB = empB?.status === '正式夥伴';
+        if (prioritizeFullTime && isFTA !== isFTB) return isFTA ? -1 : 1;
+
+        const countA = empShiftCounts[a.employeeName.trim().toLowerCase()] || 0;
+        const countB = empShiftCounts[b.employeeName.trim().toLowerCase()] || 0;
+        if (countA !== countB) return countA - countB;
+
+        return compareTimeStrings(b.endTime, a.endTime); // latest endTime first
+      });
+
+      let assignedClosing = 0;
+      for (const cand of closingCandidates) {
+        if (assignedClosing >= closingNeeded) break;
+        if (!canWorkerWorkOnDate(cand.employeeName, dateStr)) continue;
+
+        const candStartMins = timeToMinutes(cand.startTime);
+        const candEndMins = timeToMinutes(cand.endTime);
+
+        // Slide window ending at candEndMins backwards by 4h to 8/9h (no less than 4h)
+        let bestStartMins = -1;
+        let bestEndMins = -1;
+        let maxUseful = -1;
+
+        // Try ending at registered end time, or adjusted to store close (e.g. 17:30/18:00/20:00)
+        const targetEndMins = Math.min(candEndMins, timeToMinutes('20:00'));
+
+        for (let durMins = Math.min(maxHoursPerShift * 60, targetEndMins - candStartMins); durMins >= 4 * 60; durMins -= 30) {
+          const testStartMins = targetEndMins - durMins;
+          if (testStartMins < candStartMins) continue;
+
+          const sStr = minutesToTime(testStartMins);
+          const eStr = minutesToTime(targetEndMins);
+
+          if (!wouldExceedCap(sStr, eStr, dateStr, isWeekend)) {
+            const useful = countCoveredDeficitHours(sStr, eStr, dateStr, isWeekend);
+            if (useful > maxUseful) {
+              maxUseful = useful;
+              bestStartMins = testStartMins;
+              bestEndMins = targetEndMins;
+            }
+          }
+        }
+
+        if (bestStartMins !== -1 && bestEndMins !== -1) {
+          const finalStart = minutesToTime(bestStartMins);
+          const finalEnd = minutesToTime(bestEndMins);
+          commitShift(cand, finalStart, finalEnd, '收班班', '填補門市打烊與收班雙人守備需求', maxUseful);
+          remainingAvails = remainingAvails.filter(a => a.id !== cand.id);
+          assignedClosing++;
+        }
+      }
+    }
+
+    // =========================================================================
+    // PHASE 3: 尖峰與中段補缺 (Midday Rush & Deficit Fill with Strict Caps)
+    // =========================================================================
+    // Sort remaining candidates: FT first, then fewest shifts assigned (fair rotation), then earliest start
+    remainingAvails.sort((a, b) => {
+      const empA = safeEmployees.find(e => e.name.trim().toLowerCase() === a.employeeName.trim().toLowerCase());
+      const empB = safeEmployees.find(e => e.name.trim().toLowerCase() === b.employeeName.trim().toLowerCase());
       const isFTA = empA?.status === '正式夥伴';
       const isFTB = empB?.status === '正式夥伴';
+      if (prioritizeFullTime && isFTA !== isFTB) return isFTA ? -1 : 1;
 
-      if (prioritizeFullTime && isFTA !== isFTB) {
-        return isFTA ? -1 : 1;
-      }
+      const countA = empShiftCounts[a.employeeName.trim().toLowerCase()] || 0;
+      const countB = empShiftCounts[b.employeeName.trim().toLowerCase()] || 0;
+      if (countA !== countB) return countA - countB;
 
       return compareTimeStrings(a.startTime, b.startTime);
     });
 
-    for (const avail of sortedAvails) {
-      if (!avail || !avail.employeeName) continue;
-      const empKey = avail.employeeName.trim().toLowerCase();
-      
-      // 1. Check if employee ALREADY has a schedule on this date (prevent over-assigning/double-booking)
-      const empAlreadyScheduledToday = virtualSchedules.some(
-        s => s && s.date === dateStr && s.employeeName && s.employeeName.trim().toLowerCase() === empKey
-      );
-      if (empAlreadyScheduledToday) {
+    for (const cand of remainingAvails) {
+      if (!canWorkerWorkOnDate(cand.employeeName, dateStr)) {
         unassignedAvailabilitiesCount++;
         continue;
       }
 
-      const currentEmpDates = Array.from(empAssignedDates[empKey] || new Set<string>());
-      
-      // 2. Labor Law check: 7 consecutive days limit
-      const prospectiveDates = Array.from(new Set([...currentEmpDates, dateStr]));
-      if (hasSevenConsecutiveDays(prospectiveDates)) {
-        unassignedAvailabilitiesCount++;
-        continue;
-      }
-
-      let rawStart = (avail.startTime && typeof avail.startTime === 'string') ? avail.startTime : '09:00';
-      let rawEnd = (avail.endTime && typeof avail.endTime === 'string') ? avail.endTime : '17:00';
-      if (!rawStart.includes(':')) rawStart = '09:00';
-      if (!rawEnd.includes(':')) rawEnd = '17:00';
-
-      const emp = safeEmployees.find(e => e.name && e.name.trim().toLowerCase() === empKey);
+      const emp = safeEmployees.find(e => e.name.trim().toLowerCase() === cand.employeeName.trim().toLowerCase());
       const isFT = emp?.status === '正式夥伴';
 
-      const [sH, sM] = rawStart.split(':').map(Number);
-      const [eH, eM] = rawEnd.split(':').map(Number);
-      const availStartMin = (sH || 0) * 60 + (sM || 0);
-      let availEndMin = (eH || 0) * 60 + (eM || 0);
-      if (availEndMin < availStartMin) availEndMin += 24 * 60;
+      // Start Phase 3 at 09:00 or later to ensure 06:00-09:00 opening remains dedicated to 2 opening workers
+      const minMidStartMins = timeToMinutes('09:00');
+      const candStartMins = Math.max(timeToMinutes(cand.startTime), minMidStartMins);
+      const candEndMins = timeToMinutes(cand.endTime);
+      const availSpan = candEndMins - candStartMins;
 
-      const daySchedules = virtualSchedules.filter(s => s && s.date === dateStr);
-
-      const evaluateShiftDeficit = (candStart: string, candEnd: string): { usefulHours: number; openingSurplus: number; closingSurplus: number; midSurplus: number } => {
-        let usefulHours = 0;
-        let openingSurplus = 0; // 06:00 - 08:00
-        let closingSurplus = 0; // 17:00 - 19:00
-        let midSurplus = 0;     // 08:00 - 17:00
-
-        for (const hour of safeHoursRange) {
-          if (isShiftActiveAtHour(candStart, candEnd, hour)) {
-            const target = getStaffingTargetForHour(hour, dateStr);
-            const currentCount = daySchedules.filter(
-              s => s && s.startTime && s.endTime && isShiftActiveAtHour(s.startTime, s.endTime, hour)
-            ).length;
-            if (currentCount < target) {
-              usefulHours++;
-            } else {
-              if (hour < 8) {
-                openingSurplus++;
-              } else if (hour >= 17) {
-                closingSurplus++;
-              } else {
-                midSurplus++;
-              }
-            }
-          }
-        }
-        return { usefulHours, openingSurplus, closingSurplus, midSurplus };
-      };
-
-      let bestStartTime = rawStart;
-      let bestEndTime = rawEnd;
-      let maxScore = -9999;
-      let bestUsefulHours = 0;
-
-      // 3. Find optimal shift window (considering shift presets for FT, and min 4h / max 9h for PT)
-      if (isFT && safeShiftPresets.length > 0) {
-        // Evaluate fitting shift presets for full-time employees
-        const fittingPresets = safeShiftPresets.filter(
-          p => p && p.startTime && p.endTime && p.startTime >= rawStart && p.endTime <= rawEnd
-        );
-        for (const preset of fittingPresets) {
-          const { usefulHours, openingSurplus, closingSurplus, midSurplus } = evaluateShiftDeficit(preset.startTime, preset.endTime);
-          if (usefulHours > 0) {
-            // Score: +15 per useful hour, -50 heavy penalty for opening/closing surplus, -1 light penalty for midday overlap
-            const score = usefulHours * 15 - openingSurplus * 50 - closingSurplus * 50 - midSurplus * 1;
-            if (score > maxScore) {
-              maxScore = score;
-              bestUsefulHours = usefulHours;
-              bestStartTime = preset.startTime;
-              bestEndTime = preset.endTime;
-            }
-          }
-        }
-      }
-
-      // For Part-Time workers or if no FT preset scored positive:
-      if (maxScore < 0) {
-        const availSpanMinutes = availEndMin - availStartMin;
-
-        // Bounded shift limits: Part-time workers minimum 4 hours (240 min), maximum 9 hours (540 min)
-        const minShiftMinutes = isFT ? 6 * 60 : 4 * 60; // 4 hours min for part-time
-        const maxShiftMinutes = Math.min(9 * 60, maxHoursPerShift * 60); // 9 hours max for part-time
-
-        if (availSpanMinutes < minShiftMinutes) {
-          // If available window is less than minimum 4 hours, cannot assign shift
-          unassignedAvailabilitiesCount++;
-          continue;
-        }
-
-        const maxDur = Math.min(maxShiftMinutes, availSpanMinutes);
-        const minDur = Math.min(minShiftMinutes, maxDur);
-
-        // Slide window with varying durations from minDur (4h) to maxDur (9h) in 30-min steps
-        for (let dur = minDur; dur <= maxDur; dur += 30) {
-          for (let curStart = availStartMin; curStart <= availEndMin - dur; curStart += 30) {
-            const curEnd = curStart + dur;
-
-            const startH = Math.floor(curStart / 60) % 24;
-            const startM = curStart % 60;
-            const endH = Math.floor(curEnd / 60) % 24;
-            const endM = curEnd % 60;
-
-            const candStartStr = `${startH.toString().padStart(2, '0')}:${startM.toString().padStart(2, '0')}`;
-            const candEndStr = `${endH.toString().padStart(2, '0')}:${endM.toString().padStart(2, '0')}`;
-
-            const { usefulHours, openingSurplus, closingSurplus, midSurplus } = evaluateShiftDeficit(candStartStr, candEndStr);
-
-            if (usefulHours > 0) {
-              const edgePenalty = onlyFillDeficits ? 75 : 50;
-              // Score: +15 per useful hour, heavy penalty (-50/-75) for opening/closing over-staffing, light penalty (-1) for midday overlap
-              const score = usefulHours * 15 - openingSurplus * edgePenalty - closingSurplus * edgePenalty - midSurplus * 1;
-
-              if (score > maxScore) {
-                maxScore = score;
-                bestUsefulHours = usefulHours;
-                bestStartTime = candStartStr;
-                bestEndTime = candEndStr;
-              }
-            }
-          }
-        }
-      }
-
-      // STRICT CAP: Skip assignment if 0 useful hours covered or maxScore is negative
-      if (bestUsefulHours <= 0 || maxScore < 0) {
+      // Minimum shift 4h (240 min)
+      if (availSpan < 4 * 60) {
         unassignedAvailabilitiesCount++;
         continue;
       }
 
-      const derivedColor = getColorFromName(avail.employeeName);
-      const proposed: ProposedSchedule = {
-        availabilityId: avail.id,
-        employeeName: avail.employeeName.trim(),
-        date: dateStr,
-        workplace: avail.workplace || '咖啡吧檯',
-        startTime: bestStartTime,
-        endTime: bestEndTime,
-        notes: avail.notes ? avail.notes.trim() : '',
-        workerNotes: avail.notes ? avail.notes.trim() : '',
-        managerNotes: '',
-        color: derivedColor,
-        coveredDeficitHoursCount: Math.max(0, bestUsefulHours)
-      };
+      let bestStartMins = -1;
+      let bestEndMins = -1;
+      let bestScore = -9999;
+      let bestUsefulHours = 0;
 
-      proposedSchedules.push(proposed);
-      coveredDeficitHoursTotal += Math.max(0, bestUsefulHours);
-
-      // Add to virtualSchedules and empAssignedDates for subsequent iteration checks
-      if (!empAssignedDates[empKey]) {
-        empAssignedDates[empKey] = new Set();
+      // FT Preset priority evaluation
+      if (isFT && safeShiftPresets.length > 0) {
+        for (const preset of safeShiftPresets) {
+          const pStartMins = timeToMinutes(preset.startTime);
+          const pEndMins = timeToMinutes(preset.endTime);
+          if (pStartMins >= candStartMins && pEndMins <= candEndMins) {
+            const pStartStr = preset.startTime;
+            const pEndStr = preset.endTime;
+            if (!wouldExceedCap(pStartStr, pEndStr, dateStr, isWeekend)) {
+              const useful = countCoveredDeficitHours(pStartStr, pEndStr, dateStr, isWeekend);
+              if (!onlyFillDeficits || useful > 0) {
+                const score = useful * 20 + (pEndMins - pStartMins) / 30;
+                if (score > bestScore) {
+                  bestScore = score;
+                  bestStartMins = pStartMins;
+                  bestEndMins = pEndMins;
+                  bestUsefulHours = useful;
+                }
+              }
+            }
+          }
+        }
       }
-      empAssignedDates[empKey].add(dateStr);
 
-      virtualSchedules.push({
-        id: `virtual-auto-${proposed.availabilityId}`,
-        title: proposed.employeeName,
-        employeeName: proposed.employeeName,
-        date: proposed.date,
-        workplace: proposed.workplace,
-        startTime: proposed.startTime,
-        endTime: proposed.endTime,
-        color: proposed.color,
-        createdAt: Date.now(),
-        availabilityId: proposed.availabilityId
-      });
+      // Sliding window evaluation across available range (from min 4h to max 8h/maxHoursPerShift)
+      if (bestScore < 0) {
+        const maxShiftMinutes = Math.min(maxHoursPerShift * 60, availSpan);
+        const minShiftMinutes = 4 * 60;
+
+        for (let dur = maxShiftMinutes; dur >= minShiftMinutes; dur -= 30) {
+          for (let sM = candStartMins; sM <= candEndMins - dur; sM += 30) {
+            const eM = sM + dur;
+            const sStr = minutesToTime(sM);
+            const eStr = minutesToTime(eM);
+
+            // Strict hourly cap: never schedule if any hour exceeds cap
+            if (wouldExceedCap(sStr, eStr, dateStr, isWeekend)) {
+              continue;
+            }
+
+            const useful = countCoveredDeficitHours(sStr, eStr, dateStr, isWeekend);
+            if (onlyFillDeficits && useful === 0) {
+              continue;
+            }
+
+            // Score: heavy weight on covering deficit hours + light weight on duration
+            const score = useful * 20 + dur / 60;
+            if (score > bestScore) {
+              bestScore = score;
+              bestStartMins = sM;
+              bestEndMins = eM;
+              bestUsefulHours = useful;
+            }
+          }
+        }
+      }
+
+      if (bestStartMins !== -1 && bestEndMins !== -1) {
+        const finalStart = minutesToTime(bestStartMins);
+        const finalEnd = minutesToTime(bestEndMins);
+        commitShift(
+          cand,
+          finalStart,
+          finalEnd,
+          '中段班',
+          `填補門市中段時段人力（涵蓋 ${bestUsefulHours} 小時需求，遵守平日≤3人/假日≤4人上限）`,
+          bestUsefulHours
+        );
+      } else {
+        unassignedAvailabilitiesCount++;
+      }
     }
   }
 
