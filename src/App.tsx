@@ -1279,6 +1279,11 @@ function App() {
           await addSchedule(payload);
         }
       } else if (modalMode === 'edit' && editingId) {
+        const existingSchedule = schedules.find(s => s.id === editingId);
+        const isTimeChanged = existingSchedule
+          ? (existingSchedule.startTime !== startTime || existingSchedule.endTime !== endTime)
+          : false;
+
         const payload = {
           title: employeeName.trim(),
           employeeName: employeeName.trim(),
@@ -1291,7 +1296,10 @@ function App() {
           workerNotes: workerNotes,
           color: derivedColor,
           originalStartTime: formOriginalStartTime || null,
-          originalEndTime: formOriginalEndTime || null
+          originalEndTime: formOriginalEndTime || null,
+          markedBlue: isTimeChanged ? true : !!existingSchedule?.markedBlue,
+          scheduleSource: existingSchedule?.scheduleSource || 'manual',
+          shiftType: existingSchedule?.shiftType
         };
         await updateSchedule(editingId, payload);
       }

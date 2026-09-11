@@ -364,6 +364,19 @@ export const ShiftModal: React.FC<ShiftModalProps> = ({
             </div>
           )}
 
+          {/* Time changed indicator */}
+          {mode === 'edit' && editingId && (() => {
+            const editingSchedule = schedules.find(s => s.id === editingId);
+            const isTimeChanged = editingSchedule ? (editingSchedule.startTime !== startTime || editingSchedule.endTime !== endTime) : false;
+            if (!isTimeChanged) return null;
+            return (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-blue-50 border border-blue-200 text-blue-700 text-xs font-semibold animate-fade-in">
+                <span>🔵</span>
+                <span>時段已調整（原為 {editingSchedule?.startTime} - {editingSchedule?.endTime}），儲存後將自動套用藍色標記</span>
+              </div>
+            );
+          })()}
+
           {/* Consecutive 7 days warning */}
           {(() => {
             if (!employeeName.trim()) return null;
