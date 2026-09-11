@@ -65,6 +65,7 @@ import { WorkerLogin } from './components/worker/WorkerLogin';
 import { WorkerAvailForm } from './components/worker/WorkerAvailForm';
 import { WorkerAvailModal } from './components/worker/WorkerAvailModal';
 import { AutoScheduleModal } from './components/modals/AutoScheduleModal';
+import { RuleScheduleModal } from './components/modals/RuleScheduleModal';
 import { ClearScheduleModal } from './components/modals/ClearScheduleModal';
 import type { ProposedSchedule } from './utils/autoScheduler';
 
@@ -348,6 +349,7 @@ function App() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
   const [isAutoScheduleModalOpen, setIsAutoScheduleModalOpen] = useState(false);
+  const [isRuleScheduleModalOpen, setIsRuleScheduleModalOpen] = useState(false);
   const [isClearScheduleModalOpen, setIsClearScheduleModalOpen] = useState(false);
   const [employeeFormMode, setEmployeeFormMode] = useState<'create' | 'edit'>('create');
   const [editingEmployeeId, setEditingEmployeeId] = useState<string | null>(null);
@@ -2100,11 +2102,20 @@ function App() {
                     <div className="flex flex-wrap items-center gap-3">
                       <button
                         type="button"
-                        onClick={() => setIsAutoScheduleModalOpen(true)}
+                        onClick={() => setIsRuleScheduleModalOpen(true)}
                         className="bg-[#2E7D32] hover:bg-[#1B5E20] text-white font-extrabold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md hover:-translate-y-0.5 active:translate-y-0 flex items-center gap-1.5 cursor-pointer border border-[#2E7D32]/30 shrink-0"
-                        title="依據同仁登記可用時間與缺工需求，一鍵智能演算帶入最佳排班"
+                        title="依據 4 大營運規則（開早、收班、平日≤3人/假日≤4人、勞基法），純程式碼毫秒級自動排班"
                       >
-                        <span className="text-sm">⚡</span> 智能自動帶入與確認排班
+                        <span className="text-sm">⚡</span> 程式規則自動排班
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setIsAutoScheduleModalOpen(true)}
+                        className="bg-[#5D4037] hover:bg-[#3E2723] text-white font-extrabold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md hover:-translate-y-0.5 active:translate-y-0 flex items-center gap-1.5 cursor-pointer border border-[#5D4037]/30 shrink-0"
+                        title="透過 Google Gemini AI 智慧排班與自然語言推論"
+                      >
+                        <span className="text-sm">🤖</span> AI 智慧排班 (Gemini)
                       </button>
 
                       <div className="w-px h-6 bg-[#DAC0A3]/40 hidden sm:block"></div>
@@ -2285,6 +2296,19 @@ function App() {
           setPendingAssignAvail(null);
         }}
         onExecuteFTAssign={executeFTAssign}
+      />
+
+      <RuleScheduleModal
+        isOpen={isRuleScheduleModalOpen}
+        onClose={() => setIsRuleScheduleModalOpen(false)}
+        currentMonthStart={currentMonthStart}
+        availabilities={availabilities}
+        schedules={schedules}
+        employees={employees}
+        staffingTargets={staffingTargets}
+        analysisHoursRange={analysisHoursRange}
+        shiftPresets={shiftPresets}
+        onExecuteBatchAutoSchedule={handleBatchApplyAutoSchedules}
       />
 
       <AutoScheduleModal
