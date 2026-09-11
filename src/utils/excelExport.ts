@@ -130,7 +130,8 @@ export const generateExcelWorkbook = ({
           ? sched.workerNotes.trim()
           : getCleanNote(sched.notes);
         const managerNote = getManagerNote(sched);
-        const combinedNotes = [managerNote, workerNote].filter(Boolean).join('; ');
+        const cleanManagerNote = (managerNote && managerNote === workerNote) ? '' : managerNote;
+        const combinedNotes = [cleanManagerNote, workerNote].filter(Boolean).join('; ');
         return combinedNotes
           ? `${sched.startTime}-${sched.endTime}\n(${combinedNotes})`
           : `${sched.startTime}-${sched.endTime}`;

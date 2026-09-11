@@ -30,6 +30,8 @@ export interface WorkSchedule {
   originalEndTime?: string | null;
   availabilityId?: string;
   markedBlue?: boolean;
+  scheduleSource?: 'manual' | 'rule' | 'ai' | 'instant';
+  shiftType?: '開早班' | '收班班' | '中段班' | '自訂班' | string;
 }
 
 export interface WorkerAvailability {
@@ -772,6 +774,8 @@ export const clearConfirmedSchedulesInRange = async (
 
   const isAiSchedule = (s: WorkSchedule) => {
     return (
+      s.scheduleSource === 'rule' ||
+      s.scheduleSource === 'ai' ||
       !!s.availabilityId ||
       (!!s.notes && (s.notes.includes('🤖') || s.notes.includes('AI') || s.notes.includes('AI生成') || s.notes.includes('自動排班'))) ||
       (!!s.managerNotes && (s.managerNotes.includes('🤖') || s.managerNotes.includes('AI') || s.managerNotes.includes('AI生成') || s.managerNotes.includes('自動排班')))

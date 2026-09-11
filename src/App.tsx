@@ -1001,13 +1001,14 @@ function App() {
         workplace: avail.workplace,
         startTime: avail.startTime,
         endTime: avail.endTime,
-        notes: avail.notes ? `由登記可用時間自動排入: ${avail.notes.trim()}` : '由登記可用時間自動排入',
+        notes: '',
         workerNotes: avail.notes ? avail.notes.trim() : '',
         managerNotes: '',
         color: derivedColor,
         originalStartTime: avail.startTime,
         originalEndTime: avail.endTime,
-        availabilityId: avail.id
+        availabilityId: avail.id,
+        scheduleSource: 'instant' as const
       };
       await addSchedule(payload);
       await applyAvailabilitySubtraction(avail, avail.startTime, avail.endTime);
@@ -1057,13 +1058,15 @@ function App() {
         workplace: avail.workplace,
         startTime: sTime,
         endTime: eTime,
-        notes: avail.notes ? `由登記可用時間自動排入 (${shiftName}): ${avail.notes.trim()}` : `由登記可用時間自動排入 (${shiftName})`,
+        notes: '',
         workerNotes: avail.notes ? avail.notes.trim() : '',
         managerNotes: '',
         color: derivedColor,
         originalStartTime: sTime,
         originalEndTime: eTime,
-        availabilityId: avail.id
+        availabilityId: avail.id,
+        scheduleSource: 'instant' as const,
+        shiftType: shiftName
       };
       await addSchedule(payload);
       await applyAvailabilitySubtraction(avail, sTime, eTime);
@@ -1083,13 +1086,15 @@ function App() {
           workplace: item.workplace,
           startTime: item.startTime,
           endTime: item.endTime,
-          notes: item.notes,
-          managerNotes: item.managerNotes,
+          notes: '',
+          managerNotes: '',
           workerNotes: item.workerNotes,
           color: item.color,
           originalStartTime: item.startTime,
           originalEndTime: item.endTime,
-          availabilityId: item.availabilityId
+          availabilityId: item.availabilityId,
+          scheduleSource: item.scheduleSource || 'rule',
+          shiftType: item.shiftType
         });
 
         const targetAvail = availabilities.find(a => a.id === item.availabilityId);
@@ -1187,7 +1192,7 @@ function App() {
     setWorkplace(schedule.workplace || workplaces[0]?.name || '');
     setStartTime(schedule.startTime);
     setEndTime(schedule.endTime);
-    setNotes(schedule.managerNotes !== undefined ? schedule.managerNotes : getManagerNote(schedule));
+    setNotes(schedule.managerNotes ? getManagerNote(schedule) : '');
     setWorkerNotes(schedule.workerNotes !== undefined ? schedule.workerNotes : getWorkerNote(schedule));
     setSingleDate(schedule.date);
     setFormOriginalStartTime(schedule.originalStartTime || schedule.startTime);
@@ -1268,7 +1273,8 @@ function App() {
             workerNotes: '',
             color: derivedColor,
             originalStartTime: formOriginalStartTime || null,
-            originalEndTime: formOriginalEndTime || null
+            originalEndTime: formOriginalEndTime || null,
+            scheduleSource: 'manual' as const
           };
           await addSchedule(payload);
         }

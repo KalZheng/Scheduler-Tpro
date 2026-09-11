@@ -188,16 +188,12 @@ export const getCleanNote = (notes?: string): string => {
 };
 
 export const getManagerNote = (sched: WorkSchedule): string => {
-  const note = (sched.managerNotes !== undefined && sched.managerNotes !== '')
-    ? sched.managerNotes
-    : (sched.notes || '');
-  const trimmed = note.trim();
-
-  if (trimmed === 'AI生成' || trimmed === '🤖 AI生成') {
-    return 'AI生成';
-  }
-
   const automatedPhrases = [
+    '由規則排班演算法自動指派',
+    '規則排班演算法',
+    '自動排班演算法',
+    'AI生成',
+    '🤖 AI生成',
     'Opening shift',
     'Closing shift',
     'Midday shift',
@@ -209,6 +205,18 @@ export const getManagerNote = (sched: WorkSchedule): string => {
     'AI 智慧'
   ];
 
+  if (sched.managerNotes !== undefined) {
+    const trimmed = sched.managerNotes.trim();
+    if (automatedPhrases.some(phrase => trimmed.toLowerCase().includes(phrase.toLowerCase()))) {
+      return '';
+    }
+    return trimmed;
+  }
+
+  const trimmed = (sched.notes || '').trim();
+  if (sched.workerNotes && trimmed === sched.workerNotes.trim()) {
+    return '';
+  }
   if (automatedPhrases.some(phrase => trimmed.toLowerCase().includes(phrase.toLowerCase()))) {
     return '';
   }

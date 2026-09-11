@@ -12,6 +12,8 @@ export interface ProposedAISchedule {
   workerNotes?: string;
   managerNotes?: string;
   color?: string;
+  scheduleSource?: 'manual' | 'rule' | 'ai' | 'instant';
+  shiftType?: string;
   reasoning?: string;
 }
 
@@ -279,9 +281,11 @@ export async function runAIScheduler(options: RunAIScheduleOptions): Promise<Pro
       startTime: item.startTime,
       endTime: item.endTime,
       workplace: item.workplace || origAvail?.workplace || '埔里酒廠門市',
-      notes: origAvail?.notes ? origAvail.notes.trim() : '',
+      notes: '',
       workerNotes: origAvail?.notes ? origAvail.notes.trim() : '',
-      managerNotes: 'AI生成',
+      managerNotes: '',
+      scheduleSource: 'ai',
+      shiftType: '自訂班',
       reasoning: item.reasoning
     };
 
