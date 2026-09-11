@@ -240,3 +240,77 @@ export const getTooltipArrowAlignment = (dayIndex: number, totalDays: number): s
   if (dayIndex > totalDays - 6) return 'right-4';
   return 'left-1/2 -translate-x-1/2';
 };
+
+/**
+ * Calculate unstaffed / zero-worker time gaps during store operating hours on a given date.
+ * Returns an array of gap strings, e.g. ["06:30-08:00", "14:00-15:30"] or ["全日無人"], or [] if fully covered.
+ */
+export const getUnstaffedOperatingGaps = (
+  dateStr: string,
+  schedules: WorkSchedule[],
+  operatingStartTime: string = '06:30',
+  operatingEndTime: string = '20:00'
+): string[] => {
+  if (!dateStr || !schedules) return [];
+
+  const timeToMins = (t: string) => {
+    if (!t || !t.includes(':')) return 0;
+    const [h, m] = t.split(':').map(Number);
+    return (h || 0) * 60 + (m || 0);
+  };
+
+  const minsToTime = (mins: number) => {
+    const h = Math.floor(mins / 60) % 24;
+    const m = mins % 60;
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+  };
+
+  const startMin = timeToMins(operatingStartTime);
+  const endMin = timeToMins(operatingEndTime);
+  if (endMin <= startMin) return [];
+
+  const dayShifts = schedules.filter(s => s.date === dateStr && s.startTime && s.endTime);
+  if (dayShifts.length === 0) {
+    return ['全日無人'];
+  }
+
+  const step = 30; // 30-minute intervals
+  const gaps: { start: number; end: number }[] = [];
+  let currentGapStart: number | null = null;
+
+  for (let m = startMin; m < endMin; m += step) {
+    const slotStart = m;
+    const slotEnd = Math.min(m + step, endMin);
+
+    // Check if at least one worker is active in this slot
+    const hasWorker = dayShifts.some(s => {
+      const sMins = timeToMins(s.startTime);
+      const eMins = timeToMins(s.endTime);
+      const overlap = Math.max(0, Math.min(eMins, slotEnd) - Math.max(sMins, slotStart));
+      return overlap >= 10; // at least 10 minutes overlap
+    });
+
+    if (!hasWorker) {
+      if (currentGapStart === null) {
+        currentGapStart = slotStart;
+      }
+    } else {
+      if (currentGapStart !== null) {
+        gaps.push({ start: currentGapStart, end: slotStart });
+        currentGapStart = null;
+      }
+    }
+  }
+
+  if (currentGapStart !== null) {
+    gaps.push({ start: currentGapStart, end: endMin });
+  }
+
+  if (gaps.length === 0) return [];
+  if (gaps.length === 1 && gaps[0].start === startMin && gaps[0].end === endMin) {
+    return ['全日無人'];
+  }
+
+  return gaps.map(g => `${minsToTime(g.start)}-${minsToTime(g.end)}`);
+};
+

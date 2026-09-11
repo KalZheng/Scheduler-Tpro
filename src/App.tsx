@@ -2249,6 +2249,8 @@ function App() {
                       setFormOriginalEndTime={setFormOriginalEndTime}
                       setIsModalOpen={setIsModalOpen}
                       erpDays={erpDays}
+                      operatingStartTime={operatingStartTime}
+                      operatingEndTime={operatingEndTime}
                     />
                   )}
 
