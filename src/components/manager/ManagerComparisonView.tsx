@@ -430,7 +430,7 @@ export const ManagerComparisonView: React.FC<ManagerComparisonViewProps> = ({
     title: string,
     subtitle: string,
     badgeText: string,
-    badgeColor: string,
+    _badgeColor: string,
     cardBorderColor: string,
     cellTheme: 'emerald' | 'blue' | 'purple',
     scheduleList: WorkSchedule[] | null,

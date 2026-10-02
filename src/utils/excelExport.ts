@@ -861,7 +861,7 @@ export const exportComparisonToExcel = async ({
   const cleanRangeDesc = dateRangeDesc.replace(/[^\w\u4e00-\u9fa5]/g, '');
   const downloadFilename = `排班比對分析報告_${monthStr}_${cleanRangeDesc}.xlsx`;
 
-  const blob = new Blob([finalBuffer], {
+  const blob = new Blob([finalBuffer as any], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
   });
   const url = URL.createObjectURL(blob);
