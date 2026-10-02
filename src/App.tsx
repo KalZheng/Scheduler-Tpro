@@ -77,6 +77,7 @@ import { ManagerEmployeeView } from './components/manager/ManagerEmployeeView';
 import { ManagerCalculationView } from './components/manager/ManagerCalculationView';
 import { ManagerSystemView } from './components/manager/ManagerSystemView';
 import { ManagerAnalysisView } from './components/manager/ManagerAnalysisView';
+import { ManagerComparisonView } from './components/manager/ManagerComparisonView';
 import { ManagerSelectedDateDetail } from './components/manager/ManagerSelectedDateDetail';
 
 declare const google: any;
@@ -99,6 +100,7 @@ function App() {
 
   // Manager authentication state
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => sessionStorage.getItem('manager_auth') === 'true');
+  const [managerRole, setManagerRole] = useState<'manager' | 'admin'>(() => (sessionStorage.getItem('manager_role') as 'manager' | 'admin') || 'manager');
   const [passcodeInput, setPasscodeInput] = useState('');
   const [loginError, setLoginError] = useState('');
 
@@ -183,9 +185,19 @@ function App() {
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     const MANAGER_PASSCODE = 'coffee888';
-    if (passcodeInput === MANAGER_PASSCODE) {
+    const ADMIN_PASSCODE = 'admincoffee888';
+    if (passcodeInput === ADMIN_PASSCODE) {
       setIsAuthenticated(true);
+      setManagerRole('admin');
       sessionStorage.setItem('manager_auth', 'true');
+      sessionStorage.setItem('manager_role', 'admin');
+      setLoginError('');
+      setPasscodeInput('');
+    } else if (passcodeInput === MANAGER_PASSCODE) {
+      setIsAuthenticated(true);
+      setManagerRole('manager');
+      sessionStorage.setItem('manager_auth', 'true');
+      sessionStorage.setItem('manager_role', 'manager');
       setLoginError('');
       setPasscodeInput('');
     } else {
@@ -196,13 +208,15 @@ function App() {
   // Handle Logout
   const handleLogout = () => {
     setIsAuthenticated(false);
+    setManagerRole('manager');
     sessionStorage.removeItem('manager_auth');
+    sessionStorage.removeItem('manager_role');
     setPasscodeInput('');
     navigateToRole('worker');
   };
 
   // Manager view sub-mode
-  const [managerViewMode, setManagerViewMode] = useState<'calendar' | 'grid' | 'employees' | 'calculation' | 'system' | 'analysis'>('calendar');
+  const [managerViewMode, setManagerViewMode] = useState<'calendar' | 'grid' | 'employees' | 'calculation' | 'system' | 'analysis' | 'comparison'>('calendar');
   const [deadlineDay, setDeadlineDay] = useState<number>(20);
   const [startDay, setStartDay] = useState<number>(15);
   const [operatingStartTime, setOperatingStartTime] = useState<string>('06:30');
@@ -2045,6 +2059,7 @@ function App() {
                 totalShifts={totalShifts}
                 totalHours={totalHours}
                 totalEmployees={totalEmployees}
+                managerRole={managerRole}
               />
 
               {managerViewMode === 'employees' ? (
@@ -2079,6 +2094,19 @@ function App() {
                   analysisHoursRange={analysisHoursRange}
                   totalHours={totalHours}
                   getStaffingTargetForHour={getStaffingTargetForHour}
+                />
+              ) : managerViewMode === 'comparison' && managerRole === 'admin' ? (
+                <ManagerComparisonView
+                  currentMonthStart={currentMonthStart}
+                  setCurrentMonthStart={setCurrentMonthStart}
+                  availabilities={availabilities}
+                  schedules={schedules}
+                  employees={employees}
+                  staffingTargets={staffingTargets}
+                  analysisHoursRange={analysisHoursRange}
+                  shiftPresets={shiftPresets}
+                  operatingStartTime={operatingStartTime}
+                  operatingEndTime={operatingEndTime}
                 />
               ) : managerViewMode === 'system' ? (
                 <ManagerSystemView
