@@ -2,7 +2,7 @@ import * as XLSX from 'xlsx-js-style';
 import JSZip from 'jszip';
 import type { WorkSchedule, WorkerAvailability, Employee } from '../services/scheduler';
 import { DAYS_OF_WEEK, ALL_POSITIONS } from './constants';
-import { formatDateString, getDatesInRange, calculateDuration, getCleanNote, getManagerNote, compareTimeStrings } from './dateUtils';
+import { formatDateString, getDatesInRange, calculateDuration, getCleanNote, getManagerNote, compareTimeStrings, isShiftActiveAtHour } from './dateUtils';
 
 interface GenerateExcelParams {
   exportStartDate: string;
@@ -130,7 +130,8 @@ export const generateExcelWorkbook = ({
           ? sched.workerNotes.trim()
           : getCleanNote(sched.notes);
         const managerNote = getManagerNote(sched);
-        const combinedNotes = [managerNote, workerNote].filter(Boolean).join('; ');
+        const cleanManagerNote = (managerNote && managerNote === workerNote) ? '' : managerNote;
+        const combinedNotes = [cleanManagerNote, workerNote].filter(Boolean).join('; ');
         return combinedNotes
           ? `${sched.startTime}-${sched.endTime}\n(${combinedNotes})`
           : `${sched.startTime}-${sched.endTime}`;
@@ -476,6 +477,397 @@ export const exportEmployeesToExcel = async (
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
+export interface ExportComparisonParams {
+  monthStr: string;
+  dateRangeDesc: string;
+  displayedDaysInMonth: Date[];
+  activeEmployees: Employee[];
+  manualSchedules: WorkSchedule[];
+  ruleSchedules: WorkSchedule[];
+  aiSchedules: WorkSchedule[] | null;
+  manualStats: any;
+  ruleStats: any;
+  aiStats: any;
+}
+
+export const exportComparisonToExcel = async ({
+  monthStr,
+  dateRangeDesc,
+  displayedDaysInMonth,
+  activeEmployees,
+  manualSchedules,
+  ruleSchedules,
+  aiSchedules,
+  manualStats,
+  ruleStats,
+  aiStats
+}: ExportComparisonParams) => {
+  const wb = XLSX.utils.book_new();
+  const now = new Date();
+  const timestampStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+  const borderStyle = {
+    top: { style: 'thin', color: { rgb: 'DAC0A3' } },
+    bottom: { style: 'thin', color: { rgb: 'DAC0A3' } },
+    left: { style: 'thin', color: { rgb: 'DAC0A3' } },
+    right: { style: 'thin', color: { rgb: 'DAC0A3' } }
+  };
+
+  // 1. Sheet 1: KPI 總覽評比
+  const kpiRows: any[][] = [];
+  kpiRows.push([
+    {
+      v: `精品咖啡館 - 智慧排班比對分析報告 (${monthStr} ${dateRangeDesc})`,
+      t: 's',
+      s: { font: { bold: true, sz: 14, color: { rgb: '3E2723' } } }
+    }
+  ]);
+  kpiRows.push([
+    {
+      v: `匯出時間: ${timestampStr} | 最高管理員專屬核定報表`,
+      t: 's',
+      s: { font: { sz: 9, italic: true, color: { rgb: '6D4C41' } } }
+    }
+  ]);
+  kpiRows.push([]); // blank line
+
+  const kpiHeaders = [
+    '評估指標維度',
+    '手動現有排班 (現行實績)',
+    '程式規則演算法 (autoScheduler)',
+    'Gemini AI 智慧排班'
+  ];
+
+  kpiRows.push(
+    kpiHeaders.map((h, i) => {
+      const headerColor = i === 1 ? '2E7D32' : i === 2 ? '1565C0' : i === 3 ? '6A1B9A' : '795548';
+      return {
+        v: h,
+        t: 's',
+        s: {
+          fill: { fgColor: { rgb: headerColor } },
+          font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 11 },
+          alignment: { horizontal: 'center', vertical: 'center' },
+          border: borderStyle
+        }
+      };
+    })
+  );
+
+  const kpiMetrics = [
+    {
+      name: '總排定班次數',
+      m: `${manualStats?.totalShifts || 0} 班`,
+      r: `${ruleStats?.totalShifts || 0} 班`,
+      a: aiStats ? `${aiStats.totalShifts} 班` : '未執行'
+    },
+    {
+      name: '總出勤工時 (人時)',
+      m: `${manualStats?.totalLaborHours || 0} hrs`,
+      r: `${ruleStats?.totalLaborHours || 0} hrs`,
+      a: aiStats ? `${aiStats.totalLaborHours} hrs` : '未執行'
+    },
+    {
+      name: '時段缺額人時 (Shortage)',
+      m: `${manualStats?.deficitHoursCount || 0} hrs 缺額`,
+      r: `${ruleStats?.deficitHoursCount || 0} hrs 缺額`,
+      a: aiStats ? `${aiStats.deficitHoursCount} hrs 缺額` : '未執行'
+    },
+    {
+      name: '開早達標率 (06-08 ≥2人)',
+      m: `${manualStats?.openingMetRate || 0}%`,
+      r: `${ruleStats?.openingMetRate || 0}%`,
+      a: aiStats ? `${aiStats.openingMetRate || 0}%` : '未執行'
+    },
+    {
+      name: '收班達標率 (17-20 ≥2人)',
+      m: `${manualStats?.closingMetRate || 0}%`,
+      r: `${ruleStats?.closingMetRate || 0}%`,
+      a: aiStats ? `${aiStats.closingMetRate || 0}%` : '未執行'
+    },
+    {
+      name: '尖峰超編人時 (平日>3人, 假日>4人)',
+      m: `${manualStats?.overstaffedHoursCount || 0} hrs 超編`,
+      r: `${ruleStats?.overstaffedHoursCount || 0} hrs 超編`,
+      a: aiStats ? `${aiStats.overstaffedHoursCount || 0} hrs 超編` : '未執行'
+    },
+    {
+      name: '勞基法連續工作 7 日違規數',
+      m: `${manualStats?.consecutiveViolations || 0} 人違規`,
+      r: `${ruleStats?.consecutiveViolations || 0} 人違規`,
+      a: aiStats ? `${aiStats.consecutiveViolations || 0} 人違規` : '未執行'
+    }
+  ];
+
+  kpiMetrics.forEach((metric, rowIdx) => {
+    const rowBg = rowIdx % 2 === 1 ? 'FAF7F2' : 'FFFFFF';
+    kpiRows.push([
+      { v: metric.name, t: 's', s: { fill: { fgColor: { rgb: rowBg } }, font: { bold: true, sz: 10, color: { rgb: '3E2723' } }, border: borderStyle, alignment: { vertical: 'center' } } },
+      { v: metric.m, t: 's', s: { fill: { fgColor: { rgb: rowBg } }, font: { sz: 10, color: { rgb: '2E7D32' } }, border: borderStyle, alignment: { horizontal: 'center', vertical: 'center' } } },
+      { v: metric.r, t: 's', s: { fill: { fgColor: { rgb: rowBg } }, font: { sz: 10, color: { rgb: '1565C0' } }, border: borderStyle, alignment: { horizontal: 'center', vertical: 'center' } } },
+      { v: metric.a, t: 's', s: { fill: { fgColor: { rgb: rowBg } }, font: { sz: 10, color: { rgb: '6A1B9A' } }, border: borderStyle, alignment: { horizontal: 'center', vertical: 'center' } } }
+    ]);
+  });
+
+  const wsKpi = XLSX.utils.aoa_to_sheet(kpiRows);
+  wsKpi['!cols'] = [{ wch: 32 }, { wch: 28 }, { wch: 28 }, { wch: 28 }];
+  XLSX.utils.book_append_sheet(wb, wsKpi, 'KPI綜合評比總覽');
+
+  // Helper to build full schedule grid sheet for each mode
+  const buildRosterWorksheet = (
+    sheetTitle: string,
+    modeSubtitle: string,
+    themeRgb: string,
+    scheduleList: WorkSchedule[] | null
+  ) => {
+    const rows: any[][] = [];
+    rows.push([
+      {
+        v: `${sheetTitle} (${monthStr} ${dateRangeDesc}) - ${modeSubtitle}`,
+        t: 's',
+        s: { font: { bold: true, sz: 12, color: { rgb: '3E2723' } } }
+      }
+    ]);
+
+    // Build schedule map
+    const scheduleLookup: Record<string, WorkSchedule[]> = {};
+    if (scheduleList) {
+      scheduleList.forEach(s => {
+        const lookupKey = `${s.employeeName.trim().toLowerCase()}_${s.date}`;
+        if (!scheduleLookup[lookupKey]) scheduleLookup[lookupKey] = [];
+        scheduleLookup[lookupKey].push(s);
+      });
+    }
+
+    // Header row
+    const headerCols: any[] = [
+      {
+        v: '人員姓名',
+        t: 's',
+        s: { fill: { fgColor: { rgb: themeRgb } }, font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 10 }, alignment: { horizontal: 'center', vertical: 'center' }, border: borderStyle }
+      },
+      {
+        v: '身分',
+        t: 's',
+        s: { fill: { fgColor: { rgb: themeRgb } }, font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 10 }, alignment: { horizontal: 'center', vertical: 'center' }, border: borderStyle }
+      }
+    ];
+
+    displayedDaysInMonth.forEach(dateObj => {
+      const dayNum = dateObj.getDate();
+      const dayOfWeek = dateObj.getDay();
+      const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+      const dayLabel = DAYS_OF_WEEK.find(d => d.value === (dayOfWeek === 0 ? 7 : dayOfWeek))?.name || '';
+
+      headerCols.push({
+        v: `${dayNum}日\n(${dayLabel})`,
+        t: 's',
+        s: {
+          fill: { fgColor: { rgb: isWeekend ? 'EF6C00' : themeRgb } },
+          font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 9 },
+          alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+          border: borderStyle
+        }
+      });
+    });
+
+    headerCols.push({
+      v: '總工時(h)',
+      t: 's',
+      s: { fill: { fgColor: { rgb: themeRgb } }, font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 10 }, alignment: { horizontal: 'center', vertical: 'center' }, border: borderStyle }
+    });
+
+    rows.push(headerCols);
+
+    // Employee Rows
+    activeEmployees.forEach((emp, empIdx) => {
+      let empHours = 0;
+      const rowBg = empIdx % 2 === 1 ? 'FAF7F2' : 'FFFFFF';
+
+      const empRow: any[] = [
+        {
+          v: emp.name,
+          t: 's',
+          s: { fill: { fgColor: { rgb: rowBg } }, font: { bold: true, sz: 10, color: { rgb: '3E2723' } }, border: borderStyle, alignment: { vertical: 'center' } }
+        },
+        {
+          v: emp.status === '正式夥伴' ? '正職' : '兼職',
+          t: 's',
+          s: { fill: { fgColor: { rgb: rowBg } }, font: { sz: 9, color: { rgb: '6D4C41' } }, border: borderStyle, alignment: { horizontal: 'center', vertical: 'center' } }
+        }
+      ];
+
+      displayedDaysInMonth.forEach(dateObj => {
+        const dateStr = formatDateString(dateObj);
+        const lookupKey = `${emp.name.trim().toLowerCase()}_${dateStr}`;
+        const shifts = scheduleLookup[lookupKey] || [];
+
+        if (shifts.length > 0) {
+          const shiftText = shifts.map(s => {
+            if (s.startTime && s.endTime) {
+              empHours += calculateDuration(s.startTime, s.endTime);
+            }
+            return `${s.startTime}-${s.endTime}`;
+          }).join('\n');
+
+          empRow.push({
+            v: shiftText,
+            t: 's',
+            s: {
+              fill: { fgColor: { rgb: 'E8F5E9' } },
+              font: { sz: 9, bold: true, color: { rgb: '1B5E20' } },
+              border: borderStyle,
+              alignment: { horizontal: 'center', vertical: 'center', wrapText: true }
+            }
+          });
+        } else {
+          empRow.push({
+            v: '—',
+            t: 's',
+            s: { fill: { fgColor: { rgb: rowBg } }, font: { sz: 9, color: { rgb: 'BDBDBD' } }, border: borderStyle, alignment: { horizontal: 'center', vertical: 'center' } }
+          });
+        }
+      });
+
+      empRow.push({
+        v: `${Math.round(empHours * 10) / 10}`,
+        t: 'n',
+        s: { fill: { fgColor: { rgb: rowBg } }, font: { bold: true, sz: 10, color: { rgb: '795548' } }, border: borderStyle, alignment: { horizontal: 'center', vertical: 'center' } }
+      });
+
+      rows.push(empRow);
+    });
+
+    // Summary Rows
+    // 1. 出勤人數
+    const headcountRow: any[] = [
+      { v: '出勤人數 (人)', t: 's', s: { fill: { fgColor: { rgb: 'FAF7F2' } }, font: { bold: true, sz: 10, color: { rgb: '5D4037' } }, border: borderStyle, alignment: { vertical: 'center' } } },
+      { v: '', t: 's', s: { fill: { fgColor: { rgb: 'FAF7F2' } }, border: borderStyle } }
+    ];
+    displayedDaysInMonth.forEach(dateObj => {
+      const dateStr = formatDateString(dateObj);
+      const count = activeEmployees.filter(emp => {
+        const lookupKey = `${emp.name.trim().toLowerCase()}_${dateStr}`;
+        return (scheduleLookup[lookupKey] || []).length > 0;
+      }).length;
+      headcountRow.push({ v: count, t: 'n', s: { fill: { fgColor: { rgb: 'FAF7F2' } }, font: { bold: true, sz: 10, color: { rgb: '3E2723' } }, border: borderStyle, alignment: { horizontal: 'center', vertical: 'center' } } });
+    });
+    headcountRow.push({ v: '', t: 's', s: { fill: { fgColor: { rgb: 'FAF7F2' } }, border: borderStyle } });
+    rows.push(headcountRow);
+
+    // 2. 開早人數
+    const openingRow: any[] = [
+      { v: '開早人數 (06-08)', t: 's', s: { font: { bold: true, sz: 9, color: { rgb: '6D4C41' } }, border: borderStyle, alignment: { vertical: 'center' } } },
+      { v: '目標:2', t: 's', s: { font: { sz: 8, color: { rgb: '8D6E63' } }, border: borderStyle, alignment: { horizontal: 'center', vertical: 'center' } } }
+    ];
+    displayedDaysInMonth.forEach(dateObj => {
+      const dateStr = formatDateString(dateObj);
+      const count = scheduleList ? scheduleList.filter(s => s.date === dateStr && isShiftActiveAtHour(s.startTime, s.endTime, 6)).length : 0;
+      openingRow.push({
+        v: count,
+        t: 'n',
+        s: {
+          font: { bold: true, sz: 9, color: { rgb: count >= 2 ? '1B5E20' : 'C2185B' } },
+          border: borderStyle,
+          alignment: { horizontal: 'center', vertical: 'center' }
+        }
+      });
+    });
+    openingRow.push({ v: '', t: 's', s: { border: borderStyle } });
+    rows.push(openingRow);
+
+    // 3. 收班人數
+    const closingRow: any[] = [
+      { v: '收班人數 (17-20)', t: 's', s: { font: { bold: true, sz: 9, color: { rgb: '6D4C41' } }, border: borderStyle, alignment: { vertical: 'center' } } },
+      { v: '目標:2', t: 's', s: { font: { sz: 8, color: { rgb: '8D6E63' } }, border: borderStyle, alignment: { horizontal: 'center', vertical: 'center' } } }
+    ];
+    displayedDaysInMonth.forEach(dateObj => {
+      const dateStr = formatDateString(dateObj);
+      const count = scheduleList ? scheduleList.filter(s => s.date === dateStr && isShiftActiveAtHour(s.startTime, s.endTime, 17)).length : 0;
+      closingRow.push({
+        v: count,
+        t: 'n',
+        s: {
+          font: { bold: true, sz: 9, color: { rgb: count >= 2 ? '1B5E20' : 'C2185B' } },
+          border: borderStyle,
+          alignment: { horizontal: 'center', vertical: 'center' }
+        }
+      });
+    });
+    closingRow.push({ v: '', t: 's', s: { border: borderStyle } });
+    rows.push(closingRow);
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    const colWidths = [{ wch: 14 }, { wch: 8 }];
+    displayedDaysInMonth.forEach(() => colWidths.push({ wch: 12 }));
+    colWidths.push({ wch: 12 });
+    ws['!cols'] = colWidths;
+
+    return ws;
+  };
+
+  // Sheet 2: 手動現有排班
+  const wsManual = buildRosterWorksheet('手動現有排班表', '現行門市資料庫實績', '2E7D32', manualSchedules);
+  XLSX.utils.book_append_sheet(wb, wsManual, '手動現有排班');
+
+  // Sheet 3: 程式規則排班
+  const wsRule = buildRosterWorksheet('程式規則演算法排班表', 'autoScheduler 保早/保晚/封頂模擬', '1565C0', ruleSchedules);
+  XLSX.utils.book_append_sheet(wb, wsRule, '程式規則排班');
+
+  // Sheet 4: Gemini AI 排班
+  const wsAi = buildRosterWorksheet('Gemini AI 智慧排班表', 'Gemini 模型智慧生成', '6A1B9A', aiSchedules);
+  XLSX.utils.book_append_sheet(wb, wsAi, 'Gemini AI 排班');
+
+  // Generate buffer and inject freeze panes for all sheets
+  const rawBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  let finalBuffer: Uint8Array = new Uint8Array(rawBuffer);
+
+  try {
+    const zip = await JSZip.loadAsync(rawBuffer);
+    const sheetFiles = Object.keys(zip.files).filter(name => name.startsWith('xl/worksheets/sheet'));
+
+    for (let i = 0; i < sheetFiles.length; i++) {
+      const filename = sheetFiles[i];
+      const zipFile = zip.file(filename);
+      if (!zipFile) continue;
+      let xml = await zipFile.async('text');
+
+      // For sheets 2, 3, 4 (roster grids): freeze column 2 and row 2
+      // For sheet 1 (KPI): freeze row 4
+      const paneXml = i === 0
+        ? `<pane ySplit="4" topLeftCell="A5" activePane="bottomLeft" state="frozen"/>`
+        : `<pane xSplit="2" ySplit="2" topLeftCell="C3" activePane="bottomRight" state="frozen"/>`;
+
+      if (xml.includes('<sheetView workbookViewId="0"/>')) {
+        xml = xml.replace('<sheetView workbookViewId="0"/>', `<sheetView workbookViewId="0">${paneXml}</sheetView>`);
+      } else if (xml.includes('<sheetView workbookViewId="0">')) {
+        xml = xml.replace('<sheetView workbookViewId="0">', `<sheetView workbookViewId="0">${paneXml}`);
+      } else if (xml.includes('<sheetViews>')) {
+        xml = xml.replace('<sheetViews>', `<sheetViews><sheetView workbookViewId="0">${paneXml}</sheetView>`);
+      }
+      zip.file(filename, xml);
+    }
+    finalBuffer = await zip.generateAsync({ type: 'uint8array' });
+  } catch (err) {
+    console.warn('Failed to inject freeze panes in comparison export:', err);
+  }
+
+  const cleanRangeDesc = dateRangeDesc.replace(/[^\w\u4e00-\u9fa5]/g, '');
+  const downloadFilename = `排班比對分析報告_${monthStr}_${cleanRangeDesc}.xlsx`;
+
+  const blob = new Blob([finalBuffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = downloadFilename;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

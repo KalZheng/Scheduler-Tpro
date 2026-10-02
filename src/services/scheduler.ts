@@ -30,6 +30,8 @@ export interface WorkSchedule {
   originalEndTime?: string | null;
   availabilityId?: string;
   markedBlue?: boolean;
+  scheduleSource?: 'manual' | 'rule' | 'ai' | 'instant';
+  shiftType?: '開早班' | '收班班' | '中段班' | '自訂班' | string;
 }
 
 export interface WorkerAvailability {
@@ -763,19 +765,43 @@ export const deleteSchedule = async (id: string) => {
   }
 };
 
+export type ScheduleClearSource = 'ai' | 'rule' | 'instant' | 'manual';
+
 export const clearConfirmedSchedulesInRange = async (
   startDateStr: string,
   endDateStr: string,
-  onlyAi: boolean = false
+  targetSourcesInput: ScheduleClearSource[] | boolean = false
 ): Promise<{ deletedSchedulesCount: number; resetAvailabilitiesCount: number }> => {
   if (!startDateStr || !endDateStr) return { deletedSchedulesCount: 0, resetAvailabilitiesCount: 0 };
 
-  const isAiSchedule = (s: WorkSchedule) => {
-    return (
-      !!s.availabilityId ||
-      (!!s.notes && (s.notes.includes('🤖') || s.notes.includes('AI') || s.notes.includes('AI生成') || s.notes.includes('自動排班'))) ||
-      (!!s.managerNotes && (s.managerNotes.includes('🤖') || s.managerNotes.includes('AI') || s.managerNotes.includes('AI生成') || s.managerNotes.includes('自動排班')))
-    );
+  // Resolve target sources from input
+  let targetSources: ScheduleClearSource[];
+  if (typeof targetSourcesInput === 'boolean') {
+    // Backwards compatibility: true means only automated (ai + rule), false means all
+    targetSources = targetSourcesInput ? ['ai', 'rule'] : ['ai', 'rule', 'instant', 'manual'];
+  } else if (Array.isArray(targetSourcesInput) && targetSourcesInput.length > 0) {
+    targetSources = targetSourcesInput;
+  } else {
+    targetSources = ['ai', 'rule', 'instant', 'manual'];
+  }
+
+  const targetSourceSet = new Set<ScheduleClearSource>(targetSources);
+
+  const getScheduleSource = (s: WorkSchedule): ScheduleClearSource => {
+    if (s.scheduleSource && ['ai', 'rule', 'instant', 'manual'].includes(s.scheduleSource)) {
+      return s.scheduleSource as ScheduleClearSource;
+    }
+    const notesLower = ((s.notes || '') + ' ' + (s.managerNotes || '')).toLowerCase();
+    if (notesLower.includes('🤖') || notesLower.includes('ai') || notesLower.includes('ai生成')) {
+      return 'ai';
+    }
+    if (notesLower.includes('規則') || notesLower.includes('自動排班') || notesLower.includes('演算法')) {
+      return 'rule';
+    }
+    if (s.availabilityId) {
+      return 'instant';
+    }
+    return 'manual';
   };
 
   if (isValidConfig && db) {
@@ -784,9 +810,9 @@ export const clearConfirmedSchedulesInRange = async (
     const schedSnap = await getDocs(qSchedules);
 
     const docsToDelete = schedSnap.docs.filter(docSnap => {
-      if (!onlyAi) return true;
       const data = docSnap.data() as WorkSchedule;
-      return isAiSchedule(data);
+      const src = getScheduleSource(data);
+      return targetSourceSet.has(src);
     });
 
     const deletePromises = docsToDelete.map(docSnap => deleteDoc(doc(db, 'schedules', docSnap.id)));
@@ -799,7 +825,6 @@ export const clearConfirmedSchedulesInRange = async (
     const availSnap = await getDocs(qAvails);
 
     const availsToReset = availSnap.docs.filter(docSnap => {
-      if (!onlyAi) return true;
       return deletedAvailabilityIds.has(docSnap.id);
     });
 
@@ -816,8 +841,8 @@ export const clearConfirmedSchedulesInRange = async (
     );
 
     const schedulesToDelete = schedulesInRange.filter(s => {
-      if (!onlyAi) return true;
-      return isAiSchedule(s);
+      const src = getScheduleSource(s);
+      return targetSourceSet.has(src);
     });
 
     const deletedIds = new Set(schedulesToDelete.map(s => s.id));
@@ -828,7 +853,7 @@ export const clearConfirmedSchedulesInRange = async (
     let resetCount = 0;
     inMemoryDb.availabilities = inMemoryDb.availabilities.map(a => {
       if (a.date >= startDateStr && a.date <= endDateStr) {
-        if (!onlyAi || deletedAvailIds.has(a.id)) {
+        if (deletedAvailIds.has(a.id)) {
           resetCount++;
           return { ...a, confirmed: false };
         }
