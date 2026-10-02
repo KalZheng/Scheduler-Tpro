@@ -77,6 +77,7 @@ import { ManagerEmployeeView } from './components/manager/ManagerEmployeeView';
 import { ManagerCalculationView } from './components/manager/ManagerCalculationView';
 import { ManagerSystemView } from './components/manager/ManagerSystemView';
 import { ManagerAnalysisView } from './components/manager/ManagerAnalysisView';
+import { ManagerComparisonView } from './components/manager/ManagerComparisonView';
 import { ManagerSelectedDateDetail } from './components/manager/ManagerSelectedDateDetail';
 
 declare const google: any;
@@ -99,6 +100,7 @@ function App() {
 
   // Manager authentication state
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => sessionStorage.getItem('manager_auth') === 'true');
+  const [managerRole, setManagerRole] = useState<'manager' | 'admin'>(() => (sessionStorage.getItem('manager_role') as 'manager' | 'admin') || 'manager');
   const [passcodeInput, setPasscodeInput] = useState('');
   const [loginError, setLoginError] = useState('');
 
@@ -183,9 +185,19 @@ function App() {
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     const MANAGER_PASSCODE = 'coffee888';
-    if (passcodeInput === MANAGER_PASSCODE) {
+    const ADMIN_PASSCODE = 'admincoffee888';
+    if (passcodeInput === ADMIN_PASSCODE) {
       setIsAuthenticated(true);
+      setManagerRole('admin');
       sessionStorage.setItem('manager_auth', 'true');
+      sessionStorage.setItem('manager_role', 'admin');
+      setLoginError('');
+      setPasscodeInput('');
+    } else if (passcodeInput === MANAGER_PASSCODE) {
+      setIsAuthenticated(true);
+      setManagerRole('manager');
+      sessionStorage.setItem('manager_auth', 'true');
+      sessionStorage.setItem('manager_role', 'manager');
       setLoginError('');
       setPasscodeInput('');
     } else {
@@ -196,13 +208,15 @@ function App() {
   // Handle Logout
   const handleLogout = () => {
     setIsAuthenticated(false);
+    setManagerRole('manager');
     sessionStorage.removeItem('manager_auth');
+    sessionStorage.removeItem('manager_role');
     setPasscodeInput('');
     navigateToRole('worker');
   };
 
   // Manager view sub-mode
-  const [managerViewMode, setManagerViewMode] = useState<'calendar' | 'grid' | 'employees' | 'calculation' | 'system' | 'analysis'>('calendar');
+  const [managerViewMode, setManagerViewMode] = useState<'calendar' | 'grid' | 'employees' | 'calculation' | 'system' | 'analysis' | 'comparison'>('calendar');
   const [deadlineDay, setDeadlineDay] = useState<number>(20);
   const [startDay, setStartDay] = useState<number>(15);
   const [operatingStartTime, setOperatingStartTime] = useState<string>('06:30');
@@ -1001,13 +1015,14 @@ function App() {
         workplace: avail.workplace,
         startTime: avail.startTime,
         endTime: avail.endTime,
-        notes: avail.notes ? `由登記可用時間自動排入: ${avail.notes.trim()}` : '由登記可用時間自動排入',
+        notes: '',
         workerNotes: avail.notes ? avail.notes.trim() : '',
         managerNotes: '',
         color: derivedColor,
         originalStartTime: avail.startTime,
         originalEndTime: avail.endTime,
-        availabilityId: avail.id
+        availabilityId: avail.id,
+        scheduleSource: 'instant' as const
       };
       await addSchedule(payload);
       await applyAvailabilitySubtraction(avail, avail.startTime, avail.endTime);
@@ -1057,13 +1072,15 @@ function App() {
         workplace: avail.workplace,
         startTime: sTime,
         endTime: eTime,
-        notes: avail.notes ? `由登記可用時間自動排入 (${shiftName}): ${avail.notes.trim()}` : `由登記可用時間自動排入 (${shiftName})`,
+        notes: '',
         workerNotes: avail.notes ? avail.notes.trim() : '',
         managerNotes: '',
         color: derivedColor,
         originalStartTime: sTime,
         originalEndTime: eTime,
-        availabilityId: avail.id
+        availabilityId: avail.id,
+        scheduleSource: 'instant' as const,
+        shiftType: shiftName
       };
       await addSchedule(payload);
       await applyAvailabilitySubtraction(avail, sTime, eTime);
@@ -1083,13 +1100,15 @@ function App() {
           workplace: item.workplace,
           startTime: item.startTime,
           endTime: item.endTime,
-          notes: item.notes,
-          managerNotes: item.managerNotes,
+          notes: '',
+          managerNotes: '',
           workerNotes: item.workerNotes,
           color: item.color,
           originalStartTime: item.startTime,
           originalEndTime: item.endTime,
-          availabilityId: item.availabilityId
+          availabilityId: item.availabilityId,
+          scheduleSource: item.scheduleSource || 'rule',
+          shiftType: item.shiftType
         });
 
         const targetAvail = availabilities.find(a => a.id === item.availabilityId);
@@ -1187,7 +1206,7 @@ function App() {
     setWorkplace(schedule.workplace || workplaces[0]?.name || '');
     setStartTime(schedule.startTime);
     setEndTime(schedule.endTime);
-    setNotes(schedule.managerNotes !== undefined ? schedule.managerNotes : getManagerNote(schedule));
+    setNotes(schedule.managerNotes ? getManagerNote(schedule) : '');
     setWorkerNotes(schedule.workerNotes !== undefined ? schedule.workerNotes : getWorkerNote(schedule));
     setSingleDate(schedule.date);
     setFormOriginalStartTime(schedule.originalStartTime || schedule.startTime);
@@ -1268,11 +1287,17 @@ function App() {
             workerNotes: '',
             color: derivedColor,
             originalStartTime: formOriginalStartTime || null,
-            originalEndTime: formOriginalEndTime || null
+            originalEndTime: formOriginalEndTime || null,
+            scheduleSource: 'manual' as const
           };
           await addSchedule(payload);
         }
       } else if (modalMode === 'edit' && editingId) {
+        const existingSchedule = schedules.find(s => s.id === editingId);
+        const isTimeChanged = existingSchedule
+          ? (existingSchedule.startTime !== startTime || existingSchedule.endTime !== endTime)
+          : false;
+
         const payload = {
           title: employeeName.trim(),
           employeeName: employeeName.trim(),
@@ -1285,7 +1310,10 @@ function App() {
           workerNotes: workerNotes,
           color: derivedColor,
           originalStartTime: formOriginalStartTime || null,
-          originalEndTime: formOriginalEndTime || null
+          originalEndTime: formOriginalEndTime || null,
+          markedBlue: isTimeChanged ? true : !!existingSchedule?.markedBlue,
+          scheduleSource: existingSchedule?.scheduleSource || 'manual',
+          shiftType: existingSchedule?.shiftType
         };
         await updateSchedule(editingId, payload);
       }
@@ -2031,6 +2059,7 @@ function App() {
                 totalShifts={totalShifts}
                 totalHours={totalHours}
                 totalEmployees={totalEmployees}
+                managerRole={managerRole}
               />
 
               {managerViewMode === 'employees' ? (
@@ -2065,6 +2094,19 @@ function App() {
                   analysisHoursRange={analysisHoursRange}
                   totalHours={totalHours}
                   getStaffingTargetForHour={getStaffingTargetForHour}
+                />
+              ) : managerViewMode === 'comparison' && managerRole === 'admin' ? (
+                <ManagerComparisonView
+                  currentMonthStart={currentMonthStart}
+                  setCurrentMonthStart={setCurrentMonthStart}
+                  availabilities={availabilities}
+                  schedules={schedules}
+                  employees={employees}
+                  staffingTargets={staffingTargets}
+                  analysisHoursRange={analysisHoursRange}
+                  shiftPresets={shiftPresets}
+                  operatingStartTime={operatingStartTime}
+                  operatingEndTime={operatingEndTime}
                 />
               ) : managerViewMode === 'system' ? (
                 <ManagerSystemView
@@ -2235,6 +2277,8 @@ function App() {
                       setFormOriginalEndTime={setFormOriginalEndTime}
                       setIsModalOpen={setIsModalOpen}
                       erpDays={erpDays}
+                      operatingStartTime={operatingStartTime}
+                      operatingEndTime={operatingEndTime}
                     />
                   )}
 

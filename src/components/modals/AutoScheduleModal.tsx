@@ -147,7 +147,9 @@ export const AutoScheduleModal: React.FC<AutoScheduleModalProps> = ({
         workerNotes: p.workerNotes || '',
         managerNotes: p.managerNotes || '',
         color: '#795548',
-        coveredDeficitHoursCount: 8
+        coveredDeficitHoursCount: 8,
+        scheduleSource: 'ai',
+        shiftType: '自訂班'
       }));
 
       setCalculationResult({

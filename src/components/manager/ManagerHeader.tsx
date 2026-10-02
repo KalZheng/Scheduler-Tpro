@@ -2,14 +2,15 @@ import React from 'react';
 
 interface ManagerHeaderProps {
   currentMonthStart: Date;
-  managerViewMode: 'calendar' | 'grid' | 'employees' | 'calculation' | 'system' | 'analysis';
-  setManagerViewMode: (mode: 'calendar' | 'grid' | 'employees' | 'calculation' | 'system' | 'analysis') => void;
+  managerViewMode: 'calendar' | 'grid' | 'employees' | 'calculation' | 'system' | 'analysis' | 'comparison';
+  setManagerViewMode: (mode: 'calendar' | 'grid' | 'employees' | 'calculation' | 'system' | 'analysis' | 'comparison') => void;
   handleGoToToday: () => void;
   handlePrevMonth: () => void;
   handleNextMonth: () => void;
   totalShifts: number;
   totalHours: number;
   totalEmployees: number;
+  managerRole?: 'manager' | 'admin';
 }
 
 export const ManagerHeader: React.FC<ManagerHeaderProps> = ({
@@ -21,7 +22,8 @@ export const ManagerHeader: React.FC<ManagerHeaderProps> = ({
   handleNextMonth,
   totalShifts,
   totalHours,
-  totalEmployees
+  totalEmployees,
+  managerRole = 'manager'
 }) => {
   return (
     <section className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 bg-white/70 p-4 rounded-xl border border-[#DAC0A3]/50 shadow-sm">
@@ -55,8 +57,17 @@ export const ManagerHeader: React.FC<ManagerHeaderProps> = ({
             </button>
           </div>
 
-          <h2 className="text-base font-bold text-[#3E2723] ml-1 shrink-0">
-            {currentMonthStart.getFullYear()}年 {currentMonthStart.getMonth() + 1}月
+          <h2 className="text-base font-bold text-[#3E2723] ml-1 shrink-0 flex items-center gap-2">
+            <span>{currentMonthStart.getFullYear()}年 {currentMonthStart.getMonth() + 1}月</span>
+            {managerRole === 'admin' ? (
+              <span className="text-[10px] font-black bg-amber-600 text-white px-2 py-0.5 rounded-full shadow-xs">
+                👑 最高管理員
+              </span>
+            ) : (
+              <span className="text-[10px] font-bold bg-[#8D6E63]/20 text-[#5D4037] px-2 py-0.5 rounded-full">
+                ☕ 一般主管
+              </span>
+            )}
           </h2>
         </div>
 
@@ -116,6 +127,19 @@ export const ManagerHeader: React.FC<ManagerHeaderProps> = ({
           >
             系統管理
           </button>
+
+          {/* Admin-only Comparison Tab */}
+          {managerRole === 'admin' && (
+            <button
+              onClick={() => setManagerViewMode('comparison')}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center gap-1 ${managerViewMode === 'comparison'
+                ? 'bg-purple-800 text-white shadow-sm'
+                : 'text-purple-800 hover:text-purple-950 bg-purple-100/50 hover:bg-purple-100'
+                }`}
+            >
+              <span>📊</span> 排班比對分析
+            </button>
+          )}
         </div>
       </div>
 

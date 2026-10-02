@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import type { WorkSchedule, WorkerAvailability, Employee } from '../../services/scheduler';
 import { DAYS_OF_WEEK } from '../../utils/constants';
 import workplaces from '../../config/workplaces.json';
-import { formatDateString, compareTimeStrings, getCleanNote } from '../../utils/dateUtils';
+import { formatDateString, compareTimeStrings, getCleanNote, getUnstaffedOperatingGaps } from '../../utils/dateUtils';
 
 interface ManagerGridViewProps {
   gridContainerRef: React.RefObject<HTMLDivElement | null>;
@@ -39,6 +39,8 @@ interface ManagerGridViewProps {
   setFormOriginalEndTime: (time: string | null) => void;
   setIsModalOpen: (open: boolean) => void;
   erpDays?: number[];
+  operatingStartTime?: string;
+  operatingEndTime?: string;
 }
 
 export const ManagerGridView: React.FC<ManagerGridViewProps> = ({
@@ -75,7 +77,9 @@ export const ManagerGridView: React.FC<ManagerGridViewProps> = ({
   setFormOriginalStartTime,
   setFormOriginalEndTime,
   setIsModalOpen,
-  erpDays = [1, 3, 5]
+  erpDays = [1, 3, 5],
+  operatingStartTime = '06:30',
+  operatingEndTime = '20:00'
 }) => {
   const [gridSubTab, setGridSubTab] = useState<'schedules' | 'availabilities'>('schedules');
   const [dateRangePart, setDateRangePart] = useState<'part1' | 'part2' | 'all'>('part1');
@@ -353,7 +357,7 @@ export const ManagerGridView: React.FC<ManagerGridViewProps> = ({
                 );
               })}
             </tr>
-            <tr className="border-b border-[#DAC0A3]/50 bg-[#F5EBE6]/40">
+            <tr className="border-b border-[#DAC0A3]/50 bg-[#F5EBE6]/40 h-[64px]">
               {displayedDates.map(dateObj => {
                 const dateStr = formatDateString(dateObj);
                 const isToday = dateStr === todayStr;
@@ -363,23 +367,23 @@ export const ManagerGridView: React.FC<ManagerGridViewProps> = ({
                 return (
                   <th
                     key={dateStr + '-note'}
-                    className={`px-1 py-1.5 text-center border-r border-b border-[#DAC0A3]/50 w-[100px] min-w-[100px] transition-colors relative group/note ${isSelected
+                    className={`px-1 py-2 text-center border-r border-b border-[#DAC0A3]/50 w-[100px] min-w-[100px] h-[64px] transition-colors relative group/note ${isSelected
                       ? 'bg-[#8D6E63]/10 text-[#3E2723]'
                       : isToday
                         ? 'bg-[#FAF7F2]'
                         : 'bg-white/50 hover:bg-[#FAF7F2]/80'
                       }`}
                   >
-                    <div className="flex flex-col items-center justify-between min-h-[36px] gap-1">
+                    <div className="flex flex-col items-center justify-between min-h-[52px] h-full gap-1">
                       {note ? (
                         <span
-                          className="text-[9px] font-bold text-[#5D4037] break-words line-clamp-2 px-1 max-w-[92px] leading-tight select-text"
+                          className="text-[10px] font-bold text-[#5D4037] break-words line-clamp-3 px-1 max-w-[94px] leading-tight select-text"
                           title={note}
                         >
                           {note}
                         </span>
                       ) : (
-                        <span className="text-[9px] text-[#6D4C41]/30 font-medium italic select-none">
+                        <span className="text-[9.5px] text-[#6D4C41]/35 font-medium italic select-none my-auto">
                           無日備註
                         </span>
                       )}
@@ -392,7 +396,7 @@ export const ManagerGridView: React.FC<ManagerGridViewProps> = ({
                             handleUpdateDayNote(dateStr, newNote.trim());
                           }
                         }}
-                        className="text-[9px] text-[#8D6E63] hover:text-[#5D4037] hover:underline flex items-center justify-center gap-0.5 cursor-pointer mt-0.5 opacity-65 hover:opacity-100 transition-opacity"
+                        className="text-[9.5px] font-semibold text-[#8D6E63] hover:text-[#3E2723] hover:bg-[#8D6E63]/15 px-1.5 py-0.5 rounded transition-all flex items-center justify-center gap-0.5 cursor-pointer opacity-75 hover:opacity-100"
                       >
                         備註 📝
                       </button>
@@ -590,6 +594,102 @@ export const ManagerGridView: React.FC<ManagerGridViewProps> = ({
                   </tr>
                 );
               })
+            )}
+
+            {/* 置底橫列：營業時間無人排班/空班時段警示 */}
+            {gridSubTab === 'schedules' && (
+              <tr className="border-t-2 border-[#8D6E63]/40 bg-[#FAF5EF] h-[70px]">
+                <td className="sticky left-0 z-10 px-3 py-3 text-xs font-black text-[#5D4037] border-r-2 border-solid border-b border-[#DAC0A3]/90 bg-[#F5EBE6] shadow-[4px_0_8px_-4px_rgba(100,70,50,0.15)] w-[145px] min-w-[145px] h-[70px] align-middle select-none">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl shrink-0">🚨</span>
+                    <div className="flex flex-col min-w-0">
+                      <span className="font-black text-[13px] text-[#3E2723] leading-tight truncate">營業無人時段</span>
+                      <span className="text-[10px] text-[#8D6E63] font-mono font-bold leading-tight truncate mt-0.5">({operatingStartTime}-{operatingEndTime})</span>
+                    </div>
+                  </div>
+                </td>
+                {displayedDates.map(dateObj => {
+                  const dateStr = formatDateString(dateObj);
+                  const isSelected = dateStr === selectedDateStr;
+                  const gaps = getUnstaffedOperatingGaps(dateStr, schedules, operatingStartTime, operatingEndTime);
+                  const hasGaps = gaps.length > 0;
+
+                  return (
+                    <td
+                      key={dateStr + '-gap'}
+                      onClick={() => setSelectedDateStr(dateStr)}
+                      className={`p-1.5 border-r border-solid border-b border-[#DAC0A3]/50 text-center w-[100px] min-w-[100px] h-[70px] align-middle transition-colors cursor-pointer ${
+                        isSelected ? 'bg-[#8D6E63]/15' : ''
+                      } ${hasGaps ? 'bg-red-50/90 hover:bg-red-100/90' : 'bg-white/60 hover:bg-[#FAF7F2]'}`}
+                      title={hasGaps ? `⚠️ ${dateStr} 營業時間 (${operatingStartTime}-${operatingEndTime}) 無人排班：${gaps.join(', ')}` : `✅ ${dateStr} 營業時間全時段皆有人上班`}
+                    >
+                      {hasGaps ? (
+                        gaps.length === 1 ? (
+                          <div className="w-full h-[50px] rounded-lg bg-red-100/95 border border-red-300 text-red-900 shadow-2xs flex flex-col items-center justify-center leading-tight px-1 transition-all hover:bg-red-200/90">
+                            {gaps[0] === '全日無人' ? (
+                              <>
+                                <span className="text-sm leading-none">❌</span>
+                                <span className="text-[11px] font-black text-red-800 mt-1 leading-none">全日無人</span>
+                              </>
+                            ) : (
+                              <>
+                                <div className="flex items-center justify-center gap-1 text-[10px] font-black text-red-700 leading-none">
+                                  <span className="text-xs leading-none">⚠️</span>
+                                  <span>空班</span>
+                                </div>
+                                <div className="text-[11.5px] font-mono font-black tracking-tight text-red-950 mt-1 leading-none">
+                                  {gaps[0]}
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="flex flex-col gap-1 w-full justify-center items-center py-0.5">
+                            {gaps.map((gap, gIdx) => (
+                              <div
+                                key={gIdx}
+                                className="w-full py-1 px-1 rounded-md bg-red-100/95 border border-red-300 text-red-900 shadow-2xs flex items-center justify-center gap-1 leading-tight"
+                              >
+                                <span className="text-[10px]">⚠️</span>
+                                <span className="text-[10.5px] font-mono font-black tracking-tight text-red-950">
+                                  {gap}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )
+                      ) : (
+                        <div className="w-full h-[50px] rounded-lg bg-emerald-50/90 border border-emerald-200/80 text-emerald-800 shadow-2xs flex flex-col items-center justify-center leading-tight px-1 select-none" title="營業時間內均有人員在班">
+                          <span className="text-base font-black text-emerald-600 leading-none">✓</span>
+                          <span className="text-[10px] font-extrabold text-emerald-700 tracking-tight mt-1 leading-none">全時段覆蓋</span>
+                        </div>
+                      )}
+                    </td>
+                  );
+                })}
+                <td className="p-1.5 text-center text-xs font-bold border-b border-[#DAC0A3]/50 w-[95px] min-w-[95px] h-[70px] bg-[#F5EBE6]/60 align-middle">
+                  {(() => {
+                    let unstaffedDaysCount = 0;
+                    displayedDates.forEach(d => {
+                      const dStr = formatDateString(d);
+                      if (getUnstaffedOperatingGaps(dStr, schedules, operatingStartTime, operatingEndTime).length > 0) {
+                        unstaffedDaysCount++;
+                      }
+                    });
+                    return unstaffedDaysCount > 0 ? (
+                      <div className="w-full h-[50px] rounded-lg bg-red-100/95 border border-red-300 text-red-700 shadow-2xs flex flex-col items-center justify-center leading-tight px-1">
+                        <span className="text-xs leading-none">⚠️</span>
+                        <span className="text-[11px] font-black mt-1 leading-none">{unstaffedDaysCount} 天空班</span>
+                      </div>
+                    ) : (
+                      <div className="w-full h-[50px] rounded-lg bg-emerald-50/90 border border-emerald-200/80 text-emerald-700 shadow-2xs flex flex-col items-center justify-center leading-tight px-1">
+                        <span className="text-sm font-black leading-none text-emerald-600">✓</span>
+                        <span className="text-[11px] font-extrabold mt-1 leading-none">0 缺口</span>
+                      </div>
+                    );
+                  })()}
+                </td>
+              </tr>
             )}
           </tbody>
         </table>

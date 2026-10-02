@@ -21,6 +21,7 @@ export interface ProposedSchedule {
   color: string;
   coveredDeficitHoursCount: number;
   shiftType?: '開早班' | '收班班' | '中段班' | '自訂班';
+  scheduleSource?: 'manual' | 'rule' | 'ai' | 'instant';
   reasoning?: string;
 }
 
@@ -191,12 +192,13 @@ export const generateAutoSchedule = (
       workplace: avail.workplace || '咖啡吧檯',
       startTime,
       endTime,
-      notes: avail.notes ? avail.notes.trim() : '',
+      notes: '',
       workerNotes: avail.notes ? avail.notes.trim() : '',
-      managerNotes: `由規則排班演算法自動指派 (${shiftType})`,
+      managerNotes: '',
       color: derivedColor,
       coveredDeficitHoursCount: usefulHours,
       shiftType,
+      scheduleSource: 'rule',
       reasoning
     };
 
@@ -218,7 +220,9 @@ export const generateAutoSchedule = (
       endTime: proposed.endTime,
       color: proposed.color,
       createdAt: Date.now(),
-      availabilityId: proposed.availabilityId
+      availabilityId: proposed.availabilityId,
+      scheduleSource: 'rule',
+      shiftType: proposed.shiftType
     });
   };
 

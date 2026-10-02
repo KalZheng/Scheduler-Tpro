@@ -12,6 +12,8 @@ export interface ProposedAISchedule {
   workerNotes?: string;
   managerNotes?: string;
   color?: string;
+  scheduleSource?: 'manual' | 'rule' | 'ai' | 'instant';
+  shiftType?: string;
   reasoning?: string;
 }
 
@@ -45,29 +47,36 @@ export function buildAIPromptPayload(options: RunAIScheduleOptions) {
   });
 
   return {
-    instructions: `1. **Opening (06:00–08:00, target = 2)**
-   If 2 or more workers in \`availabilities\` are available starting at 06:30, assign exactly 2 of them at 06:30 so the target is fully met. Never leave this window at 1/2 if 2 eligible workers exist.
+    instructions: `1. **Opening Shifts (06:00–09:00, target = 2 workers)**
+       - Every day MUST have exactly 2 workers on duty for opening starting at 06:30 (e.g. 06:30-14:30).
+       - On weekdays, the 2nd opening worker can be scheduled for a 5~6 hour shift (e.g. 06:30-12:00 or 06:30-12:30, >= 4h) to avoid afternoon headcount congestion and leave room for closing workers.
+       - Rotate opening shifts among all qualified morning workers (e.g. 王昌薇, 林汭怡, 洪佩琪, 陳育璇).
 
-    2. **Closing (target = 2 through 17:00–18:00)**
-   Prioritize workers whose \`time\` ends at 17:00 or later for closing shifts.
-   Assign as many as are actually available — if fewer than 2 qualify (or none),
-   assign whoever is eligible and leave any remaining gap unfilled. Do not
-   invent shifts outside a worker's registered \`time\` window to force coverage.
+    2. **Closing Shifts (17:00–18:00, target = 1~2 workers) (CRITICAL)**
+       - Store operating hours extend to 18:00. Every single date MUST have 1~2 workers on duty through 17:00–18:00.
+       - Candidates whose registered availability extends to 17:00 or later (e.g. 陳宣含, 王新嵐, 張嘉纖) MUST be scheduled with staggered later start times (e.g. 09:30-17:30, 10:00-18:00, or 12:00-17:30) to cover store closing.
+       - Do NOT schedule everyone on early morning shifts leaving the closing window (17:00-18:00) with 0 workers!
 
-    3. **Midday & peak cap (08:00–17:00)**
-       Strictly cap maximum overlapping workers per hour:
-       - **Weekdays (Mon–Fri)**: Max **3 workers** per hour (never schedule 4 or more on weekdays).
-       - **Weekends (Sat–Sun)**: Max **4 workers** per hour (or max 5 during peak rush 10:00–15:00).
-       Stop assigning once an hour hits its cap.
+    3. **Midday Peak & Staggered Start Times (Target = 3 on weekdays, 4 on weekends)**
+       - The 3rd worker (and 4th weekend worker) MUST start at 09:00 or 09:30 (e.g. 09:00-15:00, 09:30-17:30).
+       - NEVER start the 3rd or 4th worker at 06:30, 07:00, or 08:00, because the 06:00–09:00 window must strictly maintain exactly 2 workers.
+       - Weekdays (Mon–Fri): Maintain exactly 3 workers during peak hours (09:30–15:00).
+       - Weekends (Sat–Sun): Maintain exactly 4 workers during peak hours (09:30–15:00).
+       - Actively assign available part-time workers (e.g. 張以恩, 陳宣含, 張嘉纖, 王新嵐) to fill peak hours.
 
-    4. **Fair rotation**
-      Every registered worker in \`availabilities\` should get shifts when unfilled targets remain for that date. Avoid stacking one worker 8–10 days straight while another gets zero shifts.
+    4. **Strict Hourly Caps & Labor Standards Act**
+       - Weekday Cap: Strictly MAX 3 workers per hour at any time (never 4).
+       - Weekend Cap: Strictly MAX 4 workers per hour at any time (never 5).
+       - Labor Law (一例一休): Maximum 5~6 consecutive working days. NEVER schedule any worker for 7 consecutive days across existing schedules and new shifts.
+       - Shift Duration: 4 to 9 hours within each worker's registered time window.
 
-    5. **No 7 consecutive workdays & Count confirmed shifts**
-   Check \`existingConfirmedSchedules\` (shifts already confirmed before or on these dates). These workers are already working those shifts, so count them toward the hourly target headcount and do not assign them overlapping shifts or 7 consecutive workdays.
+    5. **Fair Rotation & Shift Balance**
+       - Distribute weekend shifts and weekly hours evenly among all available staff.
+       - If a worker has worked multiple days leading up to the weekend, give them a rest day on Saturday or Sunday to avoid consecutive day violations, while rotating in other available workers.
 
-    6. **Part-time shift bounds**
-       The \`time\` property (e.g. \`06:30-17:30\`) is a worker's max availability window. Trim as needed to fit store demand (e.g. \`06:30-17:30\` can become \`08:30-17:30\`). Assigned shift length must be 240–540 minutes (4–9 hours). Map \`id\` -> \`availabilityId\` and \`who\` -> \`employeeName\` in response.
+    6. **Complete Date Coverage (CRITICAL)**
+       - You MUST process EVERY date in \`dateRange\` chronologically from first date to last date.
+       - Ensure opening (2 workers), midday peak (3 on weekdays, 4 on weekends), and closing (1~2 workers) are addressed for every single date.
 
     Return ONLY JSON matching the specified schema.`,
 
@@ -139,6 +148,7 @@ export async function runAIScheduler(options: RunAIScheduleOptions): Promise<Pro
       temperature: 0.1,
       topP: 0.1,
       topK: 1,
+      maxOutputTokens: 8192,
       responseMimeType: "application/json",
       responseSchema: responseSchema
     }
@@ -148,9 +158,11 @@ export async function runAIScheduler(options: RunAIScheduleOptions): Promise<Pro
   let rawText = '';
 
   const geminiModelsToTry = Array.from(new Set([
-    options.modelName || 'gemini-3.5-flash',
-    'gemini-3.1-pro-preview'
-
+    options.modelName || 'gemini-3.1-flash-lite',
+    'gemini-3.1-flash-lite',
+    'gemini-3.5-flash-lite',
+    'gemini-3.8-flash',
+    'gemini-3.5-flash'
   ]));
 
   for (const model of geminiModelsToTry) {
@@ -165,7 +177,22 @@ export async function runAIScheduler(options: RunAIScheduleOptions): Promise<Pro
       if (!res.ok) {
         const errText = await res.text();
         console.warn(`Gemini model ${model} failed (${res.status}): ${errText}`);
-        lastError = new Error(`GEMINI_API_ERROR: ${res.status} - ${errText}`);
+        
+        let errorMsg = `GEMINI_API_ERROR: ${res.status}`;
+        try {
+          const parsedErr = JSON.parse(errText);
+          if (parsedErr?.error?.message) {
+            errorMsg = `Gemini (${model}): ${parsedErr.error.message}`;
+          }
+        } catch {
+          errorMsg = `Gemini (${model}): ${errText}`;
+        }
+        lastError = new Error(errorMsg);
+
+        // If high demand (503) or rate limit (429), pause briefly before trying next fallback model
+        if (res.status === 503 || res.status === 429) {
+          await new Promise(r => setTimeout(r, 1000));
+        }
         continue;
       }
 
@@ -279,9 +306,11 @@ export async function runAIScheduler(options: RunAIScheduleOptions): Promise<Pro
       startTime: item.startTime,
       endTime: item.endTime,
       workplace: item.workplace || origAvail?.workplace || '埔里酒廠門市',
-      notes: origAvail?.notes ? origAvail.notes.trim() : '',
+      notes: '',
       workerNotes: origAvail?.notes ? origAvail.notes.trim() : '',
-      managerNotes: 'AI生成',
+      managerNotes: '',
+      scheduleSource: 'ai',
+      shiftType: '自訂班',
       reasoning: item.reasoning
     };
 
