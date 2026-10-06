@@ -73,6 +73,7 @@
   ],
   "deadlineDay": 20,
   "startDay": 15,
+  "allowMonthSwitch": false,
   "operatingStartTime": "06:30",
   "operatingEndTime": "19:30",
   "shiftMorningStart": "06:30",

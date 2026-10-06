@@ -32,7 +32,8 @@ import {
   updateMarkedEmptyCells,
   subscribeToErpDays,
   subscribeToPtAvailMode,
-  subscribeToFilenamePrefix
+  subscribeToFilenamePrefix,
+  subscribeToAllowMonthSwitch
 } from './services/scheduler';
 import type { PtAvailMode } from './services/scheduler';
 import type { WorkSchedule, WorkerAvailability, StaffingTarget, Employee, ShiftPreset, RevenueStaffRules } from './services/scheduler';
@@ -219,6 +220,7 @@ function App() {
   const [managerViewMode, setManagerViewMode] = useState<'calendar' | 'grid' | 'employees' | 'calculation' | 'system' | 'analysis' | 'comparison'>('calendar');
   const [deadlineDay, setDeadlineDay] = useState<number>(20);
   const [startDay, setStartDay] = useState<number>(15);
+  const [allowMonthSwitch, setAllowMonthSwitch] = useState<boolean>(false);
   const [operatingStartTime, setOperatingStartTime] = useState<string>('06:30');
   const [operatingEndTime, setOperatingEndTime] = useState<string>('20:00');
   const [shiftMorningStart, setShiftMorningStart] = useState<string>('06:30');
@@ -440,14 +442,27 @@ function App() {
 
   const pickerDates = getMonthGridDates(currentMonthStart);
 
-  const workerNextMonthStart = useMemo(() => {
+  const [workerMonthStart, setWorkerMonthStart] = useState<Date>(() => {
     const today = new Date();
     return new Date(today.getFullYear(), today.getMonth() + 1, 1);
-  }, []);
+  });
+  const workerNextMonthStart = workerMonthStart;
+
+  const handleWorkerPrevMonth = () => {
+    setWorkerMonthStart(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
+    setAvailSelectedDates([]);
+  };
+
+  const handleWorkerNextMonth = () => {
+    setWorkerMonthStart(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
+    setAvailSelectedDates([]);
+  };
+
   const workerCalendarGridDates = getMonthGridDates(workerNextMonthStart);
   const workerDaysInMonth = getDaysInMonth(workerNextMonthStart);
 
   const isWorkerEditable = useMemo(() => {
+    if (allowMonthSwitch) return true;
     if (!workerName.trim()) return true;
     const targetMonthStr = formatDateString(workerNextMonthStart).substring(0, 7);
     const hasConfirmed = schedules.some(
@@ -457,7 +472,7 @@ function App() {
     const todayNum = new Date().getDate();
     if (todayNum < startDay) return false;
     return (todayNum <= deadlineDay) || !hasConfirmed;
-  }, [workerName, workerNextMonthStart, schedules, startDay, deadlineDay]);
+  }, [allowMonthSwitch, workerName, workerNextMonthStart, schedules, startDay, deadlineDay]);
 
   const handleTagClick = (pos: '餐吧' | 'POS機' | '後吧' | '收班' | '開早') => {
     if (empTrainingPos === pos) {
@@ -596,6 +611,7 @@ function App() {
     const unsubErpDays = subscribeToErpDays((days) => setErpDays(days));
     const unsubPtAvailMode = subscribeToPtAvailMode((mode) => setPtAvailMode(mode));
     const unsubFilenamePrefix = subscribeToFilenamePrefix((prefix) => setFilenamePrefix(prefix));
+    const unsubAllowMonthSwitch = subscribeToAllowMonthSwitch((allowed) => setAllowMonthSwitch(allowed));
 
     return () => {
       unsubSchedules();
@@ -616,6 +632,7 @@ function App() {
       unsubErpDays();
       unsubPtAvailMode();
       unsubFilenamePrefix();
+      unsubAllowMonthSwitch();
     };
   }, []);
 
@@ -2034,6 +2051,9 @@ function App() {
               getWorkerDisplayAvailabilities={getWorkerDisplayAvailabilities}
               handleEditAvailability={handleEditAvailability}
               handleDeleteAvailability={handleDeleteAvailability}
+              allowMonthSwitch={allowMonthSwitch}
+              onWorkerPrevMonth={handleWorkerPrevMonth}
+              onWorkerNextMonth={handleWorkerNextMonth}
             />
           )
         )}
@@ -2118,6 +2138,8 @@ function App() {
                   setStartDay={setStartDay}
                   deadlineDay={deadlineDay}
                   setDeadlineDay={setDeadlineDay}
+                  allowMonthSwitch={allowMonthSwitch}
+                  setAllowMonthSwitch={setAllowMonthSwitch}
                   shiftPresets={shiftPresets}
                   setShiftPresets={setShiftPresets}
                   tempRules={tempRules}

@@ -11,7 +11,8 @@ import {
   updateRevenueStaffRules,
   updateErpDays,
   updatePtAvailMode,
-  updateFilenamePrefix
+  updateFilenamePrefix,
+  updateAllowMonthSwitch
 } from '../../services/scheduler';
 import type { PtAvailMode } from '../../services/scheduler';
 
@@ -24,6 +25,8 @@ interface ManagerSystemViewProps {
   setStartDay: (day: number) => void;
   deadlineDay: number;
   setDeadlineDay: (day: number) => void;
+  allowMonthSwitch: boolean;
+  setAllowMonthSwitch: (val: boolean) => void;
   shiftPresets: ShiftPreset[];
   setShiftPresets: (presets: ShiftPreset[]) => void;
   tempRules: RevenueStaffRules;
@@ -47,6 +50,8 @@ export const ManagerSystemView: React.FC<ManagerSystemViewProps> = ({
   setStartDay,
   deadlineDay,
   setDeadlineDay,
+  allowMonthSwitch,
+  setAllowMonthSwitch,
   shiftPresets,
   setShiftPresets,
   tempRules,
@@ -67,6 +72,7 @@ export const ManagerSystemView: React.FC<ManagerSystemViewProps> = ({
       await updateOperatingEndTime(operatingEndTime);
       await updateStartDay(startDay);
       await updateDeadlineDay(deadlineDay);
+      await updateAllowMonthSwitch(allowMonthSwitch);
       await updateShiftPresets(shiftPresets);
       await updateRevenueStaffRules(tempRules);
       await updateErpDays(erpDays);
@@ -230,18 +236,60 @@ export const ManagerSystemView: React.FC<ManagerSystemViewProps> = ({
 
           {/* Section 3: Registration Limits */}
           <div className="border-t border-[#E5DCD5]/60 pt-4 space-y-3">
-            <h4 className="text-xs font-bold text-[#3E2723] flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#795548]"></span>
-              夥伴登記時間限制
-            </h4>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-bold text-[#3E2723] flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#795548]"></span>
+                夥伴登記時間限制
+              </h4>
+            </div>
+
+            {/* Toggle: Allow month switch */}
+            <div className="flex items-center justify-between p-3.5 rounded-xl bg-[#FAF7F2]/80 border border-[#DAC0A3]/50 shadow-2xs">
+              <div className="space-y-0.5 pr-3">
+                <span className="text-xs font-bold text-[#3E2723] flex items-center gap-1.5">
+                  <span>📅</span> 開放員工切換登記月份（允許填寫歷史/其他月份）
+                </span>
+                <p className="text-[11px] text-[#6D4C41] leading-relaxed">
+                  開啟後，員工登記介面將出現「◀ 上個月 / 下個月 ▶」切換按鈕，並自動放行歷史與其他月份之登記編輯權限。
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={allowMonthSwitch}
+                onClick={() => setAllowMonthSwitch(!allowMonthSwitch)}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
+                  allowMonthSwitch ? 'bg-[#2E7D32]' : 'bg-gray-300'
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                    allowMonthSwitch ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+
+            {allowMonthSwitch && (
+              <div className="flex items-center gap-2 p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs">
+                <span className="text-sm">💡</span>
+                <span className="font-medium leading-relaxed">
+                  已開啟跨月份填寫模式：每月登記起訖日限制已自動放行，下方開放與截止日期設定已自動反灰略過。
+                </span>
+              </div>
+            )}
+
+            <div className={`grid grid-cols-2 gap-4 transition-opacity duration-200 ${allowMonthSwitch ? 'opacity-45' : 'opacity-100'}`}>
               <div>
-                <label className="block text-[11px] font-semibold text-[#6D4C41] mb-1.5">開放登記日期：每月的第</label>
+                <label className="block text-[11px] font-semibold text-[#6D4C41] mb-1.5">
+                  開放登記日期：每月的第 {allowMonthSwitch && <span className="text-gray-400 font-normal">(已放行略過)</span>}
+                </label>
                 <div className="flex items-center gap-1">
                   <input
                     type="number"
                     min="1"
                     max="31"
+                    disabled={allowMonthSwitch}
                     value={startDay}
                     onChange={(e) => {
                       const val = parseInt(e.target.value, 10);
@@ -249,19 +297,24 @@ export const ManagerSystemView: React.FC<ManagerSystemViewProps> = ({
                         setStartDay(val);
                       }
                     }}
-                    className="w-full glass-input px-3 py-2 rounded-xl text-center font-mono text-xs"
+                    className={`w-full glass-input px-3 py-2 rounded-xl text-center font-mono text-xs ${
+                      allowMonthSwitch ? 'cursor-not-allowed bg-gray-100/80 text-gray-400' : ''
+                    }`}
                   />
                   <span className="text-[10px] font-semibold text-[#6D4C41] shrink-0">號</span>
                 </div>
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-[#6D4C41] mb-1.5">截止登記日期：每月的第</label>
+                <label className="block text-[11px] font-semibold text-[#6D4C41] mb-1.5">
+                  截止登記日期：每月的第 {allowMonthSwitch && <span className="text-gray-400 font-normal">(已放行略過)</span>}
+                </label>
                 <div className="flex items-center gap-1">
                   <input
                     type="number"
                     min="1"
                     max="31"
+                    disabled={allowMonthSwitch}
                     value={deadlineDay}
                     onChange={(e) => {
                       const val = parseInt(e.target.value, 10);
@@ -269,7 +322,9 @@ export const ManagerSystemView: React.FC<ManagerSystemViewProps> = ({
                         setDeadlineDay(val);
                       }
                     }}
-                    className="w-full glass-input px-3 py-2 rounded-xl text-center font-mono text-xs"
+                    className={`w-full glass-input px-3 py-2 rounded-xl text-center font-mono text-xs ${
+                      allowMonthSwitch ? 'cursor-not-allowed bg-gray-100/80 text-gray-400' : ''
+                    }`}
                   />
                   <span className="text-[10px] font-semibold text-[#6D4C41] shrink-0">號</span>
                 </div>

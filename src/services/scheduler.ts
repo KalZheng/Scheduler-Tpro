@@ -109,6 +109,7 @@ let localMarkedEmptyCellsListeners: ((markedCells: Record<string, boolean>) => v
 let localErpDaysListeners: ((days: number[]) => void)[] = [];
 let localPtAvailModeListeners: ((mode: PtAvailMode) => void)[] = [];
 let localFilenamePrefixListeners: ((prefix: string) => void)[] = [];
+let localAllowMonthSwitchListeners: ((allowed: boolean) => void)[] = [];
 
 export type PtAvailMode = 'static' | 'flex';
 
@@ -137,6 +138,7 @@ interface DbSchema {
   employees: Employee[];
   deadlineDay?: number;
   startDay?: number;
+  allowMonthSwitch?: boolean;
   operatingStartTime?: string;
   operatingEndTime?: string;
   shiftMorningStart?: string;
@@ -160,6 +162,7 @@ const inMemoryDb: DbSchema = {
   employees: [],
   deadlineDay: 20,
   startDay: 15,
+  allowMonthSwitch: false,
   operatingStartTime: '06:30',
   operatingEndTime: '20:00',
   shiftMorningStart: '06:30',
@@ -409,6 +412,7 @@ export const syncActiveMonth = async (monthStr: string) => {
       localEmployeeOrderListeners.forEach(listener => listener(inMemoryDb.employeeOrder || []));
       localErpDaysListeners.forEach(listener => listener(inMemoryDb.erpDays || [1, 3, 5]));
       localFilenamePrefixListeners.forEach(listener => listener(inMemoryDb.filenamePrefix || ''));
+      localAllowMonthSwitchListeners.forEach(listener => listener(inMemoryDb.allowMonthSwitch || false));
       localMonthlyRevenuesListeners.forEach(listener => {
         const revenues: Record<number, number> = {};
         if (inMemoryDb.monthlyRevenues) {
@@ -556,6 +560,7 @@ const loadFileDb = async () => {
     localShiftPresetsListeners.forEach(listener => listener(inMemoryDb.shiftPresets || []));
     localEmployeeOrderListeners.forEach(listener => listener(inMemoryDb.employeeOrder || []));
     localFilenamePrefixListeners.forEach(listener => listener(inMemoryDb.filenamePrefix || ''));
+    localAllowMonthSwitchListeners.forEach(listener => listener(inMemoryDb.allowMonthSwitch || false));
     localMonthlyRevenuesListeners.forEach(listener => {
       const revenues: Record<number, number> = {};
       if (inMemoryDb.monthlyRevenues) {
@@ -623,6 +628,7 @@ const saveDbForDate = async (dateStr?: string) => {
   localShiftPresetsListeners.forEach(listener => listener(inMemoryDb.shiftPresets || []));
   localEmployeeOrderListeners.forEach(listener => listener(inMemoryDb.employeeOrder || []));
   localFilenamePrefixListeners.forEach(listener => listener(inMemoryDb.filenamePrefix || ''));
+  localAllowMonthSwitchListeners.forEach(listener => listener(inMemoryDb.allowMonthSwitch || false));
   localMonthlyRevenuesListeners.forEach(listener => {
     const revenues: Record<number, number> = {};
     if (inMemoryDb.monthlyRevenues) {
@@ -1602,6 +1608,37 @@ export const updateFilenamePrefix = async (prefix: string) => {
     return await setDoc(docRef, { filenamePrefix: prefix }, { merge: true });
   } else {
     inMemoryDb.filenamePrefix = prefix;
+    await saveDbForDate();
+  }
+};
+
+export const subscribeToAllowMonthSwitch = (callback: (allowed: boolean) => void) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    return onSnapshot(docRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        callback(data.allowMonthSwitch !== undefined ? !!data.allowMonthSwitch : false);
+      } else {
+        callback(false);
+      }
+    });
+  } else {
+    localAllowMonthSwitchListeners.push(callback);
+    callback(inMemoryDb.allowMonthSwitch || false);
+    return () => {
+      localAllowMonthSwitchListeners = localAllowMonthSwitchListeners.filter(l => l !== callback);
+    };
+  }
+};
+
+export const updateAllowMonthSwitch = async (allowed: boolean) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    return await setDoc(docRef, { allowMonthSwitch: allowed }, { merge: true });
+  } else {
+    inMemoryDb.allowMonthSwitch = allowed;
+    localAllowMonthSwitchListeners.forEach(l => l(allowed));
     await saveDbForDate();
   }
 };

@@ -25,6 +25,9 @@ interface WorkerAvailFormProps {
   getWorkerDisplayAvailabilities: () => any[];
   handleEditAvailability: (avail: WorkerAvailability) => void;
   handleDeleteAvailability: (id: string, e: React.MouseEvent) => void;
+  allowMonthSwitch?: boolean;
+  onWorkerPrevMonth?: () => void;
+  onWorkerNextMonth?: () => void;
 }
 
 export const WorkerAvailForm: React.FC<WorkerAvailFormProps> = ({
@@ -48,7 +51,10 @@ export const WorkerAvailForm: React.FC<WorkerAvailFormProps> = ({
   handleClearAvailAllSelected,
   getWorkerDisplayAvailabilities,
   handleEditAvailability,
-  handleDeleteAvailability
+  handleDeleteAvailability,
+  allowMonthSwitch = false,
+  onWorkerPrevMonth,
+  onWorkerNextMonth
 }) => {
   const todayStr = formatDateString(new Date());
 
@@ -77,19 +83,62 @@ export const WorkerAvailForm: React.FC<WorkerAvailFormProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Submission Form Card */}
         <div className="glass-panel p-6 rounded-2xl border border-[#DAC0A3]/50 lg:col-span-5 space-y-4 shadow-sm">
-          <div>
-            <h3 className="text-base font-bold text-[#3E2723] flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-[#2E7D32]"></span>
-              {isFullTime ? '登記不克排班日期' : '登記可用日期'} ({workerNextMonthStart.getFullYear()}年 {workerNextMonthStart.getMonth() + 1}月)
-            </h3>
-            <p className="text-xs text-[#6D4C41] mt-0.5 font-medium">
-              {isFullTime
-                ? '正式夥伴預設為全配合，請選取您下個月「無法上班/休假/請假」的日期。'
-                : '請選取您可以配合的日期，下一步即可設定地點與時間。'}
-            </p>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-[#2E7D32]"></span>
+                <h3 className="text-base font-bold text-[#3E2723]">
+                  {isFullTime ? '登記不克排班日期' : '登記可用日期'}
+                  {!allowMonthSwitch && (
+                    <span className="text-sm font-bold text-[#3E2723] font-mono ml-1">
+                      ({workerNextMonthStart.getFullYear()}年 {workerNextMonthStart.getMonth() + 1}月)
+                    </span>
+                  )}
+                </h3>
+              </div>
+              <p className="text-xs text-[#6D4C41] mt-0.5 font-medium">
+                {isFullTime
+                  ? '正式夥伴預設為全配合，請選取您該月「無法上班/休假/請假」的日期。'
+                  : '請選取您可以配合的日期，下一步即可設定地點與時間。'}
+              </p>
+            </div>
+
+            {/* Month Switcher Controls when allowMonthSwitch is enabled */}
+            {allowMonthSwitch && (
+              <div className="flex items-center gap-1.5 bg-[#FAF7F2] p-1.5 rounded-xl border border-[#DAC0A3]/60 shadow-2xs shrink-0 self-start sm:self-auto">
+                <button
+                  type="button"
+                  onClick={onWorkerPrevMonth}
+                  className="px-2.5 py-1 text-xs font-bold text-[#6D4C41] hover:text-[#3E2723] hover:bg-white rounded-lg transition-all cursor-pointer flex items-center gap-1 shadow-2xs border border-[#DAC0A3]/40"
+                  title="切換至上個月"
+                >
+                  ◀ 上個月
+                </button>
+                <span className="px-2 py-0.5 font-mono text-xs font-black text-[#3E2723] bg-white rounded-lg border border-[#DAC0A3]/50 shadow-2xs">
+                  {workerNextMonthStart.getFullYear()}年 {workerNextMonthStart.getMonth() + 1}月
+                </span>
+                <button
+                  type="button"
+                  onClick={onWorkerNextMonth}
+                  className="px-2.5 py-1 text-xs font-bold text-[#6D4C41] hover:text-[#3E2723] hover:bg-white rounded-lg transition-all cursor-pointer flex items-center gap-1 shadow-2xs border border-[#DAC0A3]/40"
+                  title="切換至下個月"
+                >
+                  下個月 ▶
+                </button>
+              </div>
+            )}
           </div>
 
-          {!isWorkerEditable && (
+          {allowMonthSwitch && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-200/80 text-emerald-800 text-xs">
+              <span className="text-sm">🔓</span>
+              <span className="font-semibold text-[11px] leading-relaxed">
+                自由切換月份模式已開啟：目前正在登記 {workerNextMonthStart.getFullYear()} 年 {workerNextMonthStart.getMonth() + 1} 月，已自動放行編輯權限。
+              </span>
+            </div>
+          )}
+
+          {!isWorkerEditable && !allowMonthSwitch && (
             <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-amber-50 border border-amber-200">
               <span className="text-lg leading-none mt-0.5">⚠️</span>
               <div className="space-y-0.5">
