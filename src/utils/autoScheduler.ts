@@ -50,12 +50,7 @@ function timeToMinutes(t: string): number {
 function minutesToTime(mins: number): string {
   const h = Math.floor(mins / 60) % 24;
   const m = mins % 60;
-  return `${h.toString().padStart(2, '0')}:${rmMinutes(mins)}`;
-}
-
-function rmMinutes(mins: number): string {
-  const m = mins % 60;
-  return m.toString().padStart(2, '0');
+  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
 }
 
 /**
