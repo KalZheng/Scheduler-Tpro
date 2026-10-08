@@ -19,6 +19,7 @@ interface ManagerGridViewProps {
   setContextMenu: (ctx: any) => void;
   getDateTotalHours: (dateStr: string) => number;
   getIsDayUnderstaffed: (dateStr: string) => boolean;
+  getDayStaffingRequirement?: (dateStr: string) => { isOk: boolean; hasWarning: boolean; isUnderstaffed: boolean; isOverstaffed: boolean; issues: string[] };
   getDayNote: (dateStr: string) => string;
   handleUpdateDayNote: (dateStr: string, note: string) => void;
   handleMoveEmployeeUp: (name: string) => void;
@@ -58,6 +59,7 @@ export const ManagerGridView: React.FC<ManagerGridViewProps> = ({
   setContextMenu,
   getDateTotalHours,
   getIsDayUnderstaffed,
+  getDayStaffingRequirement,
   getDayNote,
   handleUpdateDayNote,
   handleMoveEmployeeUp,
@@ -279,20 +281,44 @@ export const ManagerGridView: React.FC<ManagerGridViewProps> = ({
                 const isUnderstaffed = getIsDayUnderstaffed(dateStr);
                 const availSummary = getDateAvailSummary(dateStr);
 
+                const dayReq = getDayStaffingRequirement ? getDayStaffingRequirement(dateStr) : undefined;
+
                 return (
                   <th
                     key={dateStr}
                     onClick={() => setSelectedDateStr(dateStr)}
-                    className={`px-2 py-2 text-center text-xs font-bold border-r border-b border-[#DAC0A3]/50 w-[100px] min-w-[100px] cursor-pointer transition-colors ${isSelected
-                      ? 'bg-[#8D6E63]/15 text-[#3E2723]'
-                      : isToday
-                        ? 'bg-[#F5EBE6] text-[#3E2723] font-black'
-                        : 'hover:bg-[#FAF7F2]/75 text-[#6D4C41]'
-                      }`}
+                    className={`px-2 py-2 text-center text-xs font-bold border-r border-b border-[#DAC0A3]/50 w-[100px] min-w-[100px] cursor-pointer transition-colors ${
+                      dayReq?.hasWarning
+                        ? 'bg-rose-50/70 border-t-2 border-t-rose-500 text-rose-950'
+                        : isSelected
+                          ? 'bg-[#8D6E63]/15 text-[#3E2723]'
+                          : isToday
+                            ? 'bg-[#F5EBE6] text-[#3E2723] font-black'
+                            : 'hover:bg-[#FAF7F2]/75 text-[#6D4C41]'
+                    }`}
                   >
-                    <div className="font-mono text-sm font-extrabold">{dateObj.getDate()}</div>
+                    <div className="font-mono text-sm font-extrabold flex items-center justify-center gap-1">
+                      <span>{dateObj.getDate()}</span>
+                      {dayReq?.hasWarning && (
+                        <span className="text-[10px] text-rose-700 animate-pulse" title={`⚠️ 需調整：\n${dayReq.issues.join('\n')}`}>
+                          ⚠️
+                        </span>
+                      )}
+                    </div>
                     <div className="text-xs font-bold opacity-90">{dayInfo.name}</div>
                     <div className="mt-1 flex flex-col items-center justify-center gap-0.5">
+                      {dayReq?.hasWarning && (
+                        <span
+                          className={`text-[8px] font-black px-1.5 py-0.2 rounded-md border ${
+                            dayReq.isUnderstaffed
+                              ? 'bg-rose-100 text-rose-800 border-rose-300'
+                              : 'bg-amber-100 text-amber-900 border-amber-300'
+                          }`}
+                          title={`⚠️ ${dateStr} 需調整：\n${dayReq.issues.join('\n')}`}
+                        >
+                          {dayReq.isUnderstaffed ? '缺工' : '超額'}
+                        </span>
+                      )}
                       {gridSubTab === 'schedules' ? (
                         totalDayHours > 0 && (
                           <span className={`text-[8px] font-black px-1.5 py-0.2 rounded-md ${isUnderstaffed

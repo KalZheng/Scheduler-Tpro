@@ -1,4 +1,4 @@
-import type { WorkSchedule, WorkerAvailability, Employee, StaffingTarget, ShiftPreset } from '../services/scheduler';
+import type { WorkSchedule, WorkerAvailability, Employee, StaffingTarget, ShiftPreset, StaffingDemandConfig } from '../services/scheduler';
 import { isShiftActiveAtHour, hasSevenConsecutiveDays, getColorFromName, compareTimeStrings } from './dateUtils';
 
 export interface AutoScheduleOptions {
@@ -6,6 +6,9 @@ export interface AutoScheduleOptions {
   prioritizeFullTime: boolean;
   maxHoursPerShift: number;
   onlyFillDeficits: boolean;
+  operatingStartTime?: string;
+  operatingEndTime?: string;
+  staffingDemandConfig?: StaffingDemandConfig;
 }
 
 export interface ProposedSchedule {
@@ -47,15 +50,21 @@ function timeToMinutes(t: string): number {
 function minutesToTime(mins: number): string {
   const h = Math.floor(mins / 60) % 24;
   const m = mins % 60;
-  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+  return `${h.toString().padStart(2, '0')}:${rmMinutes(mins)}`;
+}
+
+function rmMinutes(mins: number): string {
+  const m = mins % 60;
+  return m.toString().padStart(2, '0');
 }
 
 /**
- * Pure deterministic rule-based automatic scheduler implementing 4 core logics:
- * 1. 開早保障 (Opening 06:00-08:00, target 2 workers, starts at 06:30)
- * 2. 晚班與收班保障 (Closing 17:00-20:00, target 2 workers)
- * 3. 尖峰與中段人數嚴格上限 (Weekdays max 3/hr, Weekends max 4-5/hr)
+ * Deterministic rule-based automatic scheduler dynamically configured with store parameters:
+ * 1. 開早保障 (Opening 30-min window, target openingStaffCount workers)
+ * 2. 晚班與收班打烊保障 (Closing 30-min window, target closingStaffCount workers)
+ * 3. 尖峰最忙時段與人數上限 (Weekday weekdayMaxStaff / Weekend weekendMaxStaff)
  * 4. 勞基法一例一休檢核 (No 7 consecutive work days, 4-9h bounds, fair rotation)
+ * 5. 全整數工時保障 (All shifts in full hours; no 30-min fractional durations, e.g. 4.5h -> 4h)
  */
 export const generateAutoSchedule = (
   availabilities: WorkerAvailability[] = [],
@@ -76,8 +85,20 @@ export const generateAutoSchedule = (
     dateRange = [],
     prioritizeFullTime = true,
     maxHoursPerShift = 8,
-    onlyFillDeficits = false
+    onlyFillDeficits = false,
+    operatingStartTime = '06:30',
+    operatingEndTime = '18:00',
+    staffingDemandConfig
   } = options || {};
+
+  const weekdayMaxStaff = staffingDemandConfig?.weekdayMaxStaff ?? 3;
+  const weekendMaxStaff = staffingDemandConfig?.weekendMaxStaff ?? 4;
+  const openingStaffCount = staffingDemandConfig?.openingStaffCount ?? 2;
+  const closingStaffCount = staffingDemandConfig?.closingStaffCount ?? 2;
+  const operatingStartTimeWeekend = staffingDemandConfig?.operatingStartTimeWeekend || '06:30';
+  const operatingEndTimeWeekend = staffingDemandConfig?.operatingEndTimeWeekend || '18:30';
+  const peakStartTime = staffingDemandConfig?.peakStartTime || '11:30';
+  const peakEndTime = staffingDemandConfig?.peakEndTime || '13:30';
 
   const proposedSchedules: ProposedSchedule[] = [];
   let unassignedAvailabilitiesCount = 0;
@@ -103,16 +124,25 @@ export const generateAutoSchedule = (
   const virtualSchedules: WorkSchedule[] = [...safeSchedules];
 
   // Helper: Get hourly staffing maximum cap (Rule 3)
-  // Weekday: max 3 workers per hour. Weekend: strictly max 4 workers per hour (never 5)
   const getHourMaxCap = (_hour: number, isWeekend: boolean): number => {
-    if (isWeekend) {
-      return 4;
-    }
-    return 3;
+    return isWeekend ? weekendMaxStaff : weekdayMaxStaff;
+  };
+
+  // Helper: Check if an hour falls within peak customer window
+  const isPeakHour = (hour: number): boolean => {
+    const peakStartM = timeToMinutes(peakStartTime);
+    const peakEndM = timeToMinutes(peakEndTime);
+    const hourStartM = hour * 60;
+    const hourEndM = (hour + 1) * 60;
+    return Math.max(peakStartM, hourStartM) < Math.min(peakEndM, hourEndM);
   };
 
   // Helper: Get target count for a given hour on dateStr
   const getStaffingTarget = (hour: number, dateStr: string, isWeekend: boolean): number => {
+    if (isPeakHour(hour)) {
+      return getHourMaxCap(hour, isWeekend);
+    }
+
     let base = 2;
     const dateMatch = safeStaffingTargets.find(t => t.hour === hour && t.date === dateStr);
     if (dateMatch) {
@@ -120,10 +150,6 @@ export const generateAutoSchedule = (
     } else {
       const globalMatch = safeStaffingTargets.find(t => t.hour === hour && !t.date);
       if (globalMatch) base = globalMatch.targetCount;
-    }
-
-    if (isWeekend && hour >= 10 && hour < 15) {
-      base += 1;
     }
 
     return Math.min(base, getHourMaxCap(hour, isWeekend));
@@ -254,6 +280,11 @@ export const generateAutoSchedule = (
     const dayOfWeek = d.getDay();
     const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
 
+    const dayOpenStart = isWeekend ? operatingStartTimeWeekend : operatingStartTime;
+    const dayCloseEnd = isWeekend ? operatingEndTimeWeekend : operatingEndTime;
+    const dayOpenStartMins = timeToMinutes(dayOpenStart);
+    const dayCloseEndMins = timeToMinutes(dayCloseEnd);
+
     // Get unconfirmed, non-off-day availabilities for this date
     const dateAvails = safeAvailabilities.filter(
       a => a && a.date === dateStr && a.confirmed !== true && !(a.startTime === '00:00' && a.endTime === '00:00')
@@ -269,21 +300,21 @@ export const generateAutoSchedule = (
     let remainingAvails = [...availablePool];
 
     // =========================================================================
-    // PHASE 1: 開早保障 (Opening 06:00–08:00, target = 2)
+    // PHASE 1: 開早保障 (Opening 30-min window, target = openingStaffCount)
     // =========================================================================
-    const activeHour6 = getActiveWorkersInHour(dateStr, 6);
-    const activeHour7 = getActiveWorkersInHour(dateStr, 7);
-    const currentOpening = Math.min(activeHour6, activeHour7);
-    const openingTarget = 2;
-    const openingNeeded = Math.max(0, openingTarget - currentOpening);
+    // Count active workers during the first 30 mins of the day
+    const activeOpening = virtualSchedules.filter(
+      s => s && s.date === dateStr && timeToMinutes(s.startTime) <= dayOpenStartMins && timeToMinutes(s.endTime) >= dayOpenStartMins + 30
+    ).length;
+    const openingTarget = openingStaffCount;
+    const openingNeeded = Math.max(0, openingTarget - activeOpening);
 
     if (openingNeeded > 0) {
-      // Find candidates who can start at or before 06:30 and have >= 4h availability
+      // Find candidates who can start at or before dayOpenStart and have >= 4h availability
       const openingCandidates = remainingAvails.filter(a => {
         const sMins = timeToMinutes(a.startTime);
         const eMins = timeToMinutes(a.endTime);
-        // Can cover 06:30 opening
-        return sMins <= timeToMinutes('06:30') && (eMins - timeToMinutes('06:30')) >= 4 * 60;
+        return sMins <= dayOpenStartMins && (eMins - dayOpenStartMins) >= 4 * 60;
       });
 
       let assignedOpening = 0;
@@ -301,7 +332,7 @@ export const generateAutoSchedule = (
           if (slot === 1 || isWeekend) {
             if (prioritizeFullTime && isFTA !== isFTB) return isFTA ? -1 : 1;
           } else {
-            // Slot 2 on weekdays: prefer PT so PT can work 5.5h (06:30-12:00, >= 4h), freeing afternoon for closing!
+            // Slot 2 on weekdays: prefer PT so PT can work 5.5h, freeing afternoon for closing!
             if (isFTA !== isFTB) return isFTA ? 1 : -1;
           }
 
@@ -319,21 +350,23 @@ export const generateAutoSchedule = (
         const emp = safeEmployees.find(e => e.name.trim().toLowerCase() === cand.employeeName.trim().toLowerCase());
         const isFT = emp?.status === '正式夥伴';
 
-        const openStart = '06:30';
-        const openStartMins = timeToMinutes(openStart);
+        const openStart = dayOpenStart;
+        const openStartMins = dayOpenStartMins;
         const candEndMins = timeToMinutes(cand.endTime);
 
         let targetDurationMins = Math.min(maxHoursPerShift * 60, candEndMins - openStartMins);
-        // Part-time 2nd opening worker on weekdays can work 5.5h (06:30-12:00, >= 4h) to avoid blocking afternoon closing
+        // Part-time 2nd opening worker on weekdays can work 5h (>= 4h) to avoid blocking afternoon closing
         if (slot >= 2 && !isFT && !isWeekend) {
-          targetDurationMins = Math.min(targetDurationMins, 5.5 * 60);
+          targetDurationMins = Math.min(targetDurationMins, 5 * 60);
         }
 
-        const maxShiftEndMins = openStartMins + targetDurationMins;
+        // All workers work in full hours (integer multiple of 60 mins): round down to full hours
+        const maxFullHours = Math.floor(targetDurationMins / 60);
 
-        // Try candidate end times stepping down by 30 mins to avoid exceeding cap
+        // Try candidate end times stepping down by 60 mins (full hours) to avoid exceeding cap
         let bestEndMins = -1;
-        for (let endM = maxShiftEndMins; endM >= openStartMins + 4 * 60; endM -= 30) {
+        for (let h = maxFullHours; h >= 4; h--) {
+          const endM = openStartMins + h * 60;
           const endStr = minutesToTime(endM);
           if (!wouldExceedCap(openStart, endStr, dateStr, isWeekend)) {
             bestEndMins = endM;
@@ -344,7 +377,7 @@ export const generateAutoSchedule = (
         if (bestEndMins !== -1) {
           const finalEnd = minutesToTime(bestEndMins);
           const useful = countCoveredDeficitHours(openStart, finalEnd, dateStr, isWeekend);
-          commitShift(cand, openStart, finalEnd, '開早班', '滿足 06:30 開早雙人守備需求', useful);
+          commitShift(cand, openStart, finalEnd, '開早班', `滿足 ${openStart} 開早 ${openingTarget} 人守備需求`, useful);
           remainingAvails = remainingAvails.filter(a => a.id !== cand.id);
           assignedOpening++;
         }
@@ -352,20 +385,21 @@ export const generateAutoSchedule = (
     }
 
     // =========================================================================
-    // PHASE 2: 晚班與收班打烊保障 (Closing 17:00–20:00, target = 2)
+    // PHASE 2: 晚班與收班打烊保障 (Closing 30-min window, target = closingStaffCount)
     // =========================================================================
-    const activeHour17 = getActiveWorkersInHour(dateStr, 17);
-    const activeHour18 = getActiveWorkersInHour(dateStr, 18);
-    const currentClosing = Math.min(activeHour17, activeHour18);
-    const closingTarget = 2;
-    const closingNeeded = Math.max(0, closingTarget - currentClosing);
+    // Count active workers during the last 30 mins of operating hours
+    const activeClosing = virtualSchedules.filter(
+      s => s && s.date === dateStr && timeToMinutes(s.startTime) <= dayCloseEndMins - 30 && timeToMinutes(s.endTime) >= dayCloseEndMins
+    ).length;
+    const closingTarget = closingStaffCount;
+    const closingNeeded = Math.max(0, closingTarget - activeClosing);
 
     if (closingNeeded > 0) {
-      // Find candidates who can work until 17:00 or later with >= 4h availability
+      // Find candidates who can work until dayCloseEnd (or dayCloseEnd - 30 mins) with >= 4h availability
       const closingCandidates = remainingAvails.filter(a => {
         const eMins = timeToMinutes(a.endTime);
         const sMins = timeToMinutes(a.startTime);
-        return eMins >= timeToMinutes('17:00') && (eMins - sMins) >= 4 * 60;
+        return eMins >= (dayCloseEndMins - 30) && (eMins - sMins) >= 4 * 60;
       });
 
       // Sort closing candidates: FT first, then fewest shifts (fairness), then latest end time
@@ -391,15 +425,18 @@ export const generateAutoSchedule = (
         const candStartMins = timeToMinutes(cand.startTime);
         const candEndMins = timeToMinutes(cand.endTime);
 
-        // Slide window ending at candEndMins backwards by 4h to 8/9h (no less than 4h)
         let bestStartMins = -1;
         let bestEndMins = -1;
         let maxUseful = -1;
 
-        // Try ending at registered end time, or adjusted to store close (e.g. 17:30/18:00/20:00)
-        const targetEndMins = Math.min(candEndMins, timeToMinutes('20:00'));
+        // Try ending at registered end time, or adjusted to store close
+        const targetEndMins = Math.min(candEndMins, dayCloseEndMins);
 
-        for (let durMins = Math.min(maxHoursPerShift * 60, targetEndMins - candStartMins); durMins >= 4 * 60; durMins -= 30) {
+        // All workers work in full hours (no 30 mins fractional duration, e.g. 4.5h -> 4h)
+        const maxDurHours = Math.min(maxHoursPerShift, Math.floor((targetEndMins - candStartMins) / 60));
+
+        for (let h = maxDurHours; h >= 4; h--) {
+          const durMins = h * 60;
           const testStartMins = targetEndMins - durMins;
           if (testStartMins < candStartMins) continue;
 
@@ -419,7 +456,7 @@ export const generateAutoSchedule = (
         if (bestStartMins !== -1 && bestEndMins !== -1) {
           const finalStart = minutesToTime(bestStartMins);
           const finalEnd = minutesToTime(bestEndMins);
-          commitShift(cand, finalStart, finalEnd, '收班班', '填補門市打烊與收班雙人守備需求', maxUseful);
+          commitShift(cand, finalStart, finalEnd, '收班班', `填補門市 ${dayCloseEnd} 收班 ${closingTarget} 人守備需求`, maxUseful);
           remainingAvails = remainingAvails.filter(a => a.id !== cand.id);
           assignedClosing++;
         }
@@ -453,8 +490,8 @@ export const generateAutoSchedule = (
       const emp = safeEmployees.find(e => e.name.trim().toLowerCase() === cand.employeeName.trim().toLowerCase());
       const isFT = emp?.status === '正式夥伴';
 
-      // Start Phase 3 at 09:00 or later to ensure 06:00-09:00 opening remains dedicated to 2 opening workers
-      const minMidStartMins = timeToMinutes('09:00');
+      // Start Phase 3 at dayOpenStart + 90 mins or 08:30 to ensure opening window remains dedicated to opening workers
+      const minMidStartMins = Math.max(dayOpenStartMins + 90, timeToMinutes('08:30'));
       const candStartMins = Math.max(timeToMinutes(cand.startTime), minMidStartMins);
       const candEndMins = timeToMinutes(cand.endTime);
       const availSpan = candEndMins - candStartMins;
@@ -470,18 +507,20 @@ export const generateAutoSchedule = (
       let bestScore = -9999;
       let bestUsefulHours = 0;
 
-      // FT Preset priority evaluation
+      // FT Preset priority evaluation (must also be full hours)
       if (isFT && safeShiftPresets.length > 0) {
         for (const preset of safeShiftPresets) {
           const pStartMins = timeToMinutes(preset.startTime);
           const pEndMins = timeToMinutes(preset.endTime);
+          const presetDur = pEndMins - pStartMins;
+          if (presetDur % 60 !== 0) continue;
           if (pStartMins >= candStartMins && pEndMins <= candEndMins) {
             const pStartStr = preset.startTime;
             const pEndStr = preset.endTime;
             if (!wouldExceedCap(pStartStr, pEndStr, dateStr, isWeekend)) {
               const useful = countCoveredDeficitHours(pStartStr, pEndStr, dateStr, isWeekend);
               if (!onlyFillDeficits || useful > 0) {
-                const score = useful * 20 + (pEndMins - pStartMins) / 30;
+                const score = useful * 20 + presetDur / 60;
                 if (score > bestScore) {
                   bestScore = score;
                   bestStartMins = pStartMins;
@@ -495,11 +534,13 @@ export const generateAutoSchedule = (
       }
 
       // Sliding window evaluation across available range (from min 4h to max 8h/maxHoursPerShift)
+      // All workers work in full hours (no 30 mins fractional duration, e.g. 4.5h -> 4h)
       if (bestScore < 0) {
-        const maxShiftMinutes = Math.min(maxHoursPerShift * 60, availSpan);
-        const minShiftMinutes = 4 * 60;
+        const maxDurHours = Math.min(maxHoursPerShift, Math.floor(availSpan / 60));
+        const minDurHours = 4;
 
-        for (let dur = maxShiftMinutes; dur >= minShiftMinutes; dur -= 30) {
+        for (let h = maxDurHours; h >= minDurHours; h--) {
+          const dur = h * 60;
           for (let sM = candStartMins; sM <= candEndMins - dur; sM += 30) {
             const eM = sM + dur;
             const sStr = minutesToTime(sM);
@@ -516,7 +557,7 @@ export const generateAutoSchedule = (
             }
 
             // Score: heavy weight on covering deficit hours + light weight on duration
-            const score = useful * 20 + dur / 60;
+            const score = useful * 20 + h;
             if (score > bestScore) {
               bestScore = score;
               bestStartMins = sM;

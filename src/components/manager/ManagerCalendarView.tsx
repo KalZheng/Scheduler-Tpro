@@ -12,6 +12,7 @@ interface ManagerCalendarViewProps {
   getDateTotalHours: (dateStr: string) => number;
   getAvailabilitiesForDate: (dateStr: string) => WorkerAvailability[];
   getIsDayUnderstaffed: (dateStr: string) => boolean;
+  getDayStaffingRequirement?: (dateStr: string) => { isOk: boolean; hasWarning: boolean; isUnderstaffed: boolean; isOverstaffed: boolean; issues: string[] };
   getScheduleTheme: (schedule: WorkSchedule) => any;
   handleOpenAddModal: (dateStr?: string) => void;
   handleOpenEditModal: (schedule: WorkSchedule, e: React.MouseEvent) => void;
@@ -27,6 +28,7 @@ export const ManagerCalendarView: React.FC<ManagerCalendarViewProps> = ({
   getDateTotalHours,
   getAvailabilitiesForDate,
   getIsDayUnderstaffed,
+  getDayStaffingRequirement,
   getScheduleTheme,
   handleOpenAddModal,
   handleOpenEditModal
@@ -54,6 +56,8 @@ export const ManagerCalendarView: React.FC<ManagerCalendarViewProps> = ({
           const totalDayHours = getDateTotalHours(dateStr);
           const dateAvails = getAvailabilitiesForDate(dateStr);
           const isUnderstaffed = getIsDayUnderstaffed(dateStr);
+          const dayReq = getDayStaffingRequirement ? getDayStaffingRequirement(dateStr) : undefined;
+          const hasWarning = dayReq ? dayReq.hasWarning : isUnderstaffed;
 
           const isFirstOfMonth = dateObj.getDate() === 1;
           const dateLabel = isFirstOfMonth ? `${dateObj.getMonth() + 1}/1` : dateObj.getDate().toString();
@@ -62,29 +66,47 @@ export const ManagerCalendarView: React.FC<ManagerCalendarViewProps> = ({
             <div
               key={dateStr}
               onClick={() => setSelectedDateStr(dateStr)}
-              className={`min-h-[75px] md:min-h-[135px] p-1.5 flex flex-col justify-between transition-colors cursor-pointer select-none relative group ${isSelected
-                ? 'bg-[#8D6E63]/10'
-                : isToday
-                  ? 'bg-[#FAF7F2]'
-                  : isCurrentMonth
-                    ? 'bg-white/90 hover:bg-[#FAF7F2]'
-                    : 'bg-[#FAF7F2]/50 text-[#8D6E63]/40 opacity-50 hover:bg-[#FAF7F2]'
-                }`}
+              className={`min-h-[75px] md:min-h-[135px] p-1.5 flex flex-col justify-between transition-colors cursor-pointer select-none relative group ${
+                isSelected
+                  ? 'bg-[#8D6E63]/10'
+                  : isToday
+                    ? 'bg-[#FAF7F2]'
+                    : hasWarning
+                      ? 'bg-rose-50/40 border border-rose-300 ring-1 ring-rose-300/60'
+                      : isCurrentMonth
+                        ? 'bg-white/90 hover:bg-[#FAF7F2]'
+                        : 'bg-[#FAF7F2]/50 text-[#8D6E63]/40 opacity-50 hover:bg-[#FAF7F2]'
+              }`}
             >
               {/* Date cell header */}
               <div className="flex items-center justify-between mb-1">
-                <span
-                  className={`text-xs font-bold font-mono px-1.5 py-0.5 rounded-full flex items-center justify-center ${isToday
-                    ? 'bg-[#795548] text-white shadow-sm shadow-[#795548]/20'
-                    : isSelected
-                      ? 'text-[#5D4037] bg-[#8D6E63]/10'
-                      : isCurrentMonth
-                        ? 'text-[#3E2723] font-extrabold'
-                        : 'text-[#8D6E63]/60'
-                    }`}
-                >
-                  {dateLabel}
-                </span>
+                <div className="flex items-center gap-1">
+                  <span
+                    className={`text-xs font-bold font-mono px-1.5 py-0.5 rounded-full flex items-center justify-center ${isToday
+                      ? 'bg-[#795548] text-white shadow-sm shadow-[#795548]/20'
+                      : isSelected
+                        ? 'text-[#5D4037] bg-[#8D6E63]/10'
+                        : isCurrentMonth
+                          ? 'text-[#3E2723] font-extrabold'
+                          : 'text-[#8D6E63]/60'
+                      }`}
+                  >
+                    {dateLabel}
+                  </span>
+
+                  {dayReq?.hasWarning && (
+                    <span
+                      className={`text-[9.5px] px-1 py-0.2 rounded font-black border shadow-2xs flex items-center gap-0.5 animate-pulse ${
+                        dayReq.isUnderstaffed
+                          ? 'bg-rose-100 text-rose-800 border-rose-300'
+                          : 'bg-amber-100 text-amber-900 border-amber-300'
+                      }`}
+                      title={`⚠️ ${dateStr} 需調整：\n${dayReq.issues.join('\n')}`}
+                    >
+                      ⚠️{dayReq.isUnderstaffed ? '缺工' : '超額'}
+                    </span>
+                  )}
+                </div>
 
                 {/* Availability Count Badge */}
                 {(() => {
