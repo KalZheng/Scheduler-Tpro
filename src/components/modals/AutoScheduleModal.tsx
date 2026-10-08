@@ -1,7 +1,15 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import type { WorkSchedule, WorkerAvailability, Employee, StaffingTarget, ShiftPreset } from '../../services/scheduler';
+import type { WorkSchedule, WorkerAvailability, Employee, StaffingTarget, ShiftPreset, StaffingDemandConfig } from '../../services/scheduler';
 import type { ProposedSchedule, AutoScheduleResult } from '../../utils/autoScheduler';
-import { formatDateString, getDaysInMonth, getDatesInRange, isShiftActiveAtHour, getTooltipAlignment, getTooltipArrowAlignment } from '../../utils/dateUtils';
+import {
+  formatDateString,
+  getDaysInMonth,
+  getDatesInRange,
+  isShiftActiveAtHour,
+  getTooltipAlignment,
+  getTooltipArrowAlignment,
+  checkDayStaffingRequirement
+} from '../../utils/dateUtils';
 import { DAYS_OF_WEEK } from '../../utils/constants';
 import { runAIScheduler } from '../../services/aiScheduler';
 
@@ -15,6 +23,9 @@ interface AutoScheduleModalProps {
   staffingTargets: StaffingTarget[];
   analysisHoursRange: number[];
   shiftPresets: ShiftPreset[];
+  operatingStartTime?: string;
+  operatingEndTime?: string;
+  staffingDemandConfig?: StaffingDemandConfig;
   onExecuteBatchAutoSchedule: (proposedSchedules: ProposedSchedule[]) => Promise<void>;
 }
 
@@ -28,6 +39,9 @@ export const AutoScheduleModal: React.FC<AutoScheduleModalProps> = ({
   staffingTargets,
   analysisHoursRange,
   shiftPresets: _shiftPresets,
+  operatingStartTime,
+  operatingEndTime,
+  staffingDemandConfig,
   onExecuteBatchAutoSchedule
 }) => {
   const daysInMonth = useMemo(() => getDaysInMonth(currentMonthStart), [currentMonthStart]);
@@ -102,6 +116,20 @@ export const AutoScheduleModal: React.FC<AutoScheduleModalProps> = ({
     return defaultMatch ? defaultMatch.targetCount : 0;
   };
 
+  // Evaluate which dates have unmet operational requirements or overstaffing
+  const unmetDateResults = useMemo(() => {
+    if (!calculationResult) return [];
+    return previewDates.map(dateStr => {
+      return checkDayStaffingRequirement(dateStr, combinedPreviewSchedules, {
+        operatingStartTime,
+        operatingEndTime,
+        staffingDemandConfig,
+        staffingTargets,
+        getStaffingTargetForHour
+      });
+    }).filter(r => r.hasWarning);
+  }, [calculationResult, previewDates, combinedPreviewSchedules, operatingStartTime, operatingEndTime, staffingDemandConfig, staffingTargets]);
+
   if (!isOpen) return null;
 
   const handleRunCalculation = async () => {
@@ -133,7 +161,10 @@ export const AutoScheduleModal: React.FC<AutoScheduleModalProps> = ({
         schedules,
         employees,
         staffingTargets,
-        onlyFillDeficits
+        onlyFillDeficits,
+        operatingStartTime,
+        operatingEndTime,
+        staffingDemandConfig
       });
 
       const mappedProposed: ProposedSchedule[] = aiProposed.map(p => ({
@@ -352,6 +383,50 @@ export const AutoScheduleModal: React.FC<AutoScheduleModalProps> = ({
                 </div>
               </div>
 
+              {/* Red Warning Card: Dates failing operational requirements or overstaffed */}
+              {unmetDateResults.length > 0 && (
+                <div className="p-4 bg-rose-50/90 border-2 border-rose-300 rounded-xl space-y-2.5 animate-fade-in shadow-xs">
+                  <div className="flex items-center justify-between text-rose-950 font-extrabold text-xs">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-base leading-none">⚠️</span>
+                      <span>
+                        共有 {unmetDateResults.length} 個日期未滿足門市規範或人數超標（需主管手動排班修復）：
+                      </span>
+                    </div>
+                    <span className="text-[10px] font-mono bg-rose-100 text-rose-900 border border-rose-200 px-2.5 py-0.5 rounded-full font-black">
+                      {unmetDateResults.length} 天需調整
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 pt-1">
+                    {unmetDateResults.map(item => (
+                      <div
+                        key={item.date}
+                        className="p-2.5 bg-white rounded-lg border border-rose-200 text-xs shadow-2xs flex flex-col gap-1 hover:border-rose-300 transition-colors"
+                      >
+                        <div className="flex items-center justify-between border-b border-rose-100 pb-1">
+                          <span className="font-mono font-black text-rose-950">📅 {item.date}</span>
+                          <div className="flex gap-1">
+                            {item.isUnderstaffed && (
+                              <span className="text-[9.5px] px-1.5 py-0.2 rounded font-black bg-rose-100 text-rose-800 border border-rose-200">
+                                缺工
+                              </span>
+                            )}
+                            {item.isOverstaffed && (
+                              <span className="text-[9.5px] px-1.5 py-0.2 rounded font-black bg-amber-100 text-amber-900 border border-amber-200">
+                                超額
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="text-[11px] text-rose-800 font-medium leading-tight mt-0.5">
+                          {item.issues.join('、')}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {calculationResult.proposedSchedules.length === 0 ? (
                 <div className="p-8 text-center border-2 border-dashed border-[#DAC0A3]/50 rounded-xl text-xs text-[#6D4C41]">
                   無符合條件可排入的未確認登記
@@ -449,10 +524,26 @@ export const AutoScheduleModal: React.FC<AutoScheduleModalProps> = ({
                             const dateObj = new Date(y, (m || 1) - 1, d || 1);
                             const dayName = DAYS_OF_WEEK[dateObj.getDay() === 0 ? 6 : dateObj.getDay() - 1]?.name.substring(1) || '';
                             const isWeekend = dateObj.getDay() === 0 || dateObj.getDay() === 6;
+                            const dateWarning = unmetDateResults.find(u => u.date === dateStr);
                             return (
-                              <div key={dateStr} className={`flex-1 text-center flex flex-col items-center min-w-[24px] ${isWeekend ? 'text-red-650 font-bold' : 'text-[#6D4C41]'}`}>
+                              <div
+                                key={dateStr}
+                                className={`flex-1 text-center flex flex-col items-center min-w-[24px] px-0.5 rounded transition-all ${
+                                  dateWarning
+                                    ? 'bg-rose-100/90 border border-rose-400 text-rose-950 font-black ring-1 ring-rose-400'
+                                    : isWeekend
+                                      ? 'text-red-650 font-bold'
+                                      : 'text-[#6D4C41]'
+                                }`}
+                                title={dateWarning ? `⚠️ 該日需調整：\n${dateWarning.issues.join('\n')}` : undefined}
+                              >
                                 <span className="text-[12px] font-mono font-bold leading-none">{d}</span>
                                 <span className="text-[10px] font-extrabold mt-0.5 opacity-90">{dayName}</span>
+                                {dateWarning && (
+                                  <span className="text-[8px] font-black text-rose-700 leading-none mt-0.5 animate-pulse">
+                                    ⚠️{dateWarning.isOverstaffed && !dateWarning.isUnderstaffed ? '超額' : '缺工'}
+                                  </span>
+                                )}
                               </div>
                             );
                           })}

@@ -110,6 +110,7 @@ let localErpDaysListeners: ((days: number[]) => void)[] = [];
 let localPtAvailModeListeners: ((mode: PtAvailMode) => void)[] = [];
 let localFilenamePrefixListeners: ((prefix: string) => void)[] = [];
 let localAllowMonthSwitchListeners: ((allowed: boolean) => void)[] = [];
+let localStaffingDemandListeners: ((config: StaffingDemandConfig) => void)[] = [];
 
 export type PtAvailMode = 'static' | 'flex';
 
@@ -118,6 +119,28 @@ export interface ShiftPreset {
   startTime: string;
   endTime: string;
 }
+
+export interface StaffingDemandConfig {
+  operatingStartTimeWeekend: string;
+  operatingEndTimeWeekend: string;
+  openingStaffCount: number;
+  closingStaffCount: number;
+  peakStartTime: string;
+  peakEndTime: string;
+  weekdayMaxStaff: number;
+  weekendMaxStaff: number;
+}
+
+export const DEFAULT_STAFFING_DEMAND_CONFIG: StaffingDemandConfig = {
+  operatingStartTimeWeekend: '06:30',
+  operatingEndTimeWeekend: '18:30',
+  openingStaffCount: 2,
+  closingStaffCount: 2,
+  peakStartTime: '11:30',
+  peakEndTime: '13:30',
+  weekdayMaxStaff: 3,
+  weekendMaxStaff: 4
+};
 
 export interface RevenueStaffRules {
   tier1Limit: number;
@@ -141,6 +164,14 @@ interface DbSchema {
   allowMonthSwitch?: boolean;
   operatingStartTime?: string;
   operatingEndTime?: string;
+  operatingStartTimeWeekend?: string;
+  operatingEndTimeWeekend?: string;
+  openingStaffCount?: number;
+  closingStaffCount?: number;
+  peakStartTime?: string;
+  peakEndTime?: string;
+  weekdayMaxStaff?: number;
+  weekendMaxStaff?: number;
   shiftMorningStart?: string;
   shiftMorningEnd?: string;
   shiftEveningStart?: string;
@@ -164,7 +195,15 @@ const inMemoryDb: DbSchema = {
   startDay: 15,
   allowMonthSwitch: false,
   operatingStartTime: '06:30',
-  operatingEndTime: '20:00',
+  operatingEndTime: '18:00',
+  operatingStartTimeWeekend: '06:30',
+  operatingEndTimeWeekend: '18:30',
+  openingStaffCount: 2,
+  closingStaffCount: 2,
+  peakStartTime: '11:30',
+  peakEndTime: '13:30',
+  weekdayMaxStaff: 3,
+  weekendMaxStaff: 4,
   shiftMorningStart: '06:30',
   shiftMorningEnd: '15:30',
   shiftEveningStart: '08:30',
@@ -374,6 +413,30 @@ export const syncActiveMonth = async (monthStr: string) => {
       if (data.filenamePrefix !== undefined) {
         inMemoryDb.filenamePrefix = data.filenamePrefix;
       }
+      if (data.operatingStartTimeWeekend !== undefined) {
+        inMemoryDb.operatingStartTimeWeekend = data.operatingStartTimeWeekend;
+      }
+      if (data.operatingEndTimeWeekend !== undefined) {
+        inMemoryDb.operatingEndTimeWeekend = data.operatingEndTimeWeekend;
+      }
+      if (data.openingStaffCount !== undefined) {
+        inMemoryDb.openingStaffCount = data.openingStaffCount;
+      }
+      if (data.closingStaffCount !== undefined) {
+        inMemoryDb.closingStaffCount = data.closingStaffCount;
+      }
+      if (data.peakStartTime !== undefined) {
+        inMemoryDb.peakStartTime = data.peakStartTime;
+      }
+      if (data.peakEndTime !== undefined) {
+        inMemoryDb.peakEndTime = data.peakEndTime;
+      }
+      if (data.weekdayMaxStaff !== undefined) {
+        inMemoryDb.weekdayMaxStaff = data.weekdayMaxStaff;
+      }
+      if (data.weekendMaxStaff !== undefined) {
+        inMemoryDb.weekendMaxStaff = data.weekendMaxStaff;
+      }
 
       // Update LocalStorage backup
       localStorage.setItem('weekly_work_schedules', JSON.stringify(inMemoryDb.schedules));
@@ -394,6 +457,16 @@ export const syncActiveMonth = async (monthStr: string) => {
       localStorage.setItem('revenue_staff_rules', JSON.stringify(inMemoryDb.revenueStaffRules || {}));
       localStorage.setItem('scheduler_erp_days', JSON.stringify(inMemoryDb.erpDays || [1, 3, 5]));
       localStorage.setItem('scheduler_filename_prefix', inMemoryDb.filenamePrefix || '');
+      localStorage.setItem('scheduler_staffing_demand_config', JSON.stringify({
+        operatingStartTimeWeekend: inMemoryDb.operatingStartTimeWeekend || '06:30',
+        operatingEndTimeWeekend: inMemoryDb.operatingEndTimeWeekend || '18:30',
+        openingStaffCount: inMemoryDb.openingStaffCount !== undefined ? inMemoryDb.openingStaffCount : 2,
+        closingStaffCount: inMemoryDb.closingStaffCount !== undefined ? inMemoryDb.closingStaffCount : 2,
+        peakStartTime: inMemoryDb.peakStartTime || '11:30',
+        peakEndTime: inMemoryDb.peakEndTime || '13:30',
+        weekdayMaxStaff: inMemoryDb.weekdayMaxStaff !== undefined ? inMemoryDb.weekdayMaxStaff : 3,
+        weekendMaxStaff: inMemoryDb.weekendMaxStaff !== undefined ? inMemoryDb.weekendMaxStaff : 4,
+      }));
 
       // Trigger all active UI listeners
       localListeners.forEach(listener => listener([...inMemoryDb.schedules]));
@@ -413,6 +486,16 @@ export const syncActiveMonth = async (monthStr: string) => {
       localErpDaysListeners.forEach(listener => listener(inMemoryDb.erpDays || [1, 3, 5]));
       localFilenamePrefixListeners.forEach(listener => listener(inMemoryDb.filenamePrefix || ''));
       localAllowMonthSwitchListeners.forEach(listener => listener(inMemoryDb.allowMonthSwitch || false));
+      localStaffingDemandListeners.forEach(listener => listener({
+        operatingStartTimeWeekend: inMemoryDb.operatingStartTimeWeekend || '06:30',
+        operatingEndTimeWeekend: inMemoryDb.operatingEndTimeWeekend || '18:30',
+        openingStaffCount: inMemoryDb.openingStaffCount !== undefined ? inMemoryDb.openingStaffCount : 2,
+        closingStaffCount: inMemoryDb.closingStaffCount !== undefined ? inMemoryDb.closingStaffCount : 2,
+        peakStartTime: inMemoryDb.peakStartTime || '11:30',
+        peakEndTime: inMemoryDb.peakEndTime || '13:30',
+        weekdayMaxStaff: inMemoryDb.weekdayMaxStaff !== undefined ? inMemoryDb.weekdayMaxStaff : 3,
+        weekendMaxStaff: inMemoryDb.weekendMaxStaff !== undefined ? inMemoryDb.weekendMaxStaff : 4,
+      }));
       localMonthlyRevenuesListeners.forEach(listener => {
         const revenues: Record<number, number> = {};
         if (inMemoryDb.monthlyRevenues) {
@@ -490,6 +573,30 @@ const loadFileDb = async () => {
       if (data.filenamePrefix !== undefined) {
         inMemoryDb.filenamePrefix = data.filenamePrefix;
       }
+      if (data.operatingStartTimeWeekend !== undefined) {
+        inMemoryDb.operatingStartTimeWeekend = data.operatingStartTimeWeekend;
+      }
+      if (data.operatingEndTimeWeekend !== undefined) {
+        inMemoryDb.operatingEndTimeWeekend = data.operatingEndTimeWeekend;
+      }
+      if (data.openingStaffCount !== undefined) {
+        inMemoryDb.openingStaffCount = data.openingStaffCount;
+      }
+      if (data.closingStaffCount !== undefined) {
+        inMemoryDb.closingStaffCount = data.closingStaffCount;
+      }
+      if (data.peakStartTime !== undefined) {
+        inMemoryDb.peakStartTime = data.peakStartTime;
+      }
+      if (data.peakEndTime !== undefined) {
+        inMemoryDb.peakEndTime = data.peakEndTime;
+      }
+      if (data.weekdayMaxStaff !== undefined) {
+        inMemoryDb.weekdayMaxStaff = data.weekdayMaxStaff;
+      }
+      if (data.weekendMaxStaff !== undefined) {
+        inMemoryDb.weekendMaxStaff = data.weekendMaxStaff;
+      }
       // Update local storage backup
       localStorage.setItem('weekly_work_schedules', JSON.stringify(inMemoryDb.schedules));
       localStorage.setItem('weekly_worker_availabilities', JSON.stringify(inMemoryDb.availabilities));
@@ -508,6 +615,16 @@ const loadFileDb = async () => {
       localStorage.setItem('monthly_revenue_data', JSON.stringify(inMemoryDb.monthlyRevenues || {}));
       localStorage.setItem('revenue_staff_rules', JSON.stringify(inMemoryDb.revenueStaffRules || {}));
       localStorage.setItem('scheduler_filename_prefix', inMemoryDb.filenamePrefix || '');
+      localStorage.setItem('scheduler_staffing_demand_config', JSON.stringify({
+        operatingStartTimeWeekend: inMemoryDb.operatingStartTimeWeekend || '06:30',
+        operatingEndTimeWeekend: inMemoryDb.operatingEndTimeWeekend || '18:30',
+        openingStaffCount: inMemoryDb.openingStaffCount !== undefined ? inMemoryDb.openingStaffCount : 2,
+        closingStaffCount: inMemoryDb.closingStaffCount !== undefined ? inMemoryDb.closingStaffCount : 2,
+        peakStartTime: inMemoryDb.peakStartTime || '11:30',
+        peakEndTime: inMemoryDb.peakEndTime || '13:30',
+        weekdayMaxStaff: inMemoryDb.weekdayMaxStaff !== undefined ? inMemoryDb.weekdayMaxStaff : 3,
+        weekendMaxStaff: inMemoryDb.weekendMaxStaff !== undefined ? inMemoryDb.weekendMaxStaff : 4,
+      }));
     } else {
       throw new Error("Local DB API response not OK");
     }
@@ -528,6 +645,19 @@ const loadFileDb = async () => {
     inMemoryDb.shiftPresets = getLocalShiftPresets();
     inMemoryDb.erpDays = getLocalErpDays();
     inMemoryDb.filenamePrefix = localStorage.getItem('scheduler_filename_prefix') || '';
+    try {
+      const demandData = JSON.parse(localStorage.getItem('scheduler_staffing_demand_config') || '{}');
+      if (demandData.operatingStartTimeWeekend) inMemoryDb.operatingStartTimeWeekend = demandData.operatingStartTimeWeekend;
+      if (demandData.operatingEndTimeWeekend) inMemoryDb.operatingEndTimeWeekend = demandData.operatingEndTimeWeekend;
+      if (demandData.openingStaffCount !== undefined) inMemoryDb.openingStaffCount = demandData.openingStaffCount;
+      if (demandData.closingStaffCount !== undefined) inMemoryDb.closingStaffCount = demandData.closingStaffCount;
+      if (demandData.peakStartTime) inMemoryDb.peakStartTime = demandData.peakStartTime;
+      if (demandData.peakEndTime) inMemoryDb.peakEndTime = demandData.peakEndTime;
+      if (demandData.weekdayMaxStaff !== undefined) inMemoryDb.weekdayMaxStaff = demandData.weekdayMaxStaff;
+      if (demandData.weekendMaxStaff !== undefined) inMemoryDb.weekendMaxStaff = demandData.weekendMaxStaff;
+    } catch {
+      // ignore
+    }
     try {
       inMemoryDb.employeeOrder = JSON.parse(localStorage.getItem('scheduler_employee_order') || '[]');
     } catch {
@@ -561,6 +691,16 @@ const loadFileDb = async () => {
     localEmployeeOrderListeners.forEach(listener => listener(inMemoryDb.employeeOrder || []));
     localFilenamePrefixListeners.forEach(listener => listener(inMemoryDb.filenamePrefix || ''));
     localAllowMonthSwitchListeners.forEach(listener => listener(inMemoryDb.allowMonthSwitch || false));
+    localStaffingDemandListeners.forEach(listener => listener({
+      operatingStartTimeWeekend: inMemoryDb.operatingStartTimeWeekend || '06:30',
+      operatingEndTimeWeekend: inMemoryDb.operatingEndTimeWeekend || '18:30',
+      openingStaffCount: inMemoryDb.openingStaffCount !== undefined ? inMemoryDb.openingStaffCount : 2,
+      closingStaffCount: inMemoryDb.closingStaffCount !== undefined ? inMemoryDb.closingStaffCount : 2,
+      peakStartTime: inMemoryDb.peakStartTime || '11:30',
+      peakEndTime: inMemoryDb.peakEndTime || '13:30',
+      weekdayMaxStaff: inMemoryDb.weekdayMaxStaff !== undefined ? inMemoryDb.weekdayMaxStaff : 3,
+      weekendMaxStaff: inMemoryDb.weekendMaxStaff !== undefined ? inMemoryDb.weekendMaxStaff : 4,
+    }));
     localMonthlyRevenuesListeners.forEach(listener => {
       const revenues: Record<number, number> = {};
       if (inMemoryDb.monthlyRevenues) {
@@ -611,6 +751,16 @@ const saveDbForDate = async (dateStr?: string) => {
   localStorage.setItem('revenue_staff_rules', JSON.stringify(inMemoryDb.revenueStaffRules || {}));
   localStorage.setItem('marked_empty_cells', JSON.stringify(inMemoryDb.markedEmptyCells || {}));
   localStorage.setItem('scheduler_filename_prefix', inMemoryDb.filenamePrefix || '');
+  localStorage.setItem('scheduler_staffing_demand_config', JSON.stringify({
+    operatingStartTimeWeekend: inMemoryDb.operatingStartTimeWeekend || '06:30',
+    operatingEndTimeWeekend: inMemoryDb.operatingEndTimeWeekend || '18:30',
+    openingStaffCount: inMemoryDb.openingStaffCount !== undefined ? inMemoryDb.openingStaffCount : 2,
+    closingStaffCount: inMemoryDb.closingStaffCount !== undefined ? inMemoryDb.closingStaffCount : 2,
+    peakStartTime: inMemoryDb.peakStartTime || '11:30',
+    peakEndTime: inMemoryDb.peakEndTime || '13:30',
+    weekdayMaxStaff: inMemoryDb.weekdayMaxStaff !== undefined ? inMemoryDb.weekdayMaxStaff : 3,
+    weekendMaxStaff: inMemoryDb.weekendMaxStaff !== undefined ? inMemoryDb.weekendMaxStaff : 4,
+  }));
 
   // Trigger active listeners immediately for immediate UI response
   localListeners.forEach(listener => listener([...inMemoryDb.schedules]));
@@ -629,6 +779,16 @@ const saveDbForDate = async (dateStr?: string) => {
   localEmployeeOrderListeners.forEach(listener => listener(inMemoryDb.employeeOrder || []));
   localFilenamePrefixListeners.forEach(listener => listener(inMemoryDb.filenamePrefix || ''));
   localAllowMonthSwitchListeners.forEach(listener => listener(inMemoryDb.allowMonthSwitch || false));
+  localStaffingDemandListeners.forEach(listener => listener({
+    operatingStartTimeWeekend: inMemoryDb.operatingStartTimeWeekend || '06:30',
+    operatingEndTimeWeekend: inMemoryDb.operatingEndTimeWeekend || '18:30',
+    openingStaffCount: inMemoryDb.openingStaffCount !== undefined ? inMemoryDb.openingStaffCount : 2,
+    closingStaffCount: inMemoryDb.closingStaffCount !== undefined ? inMemoryDb.closingStaffCount : 2,
+    peakStartTime: inMemoryDb.peakStartTime || '11:30',
+    peakEndTime: inMemoryDb.peakEndTime || '13:30',
+    weekdayMaxStaff: inMemoryDb.weekdayMaxStaff !== undefined ? inMemoryDb.weekdayMaxStaff : 3,
+    weekendMaxStaff: inMemoryDb.weekendMaxStaff !== undefined ? inMemoryDb.weekendMaxStaff : 4,
+  }));
   localMonthlyRevenuesListeners.forEach(listener => {
     const revenues: Record<number, number> = {};
     if (inMemoryDb.monthlyRevenues) {
@@ -664,8 +824,17 @@ const saveDbForDate = async (dateStr?: string) => {
       employees: inMemoryDb.employees,
       deadlineDay: inMemoryDb.deadlineDay || 20,
       startDay: inMemoryDb.startDay || 15,
+      allowMonthSwitch: inMemoryDb.allowMonthSwitch || false,
       operatingStartTime: inMemoryDb.operatingStartTime || '06:30',
-      operatingEndTime: inMemoryDb.operatingEndTime || '20:00',
+      operatingEndTime: inMemoryDb.operatingEndTime || '18:00',
+      operatingStartTimeWeekend: inMemoryDb.operatingStartTimeWeekend || '06:30',
+      operatingEndTimeWeekend: inMemoryDb.operatingEndTimeWeekend || '18:30',
+      openingStaffCount: inMemoryDb.openingStaffCount !== undefined ? inMemoryDb.openingStaffCount : 2,
+      closingStaffCount: inMemoryDb.closingStaffCount !== undefined ? inMemoryDb.closingStaffCount : 2,
+      peakStartTime: inMemoryDb.peakStartTime || '11:30',
+      peakEndTime: inMemoryDb.peakEndTime || '13:30',
+      weekdayMaxStaff: inMemoryDb.weekdayMaxStaff !== undefined ? inMemoryDb.weekdayMaxStaff : 3,
+      weekendMaxStaff: inMemoryDb.weekendMaxStaff !== undefined ? inMemoryDb.weekendMaxStaff : 4,
       shiftMorningStart: inMemoryDb.shiftMorningStart || '06:30',
       shiftMorningEnd: inMemoryDb.shiftMorningEnd || '15:30',
       shiftEveningStart: inMemoryDb.shiftEveningStart || '08:30',
@@ -1642,5 +1811,73 @@ export const updateAllowMonthSwitch = async (allowed: boolean) => {
     await saveDbForDate();
   }
 };
+
+export const subscribeToStaffingDemandConfig = (callback: (config: StaffingDemandConfig) => void) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    return onSnapshot(docRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        callback({
+          operatingStartTimeWeekend: data.operatingStartTimeWeekend || '06:30',
+          operatingEndTimeWeekend: data.operatingEndTimeWeekend || '18:30',
+          openingStaffCount: data.openingStaffCount !== undefined ? data.openingStaffCount : 2,
+          closingStaffCount: data.closingStaffCount !== undefined ? data.closingStaffCount : 2,
+          peakStartTime: data.peakStartTime || '11:30',
+          peakEndTime: data.peakEndTime || '13:30',
+          weekdayMaxStaff: data.weekdayMaxStaff !== undefined ? data.weekdayMaxStaff : 3,
+          weekendMaxStaff: data.weekendMaxStaff !== undefined ? data.weekendMaxStaff : 4,
+        });
+      } else {
+        callback(DEFAULT_STAFFING_DEMAND_CONFIG);
+      }
+    });
+  } else {
+    localStaffingDemandListeners.push(callback);
+    callback({
+      operatingStartTimeWeekend: inMemoryDb.operatingStartTimeWeekend || '06:30',
+      operatingEndTimeWeekend: inMemoryDb.operatingEndTimeWeekend || '18:30',
+      openingStaffCount: inMemoryDb.openingStaffCount !== undefined ? inMemoryDb.openingStaffCount : 2,
+      closingStaffCount: inMemoryDb.closingStaffCount !== undefined ? inMemoryDb.closingStaffCount : 2,
+      peakStartTime: inMemoryDb.peakStartTime || '11:30',
+      peakEndTime: inMemoryDb.peakEndTime || '13:30',
+      weekdayMaxStaff: inMemoryDb.weekdayMaxStaff !== undefined ? inMemoryDb.weekdayMaxStaff : 3,
+      weekendMaxStaff: inMemoryDb.weekendMaxStaff !== undefined ? inMemoryDb.weekendMaxStaff : 4,
+    });
+    return () => {
+      localStaffingDemandListeners = localStaffingDemandListeners.filter(l => l !== callback);
+    };
+  }
+};
+
+export const updateStaffingDemandConfig = async (config: Partial<StaffingDemandConfig>) => {
+  if (isValidConfig && db) {
+    const docRef = doc(db, 'settings', 'global');
+    return await setDoc(docRef, config, { merge: true });
+  } else {
+    if (config.operatingStartTimeWeekend !== undefined) inMemoryDb.operatingStartTimeWeekend = config.operatingStartTimeWeekend;
+    if (config.operatingEndTimeWeekend !== undefined) inMemoryDb.operatingEndTimeWeekend = config.operatingEndTimeWeekend;
+    if (config.openingStaffCount !== undefined) inMemoryDb.openingStaffCount = config.openingStaffCount;
+    if (config.closingStaffCount !== undefined) inMemoryDb.closingStaffCount = config.closingStaffCount;
+    if (config.peakStartTime !== undefined) inMemoryDb.peakStartTime = config.peakStartTime;
+    if (config.peakEndTime !== undefined) inMemoryDb.peakEndTime = config.peakEndTime;
+    if (config.weekdayMaxStaff !== undefined) inMemoryDb.weekdayMaxStaff = config.weekdayMaxStaff;
+    if (config.weekendMaxStaff !== undefined) inMemoryDb.weekendMaxStaff = config.weekendMaxStaff;
+
+    const currentConfig: StaffingDemandConfig = {
+      operatingStartTimeWeekend: inMemoryDb.operatingStartTimeWeekend || '06:30',
+      operatingEndTimeWeekend: inMemoryDb.operatingEndTimeWeekend || '18:30',
+      openingStaffCount: inMemoryDb.openingStaffCount !== undefined ? inMemoryDb.openingStaffCount : 2,
+      closingStaffCount: inMemoryDb.closingStaffCount !== undefined ? inMemoryDb.closingStaffCount : 2,
+      peakStartTime: inMemoryDb.peakStartTime || '11:30',
+      peakEndTime: inMemoryDb.peakEndTime || '13:30',
+      weekdayMaxStaff: inMemoryDb.weekdayMaxStaff !== undefined ? inMemoryDb.weekdayMaxStaff : 3,
+      weekendMaxStaff: inMemoryDb.weekendMaxStaff !== undefined ? inMemoryDb.weekendMaxStaff : 4,
+    };
+    localStaffingDemandListeners.forEach(listener => listener(currentConfig));
+    await saveDbForDate();
+  }
+};
+
 
 

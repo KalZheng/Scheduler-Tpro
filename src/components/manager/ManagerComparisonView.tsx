@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import type { WorkSchedule, WorkerAvailability, Employee, StaffingTarget, ShiftPreset } from '../../services/scheduler';
+import type { WorkSchedule, WorkerAvailability, Employee, StaffingTarget, ShiftPreset, StaffingDemandConfig } from '../../services/scheduler';
 import { generateAutoSchedule } from '../../utils/autoScheduler';
 import { runAIScheduler, type ProposedAISchedule } from '../../services/aiScheduler';
 import {
@@ -26,6 +26,7 @@ interface ManagerComparisonViewProps {
   shiftPresets: ShiftPreset[];
   operatingStartTime?: string;
   operatingEndTime?: string;
+  staffingDemandConfig?: StaffingDemandConfig;
 }
 
 export const ManagerComparisonView: React.FC<ManagerComparisonViewProps> = ({
@@ -36,7 +37,10 @@ export const ManagerComparisonView: React.FC<ManagerComparisonViewProps> = ({
   employees,
   staffingTargets,
   analysisHoursRange,
-  shiftPresets
+  shiftPresets,
+  operatingStartTime,
+  operatingEndTime,
+  staffingDemandConfig
 }) => {
   const daysInMonth = useMemo(() => getDaysInMonth(currentMonthStart), [currentMonthStart]);
   const monthDates = useMemo(() => daysInMonth.map(d => formatDateString(d)), [daysInMonth]);
@@ -173,10 +177,13 @@ export const ManagerComparisonView: React.FC<ManagerComparisonViewProps> = ({
         dateRange: activeDateRange,
         prioritizeFullTime: true,
         maxHoursPerShift: 8,
-        onlyFillDeficits: false
+        onlyFillDeficits: false,
+        operatingStartTime,
+        operatingEndTime,
+        staffingDemandConfig
       }
     );
-  }, [activeDateRange, activeAvailabilities, manualMonthSchedules, employees, staffingTargets, analysisHoursRange, shiftPresets]);
+  }, [activeDateRange, activeAvailabilities, manualMonthSchedules, employees, staffingTargets, analysisHoursRange, shiftPresets, operatingStartTime, operatingEndTime, staffingDemandConfig]);
 
   const ruleSchedules = useMemo(() => {
     const simulatedRuleShifts: WorkSchedule[] = ruleResult.proposedSchedules.map((p, idx) => ({
@@ -192,7 +199,10 @@ export const ManagerComparisonView: React.FC<ManagerComparisonViewProps> = ({
       scheduleSource: 'rule'
     }));
 
-    return [...manualMonthSchedules, ...simulatedRuleShifts];
+    const ruleDates = new Set(ruleResult.proposedSchedules.map(p => p.date));
+    const manualForOtherDates = manualMonthSchedules.filter(s => !ruleDates.has(s.date));
+
+    return [...manualForOtherDates, ...simulatedRuleShifts];
   }, [manualMonthSchedules, ruleResult]);
 
   // 2. Trigger Gemini AI simulation in-memory
@@ -207,7 +217,7 @@ export const ManagerComparisonView: React.FC<ManagerComparisonViewProps> = ({
 
       const filterEligibleAvailabilities = (dates: string[]) => {
         return monthAvailabilities.filter(
-          a => dates.includes(a.date) && a.confirmed !== true && activeEmployeeNames.has(a.employeeName.trim().toLowerCase())
+          a => dates.includes(a.date) && activeEmployeeNames.has(a.employeeName.trim().toLowerCase())
         );
       };
 
@@ -217,53 +227,78 @@ export const ManagerComparisonView: React.FC<ManagerComparisonViewProps> = ({
         const targetDates = daysInMonth.filter(d => d.getDate() <= 15).map(d => formatDateString(d));
         const targetAvail = filterEligibleAvailabilities(targetDates);
         allProposed = await runAIScheduler({
-          modelName: 'gemini-3.1-flash-lite',
+          modelName: 'gemini-3.8-flash',
           dateRange: targetDates,
           availabilities: targetAvail,
           schedules: manualMonthSchedules,
           employees,
           staffingTargets,
-          onlyFillDeficits: false
+          onlyFillDeficits: false,
+          operatingStartTime,
+          operatingEndTime,
+          staffingDemandConfig
         });
       } else if (dateRangePart === 'part2') {
         const targetDates = daysInMonth.filter(d => d.getDate() >= 16).map(d => formatDateString(d));
         const targetAvail = filterEligibleAvailabilities(targetDates);
         allProposed = await runAIScheduler({
-          modelName: 'gemini-3.1-flash-lite',
+          modelName: 'gemini-3.8-flash',
           dateRange: targetDates,
           availabilities: targetAvail,
           schedules: manualMonthSchedules,
           employees,
           staffingTargets,
-          onlyFillDeficits: false
+          onlyFillDeficits: false,
+          operatingStartTime,
+          operatingEndTime,
+          staffingDemandConfig
         });
       } else {
-        // 'all' (1~31): split into two halves so each half fits comfortably in token budget
+        // 'all' (1~31): split into two halves and pass first half to second half context
         const dates1 = daysInMonth.filter(d => d.getDate() <= 15).map(d => formatDateString(d));
         const avail1 = filterEligibleAvailabilities(dates1);
         const dates2 = daysInMonth.filter(d => d.getDate() >= 16).map(d => formatDateString(d));
         const avail2 = filterEligibleAvailabilities(dates2);
 
-        const [p1, p2] = await Promise.all([
-          runAIScheduler({
-            modelName: 'gemini-3.1-flash-lite',
-            dateRange: dates1,
-            availabilities: avail1,
-            schedules: manualMonthSchedules,
-            employees,
-            staffingTargets,
-            onlyFillDeficits: false
-          }),
-          runAIScheduler({
-            modelName: 'gemini-3.1-flash-lite',
-            dateRange: dates2,
-            availabilities: avail2,
-            schedules: manualMonthSchedules,
-            employees,
-            staffingTargets,
-            onlyFillDeficits: false
-          })
-        ]);
+        const p1 = await runAIScheduler({
+          modelName: 'gemini-3.8-flash',
+          dateRange: dates1,
+          availabilities: avail1,
+          schedules: manualMonthSchedules,
+          employees,
+          staffingTargets,
+          onlyFillDeficits: false,
+          operatingStartTime,
+          operatingEndTime,
+          staffingDemandConfig
+        });
+
+        const p1WorkSchedules: WorkSchedule[] = p1.map((p, idx) => ({
+          id: `sim-ai-p1-${idx}`,
+          title: p.employeeName,
+          employeeName: p.employeeName,
+          date: p.date,
+          workplace: p.workplace,
+          startTime: p.startTime,
+          endTime: p.endTime,
+          color: 'purple',
+          createdAt: Date.now(),
+          scheduleSource: 'ai'
+        }));
+
+        const p2 = await runAIScheduler({
+          modelName: 'gemini-3.8-flash',
+          dateRange: dates2,
+          availabilities: avail2,
+          schedules: [...manualMonthSchedules.filter(s => !dates1.includes(s.date)), ...p1WorkSchedules],
+          employees,
+          staffingTargets,
+          onlyFillDeficits: false,
+          operatingStartTime,
+          operatingEndTime,
+          staffingDemandConfig
+        });
+
         allProposed = [...p1, ...p2];
       }
 
@@ -297,7 +332,10 @@ export const ManagerComparisonView: React.FC<ManagerComparisonViewProps> = ({
       scheduleSource: 'ai'
     }));
 
-    return [...manualMonthSchedules, ...simulatedAiShifts];
+    const aiDates = new Set(aiSchedules.map(s => s.date));
+    const manualForOtherDates = manualMonthSchedules.filter(s => !aiDates.has(s.date));
+
+    return [...manualForOtherDates, ...simulatedAiShifts];
   }, [aiSchedules, manualMonthSchedules]);
 
   // Helper to get target count for a given hour on dateStr

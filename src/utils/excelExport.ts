@@ -491,9 +491,9 @@ export interface ExportComparisonParams {
   manualSchedules: WorkSchedule[];
   ruleSchedules: WorkSchedule[];
   aiSchedules: WorkSchedule[] | null;
-  manualStats: any;
-  ruleStats: any;
-  aiStats: any;
+  manualStats?: any;
+  ruleStats?: any;
+  aiStats?: any;
 }
 
 export const exportComparisonToExcel = async ({
@@ -503,14 +503,9 @@ export const exportComparisonToExcel = async ({
   activeEmployees,
   manualSchedules,
   ruleSchedules,
-  aiSchedules,
-  manualStats,
-  ruleStats,
-  aiStats
+  aiSchedules
 }: ExportComparisonParams) => {
   const wb = XLSX.utils.book_new();
-  const now = new Date();
-  const timestampStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
   const borderStyle = {
     top: { style: 'thin', color: { rgb: 'DAC0A3' } },
@@ -519,123 +514,45 @@ export const exportComparisonToExcel = async ({
     right: { style: 'thin', color: { rgb: 'DAC0A3' } }
   };
 
-  // 1. Sheet 1: KPI 總覽評比
-  const kpiRows: any[][] = [];
-  kpiRows.push([
-    {
-      v: `精品咖啡館 - 智慧排班比對分析報告 (${monthStr} ${dateRangeDesc})`,
-      t: 's',
-      s: { font: { bold: true, sz: 14, color: { rgb: '3E2723' } } }
-    }
-  ]);
-  kpiRows.push([
-    {
-      v: `匯出時間: ${timestampStr} | 最高管理員專屬核定報表`,
-      t: 's',
-      s: { font: { sz: 9, italic: true, color: { rgb: '6D4C41' } } }
-    }
-  ]);
-  kpiRows.push([]); // blank line
+  const combinedRows: any[][] = [];
+  const merges: XLSX.Range[] = [];
+  const totalCols = 2 + displayedDaysInMonth.length + 1;
 
-  const kpiHeaders = [
-    '評估指標維度',
-    '手動現有排班 (現行實績)',
-    '程式規則演算法 (autoScheduler)',
-    'Gemini AI 智慧排班'
-  ];
-
-  kpiRows.push(
-    kpiHeaders.map((h, i) => {
-      const headerColor = i === 1 ? '2E7D32' : i === 2 ? '1565C0' : i === 3 ? '6A1B9A' : '795548';
-      return {
-        v: h,
-        t: 's',
-        s: {
-          fill: { fgColor: { rgb: headerColor } },
-          font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 11 },
-          alignment: { horizontal: 'center', vertical: 'center' },
-          border: borderStyle
-        }
-      };
-    })
-  );
-
-  const kpiMetrics = [
-    {
-      name: '總排定班次數',
-      m: `${manualStats?.totalShifts || 0} 班`,
-      r: `${ruleStats?.totalShifts || 0} 班`,
-      a: aiStats ? `${aiStats.totalShifts} 班` : '未執行'
-    },
-    {
-      name: '總出勤工時 (人時)',
-      m: `${manualStats?.totalLaborHours || 0} hrs`,
-      r: `${ruleStats?.totalLaborHours || 0} hrs`,
-      a: aiStats ? `${aiStats.totalLaborHours} hrs` : '未執行'
-    },
-    {
-      name: '時段缺額人時 (Shortage)',
-      m: `${manualStats?.deficitHoursCount || 0} hrs 缺額`,
-      r: `${ruleStats?.deficitHoursCount || 0} hrs 缺額`,
-      a: aiStats ? `${aiStats.deficitHoursCount} hrs 缺額` : '未執行'
-    },
-    {
-      name: '開早達標率 (06-08 ≥2人)',
-      m: `${manualStats?.openingMetRate || 0}%`,
-      r: `${ruleStats?.openingMetRate || 0}%`,
-      a: aiStats ? `${aiStats.openingMetRate || 0}%` : '未執行'
-    },
-    {
-      name: '收班達標率 (17-20 ≥2人)',
-      m: `${manualStats?.closingMetRate || 0}%`,
-      r: `${ruleStats?.closingMetRate || 0}%`,
-      a: aiStats ? `${aiStats.closingMetRate || 0}%` : '未執行'
-    },
-    {
-      name: '尖峰超編人時 (平日>3人, 假日>4人)',
-      m: `${manualStats?.overstaffedHoursCount || 0} hrs 超編`,
-      r: `${ruleStats?.overstaffedHoursCount || 0} hrs 超編`,
-      a: aiStats ? `${aiStats.overstaffedHoursCount || 0} hrs 超編` : '未執行'
-    },
-    {
-      name: '勞基法連續工作 7 日違規數',
-      m: `${manualStats?.consecutiveViolations || 0} 人違規`,
-      r: `${ruleStats?.consecutiveViolations || 0} 人違規`,
-      a: aiStats ? `${aiStats.consecutiveViolations || 0} 人違規` : '未執行'
-    }
-  ];
-
-  kpiMetrics.forEach((metric, rowIdx) => {
-    const rowBg = rowIdx % 2 === 1 ? 'FAF7F2' : 'FFFFFF';
-    kpiRows.push([
-      { v: metric.name, t: 's', s: { fill: { fgColor: { rgb: rowBg } }, font: { bold: true, sz: 10, color: { rgb: '3E2723' } }, border: borderStyle, alignment: { vertical: 'center' } } },
-      { v: metric.m, t: 's', s: { fill: { fgColor: { rgb: rowBg } }, font: { sz: 10, color: { rgb: '2E7D32' } }, border: borderStyle, alignment: { horizontal: 'center', vertical: 'center' } } },
-      { v: metric.r, t: 's', s: { fill: { fgColor: { rgb: rowBg } }, font: { sz: 10, color: { rgb: '1565C0' } }, border: borderStyle, alignment: { horizontal: 'center', vertical: 'center' } } },
-      { v: metric.a, t: 's', s: { fill: { fgColor: { rgb: rowBg } }, font: { sz: 10, color: { rgb: '6A1B9A' } }, border: borderStyle, alignment: { horizontal: 'center', vertical: 'center' } } }
-    ]);
-  });
-
-  const wsKpi = XLSX.utils.aoa_to_sheet(kpiRows);
-  wsKpi['!cols'] = [{ wch: 32 }, { wch: 28 }, { wch: 28 }, { wch: 28 }];
-  XLSX.utils.book_append_sheet(wb, wsKpi, 'KPI綜合評比總覽');
-
-  // Helper to build full schedule grid sheet for each mode
-  const buildRosterWorksheet = (
+  // Helper to append a full schedule table block to the single combined worksheet
+  const appendTableBlock = (
     sheetTitle: string,
     modeSubtitle: string,
-    themeRgb: string,
+    titleBgRgb: string,
+    headerBgRgb: string,
     scheduleList: WorkSchedule[] | null
   ) => {
-    const rows: any[][] = [];
-    rows.push([
-      {
-        v: `${sheetTitle} (${monthStr} ${dateRangeDesc}) - ${modeSubtitle}`,
-        t: 's',
-        s: { font: { bold: true, sz: 12, color: { rgb: '3E2723' } } }
-      }
-    ]);
+    const titleRowIdx = combinedRows.length;
 
-    // Build schedule map
+    // 1. Table Title Row (Merged across all columns)
+    const titleRow: any[] = [];
+    titleRow.push({
+      v: `${sheetTitle} (${monthStr} ${dateRangeDesc}) - ${modeSubtitle}`,
+      t: 's',
+      s: {
+        fill: { fgColor: { rgb: titleBgRgb } },
+        font: { bold: true, sz: 11, color: { rgb: 'FFFFFF' } },
+        alignment: { vertical: 'center' }
+      }
+    });
+    for (let c = 1; c < totalCols; c++) {
+      titleRow.push({
+        v: '',
+        t: 's',
+        s: { fill: { fgColor: { rgb: titleBgRgb } } }
+      });
+    }
+    combinedRows.push(titleRow);
+    merges.push({
+      s: { r: titleRowIdx, c: 0 },
+      e: { r: titleRowIdx, c: totalCols - 1 }
+    });
+
+    // 2. Build schedule lookup map
     const scheduleLookup: Record<string, WorkSchedule[]> = {};
     if (scheduleList) {
       scheduleList.forEach(s => {
@@ -645,17 +562,17 @@ export const exportComparisonToExcel = async ({
       });
     }
 
-    // Header row
+    // 3. Header row
     const headerCols: any[] = [
       {
         v: '人員姓名',
         t: 's',
-        s: { fill: { fgColor: { rgb: themeRgb } }, font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 10 }, alignment: { horizontal: 'center', vertical: 'center' }, border: borderStyle }
+        s: { fill: { fgColor: { rgb: headerBgRgb } }, font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 10 }, alignment: { horizontal: 'center', vertical: 'center' }, border: borderStyle }
       },
       {
         v: '身分',
         t: 's',
-        s: { fill: { fgColor: { rgb: themeRgb } }, font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 10 }, alignment: { horizontal: 'center', vertical: 'center' }, border: borderStyle }
+        s: { fill: { fgColor: { rgb: headerBgRgb } }, font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 10 }, alignment: { horizontal: 'center', vertical: 'center' }, border: borderStyle }
       }
     ];
 
@@ -669,7 +586,7 @@ export const exportComparisonToExcel = async ({
         v: `${dayNum}日\n(${dayLabel})`,
         t: 's',
         s: {
-          fill: { fgColor: { rgb: isWeekend ? 'EF6C00' : themeRgb } },
+          fill: { fgColor: { rgb: isWeekend ? 'EF6C00' : headerBgRgb } },
           font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 9 },
           alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
           border: borderStyle
@@ -680,12 +597,12 @@ export const exportComparisonToExcel = async ({
     headerCols.push({
       v: '總工時(h)',
       t: 's',
-      s: { fill: { fgColor: { rgb: themeRgb } }, font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 10 }, alignment: { horizontal: 'center', vertical: 'center' }, border: borderStyle }
+      s: { fill: { fgColor: { rgb: headerBgRgb } }, font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 10 }, alignment: { horizontal: 'center', vertical: 'center' }, border: borderStyle }
     });
 
-    rows.push(headerCols);
+    combinedRows.push(headerCols);
 
-    // Employee Rows
+    // 4. Employee Rows
     activeEmployees.forEach((emp, empIdx) => {
       let empHours = 0;
       const rowBg = empIdx % 2 === 1 ? 'FAF7F2' : 'FFFFFF';
@@ -741,11 +658,11 @@ export const exportComparisonToExcel = async ({
         s: { fill: { fgColor: { rgb: rowBg } }, font: { bold: true, sz: 10, color: { rgb: '795548' } }, border: borderStyle, alignment: { horizontal: 'center', vertical: 'center' } }
       });
 
-      rows.push(empRow);
+      combinedRows.push(empRow);
     });
 
-    // Summary Rows
-    // 1. 出勤人數
+    // 5. Summary Rows
+    // 出勤人數 (人)
     const headcountRow: any[] = [
       { v: '出勤人數 (人)', t: 's', s: { fill: { fgColor: { rgb: 'FAF7F2' } }, font: { bold: true, sz: 10, color: { rgb: '5D4037' } }, border: borderStyle, alignment: { vertical: 'center' } } },
       { v: '', t: 's', s: { fill: { fgColor: { rgb: 'FAF7F2' } }, border: borderStyle } }
@@ -759,9 +676,9 @@ export const exportComparisonToExcel = async ({
       headcountRow.push({ v: count, t: 'n', s: { fill: { fgColor: { rgb: 'FAF7F2' } }, font: { bold: true, sz: 10, color: { rgb: '3E2723' } }, border: borderStyle, alignment: { horizontal: 'center', vertical: 'center' } } });
     });
     headcountRow.push({ v: '', t: 's', s: { fill: { fgColor: { rgb: 'FAF7F2' } }, border: borderStyle } });
-    rows.push(headcountRow);
+    combinedRows.push(headcountRow);
 
-    // 2. 開早人數
+    // 開早人數 (06-08)
     const openingRow: any[] = [
       { v: '開早人數 (06-08)', t: 's', s: { font: { bold: true, sz: 9, color: { rgb: '6D4C41' } }, border: borderStyle, alignment: { vertical: 'center' } } },
       { v: '目標:2', t: 's', s: { font: { sz: 8, color: { rgb: '8D6E63' } }, border: borderStyle, alignment: { horizontal: 'center', vertical: 'center' } } }
@@ -780,9 +697,9 @@ export const exportComparisonToExcel = async ({
       });
     });
     openingRow.push({ v: '', t: 's', s: { border: borderStyle } });
-    rows.push(openingRow);
+    combinedRows.push(openingRow);
 
-    // 3. 收班人數
+    // 收班人數 (17-20)
     const closingRow: any[] = [
       { v: '收班人數 (17-20)', t: 's', s: { font: { bold: true, sz: 9, color: { rgb: '6D4C41' } }, border: borderStyle, alignment: { vertical: 'center' } } },
       { v: '目標:2', t: 's', s: { font: { sz: 8, color: { rgb: '8D6E63' } }, border: borderStyle, alignment: { horizontal: 'center', vertical: 'center' } } }
@@ -801,30 +718,34 @@ export const exportComparisonToExcel = async ({
       });
     });
     closingRow.push({ v: '', t: 's', s: { border: borderStyle } });
-    rows.push(closingRow);
-
-    const ws = XLSX.utils.aoa_to_sheet(rows);
-    const colWidths = [{ wch: 14 }, { wch: 8 }];
-    displayedDaysInMonth.forEach(() => colWidths.push({ wch: 12 }));
-    colWidths.push({ wch: 12 });
-    ws['!cols'] = colWidths;
-
-    return ws;
+    combinedRows.push(closingRow);
   };
 
-  // Sheet 2: 手動現有排班
-  const wsManual = buildRosterWorksheet('手動現有排班表', '現行門市資料庫實績', '2E7D32', manualSchedules);
-  XLSX.utils.book_append_sheet(wb, wsManual, '手動現有排班');
+  // 1. Table 1: 手動現有排班表 (現行門市資料庫實績)
+  appendTableBlock('手動現有排班表', '現行門市資料庫實績', '795548', '2E7D32', manualSchedules);
 
-  // Sheet 3: 程式規則排班
-  const wsRule = buildRosterWorksheet('程式規則演算法排班表', 'autoScheduler 保早/保晚/封頂模擬', '1565C0', ruleSchedules);
-  XLSX.utils.book_append_sheet(wb, wsRule, '程式規則排班');
+  // Blank spacer row (Row 14 in screenshot)
+  combinedRows.push([]);
 
-  // Sheet 4: Gemini AI 排班
-  const wsAi = buildRosterWorksheet('Gemini AI 智慧排班表', 'Gemini 模型智慧生成', '6A1B9A', aiSchedules);
-  XLSX.utils.book_append_sheet(wb, wsAi, 'Gemini AI 排班');
+  // 2. Table 2: 程式規則演算法排班表 (autoScheduler 保早/保晚/封頂模擬)
+  appendTableBlock('程式規則演算法排班表', 'autoScheduler 保早/保晚/封頂模擬', '1565C0', '1565C0', ruleSchedules);
 
-  // Generate buffer and inject freeze panes for all sheets
+  // Blank spacer row (Row 28 in screenshot)
+  combinedRows.push([]);
+
+  // 3. Table 3: Gemini AI 智慧排班表 (Gemini 模型智慧生成)
+  appendTableBlock('Gemini AI 智慧排班表', 'Gemini 模型智慧生成', '6A1B9A', '6A1B9A', aiSchedules);
+
+  const ws = XLSX.utils.aoa_to_sheet(combinedRows);
+  ws['!merges'] = merges;
+  const colWidths = [{ wch: 14 }, { wch: 8 }];
+  displayedDaysInMonth.forEach(() => colWidths.push({ wch: 12 }));
+  colWidths.push({ wch: 12 });
+  ws['!cols'] = colWidths;
+
+  XLSX.utils.book_append_sheet(wb, ws, '排班比對總表');
+
+  // Generate buffer and inject freeze pane for columns A & B
   const rawBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
   let finalBuffer: Uint8Array = new Uint8Array(rawBuffer);
 
@@ -838,11 +759,8 @@ export const exportComparisonToExcel = async ({
       if (!zipFile) continue;
       let xml = await zipFile.async('text');
 
-      // For sheets 2, 3, 4 (roster grids): freeze column 2 and row 2
-      // For sheet 1 (KPI): freeze row 4
-      const paneXml = i === 0
-        ? `<pane ySplit="4" topLeftCell="A5" activePane="bottomLeft" state="frozen"/>`
-        : `<pane xSplit="2" ySplit="2" topLeftCell="C3" activePane="bottomRight" state="frozen"/>`;
+      // Freeze column 2 (Col A & B) so employee names and status stay pinned on horizontal scroll
+      const paneXml = `<pane xSplit="2" topLeftCell="C1" activePane="topRight" state="frozen"/>`;
 
       if (xml.includes('<sheetView workbookViewId="0"/>')) {
         xml = xml.replace('<sheetView workbookViewId="0"/>', `<sheetView workbookViewId="0">${paneXml}</sheetView>`);

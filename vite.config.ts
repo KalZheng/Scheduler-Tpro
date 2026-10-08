@@ -199,6 +199,15 @@ function localDbPlugin() {
                 if (globalData.filenamePrefix !== undefined) {
                   filenamePrefix = globalData.filenamePrefix;
                 }
+                var allowMonthSwitch = globalData.allowMonthSwitch !== undefined ? globalData.allowMonthSwitch : false;
+                var operatingStartTimeWeekend = globalData.operatingStartTimeWeekend || '06:30';
+                var operatingEndTimeWeekend = globalData.operatingEndTimeWeekend || '18:30';
+                var openingStaffCount = globalData.openingStaffCount !== undefined ? globalData.openingStaffCount : 2;
+                var closingStaffCount = globalData.closingStaffCount !== undefined ? globalData.closingStaffCount : 2;
+                var peakStartTime = globalData.peakStartTime || '11:30';
+                var peakEndTime = globalData.peakEndTime || '13:30';
+                var weekdayMaxStaff = globalData.weekdayMaxStaff !== undefined ? globalData.weekdayMaxStaff : 3;
+                var weekendMaxStaff = globalData.weekendMaxStaff !== undefined ? globalData.weekendMaxStaff : 4;
               } else {
                 // Initialize default staffing targets if global doesn't exist
                 globalTargets = Array.from({ length: 14 }, (_, i) => ({
@@ -233,8 +242,17 @@ function localDbPlugin() {
                 employees: globalEmployees,
                 deadlineDay: deadlineDay,
                 startDay: startDay,
+                allowMonthSwitch: allowMonthSwitch,
                 operatingStartTime: operatingStartTime,
                 operatingEndTime: operatingEndTime,
+                operatingStartTimeWeekend: operatingStartTimeWeekend,
+                operatingEndTimeWeekend: operatingEndTimeWeekend,
+                openingStaffCount: openingStaffCount,
+                closingStaffCount: closingStaffCount,
+                peakStartTime: peakStartTime,
+                peakEndTime: peakEndTime,
+                weekdayMaxStaff: weekdayMaxStaff,
+                weekendMaxStaff: weekendMaxStaff,
                 shiftMorningStart: shiftMorningStart,
                 shiftMorningEnd: shiftMorningEnd,
                 shiftEveningStart: shiftEveningStart,
@@ -294,8 +312,17 @@ function localDbPlugin() {
                   staffingTargets: globalTargets,
                   deadlineDay: parsed.deadlineDay !== undefined ? parsed.deadlineDay : 20,
                   startDay: parsed.startDay !== undefined ? parsed.startDay : 15,
+                  allowMonthSwitch: parsed.allowMonthSwitch !== undefined ? parsed.allowMonthSwitch : false,
                   operatingStartTime: parsed.operatingStartTime !== undefined ? parsed.operatingStartTime : '06:30',
-                  operatingEndTime: parsed.operatingEndTime !== undefined ? parsed.operatingEndTime : '20:00',
+                  operatingEndTime: parsed.operatingEndTime !== undefined ? parsed.operatingEndTime : '18:00',
+                  operatingStartTimeWeekend: parsed.operatingStartTimeWeekend !== undefined ? parsed.operatingStartTimeWeekend : '06:30',
+                  operatingEndTimeWeekend: parsed.operatingEndTimeWeekend !== undefined ? parsed.operatingEndTimeWeekend : '18:30',
+                  openingStaffCount: parsed.openingStaffCount !== undefined ? parsed.openingStaffCount : 2,
+                  closingStaffCount: parsed.closingStaffCount !== undefined ? parsed.closingStaffCount : 2,
+                  peakStartTime: parsed.peakStartTime !== undefined ? parsed.peakStartTime : '11:30',
+                  peakEndTime: parsed.peakEndTime !== undefined ? parsed.peakEndTime : '13:30',
+                  weekdayMaxStaff: parsed.weekdayMaxStaff !== undefined ? parsed.weekdayMaxStaff : 3,
+                  weekendMaxStaff: parsed.weekendMaxStaff !== undefined ? parsed.weekendMaxStaff : 4,
                   shiftMorningStart: parsed.shiftMorningStart !== undefined ? parsed.shiftMorningStart : '06:30',
                   shiftMorningEnd: parsed.shiftMorningEnd !== undefined ? parsed.shiftMorningEnd : '15:30',
                   shiftEveningStart: parsed.shiftEveningStart !== undefined ? parsed.shiftEveningStart : '08:30',

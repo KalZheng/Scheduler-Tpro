@@ -33,9 +33,11 @@ import {
   subscribeToErpDays,
   subscribeToPtAvailMode,
   subscribeToFilenamePrefix,
-  subscribeToAllowMonthSwitch
+  subscribeToAllowMonthSwitch,
+  subscribeToStaffingDemandConfig,
+  DEFAULT_STAFFING_DEMAND_CONFIG
 } from './services/scheduler';
-import type { PtAvailMode } from './services/scheduler';
+import type { PtAvailMode, StaffingDemandConfig } from './services/scheduler';
 import type { WorkSchedule, WorkerAvailability, StaffingTarget, Employee, ShiftPreset, RevenueStaffRules } from './services/scheduler';
 import { isValidConfig } from './firebase';
 import workplaces from './config/workplaces.json';
@@ -53,7 +55,8 @@ import {
   isShiftActiveAtHour,
   getManagerNote,
   getWorkerNote,
-  compareTimeStrings
+  compareTimeStrings,
+  checkDayStaffingRequirement
 } from './utils/dateUtils';
 import { exportToExcel, generateExcelWorkbook, generateExcelBuffer } from './utils/excelExport';
 
@@ -230,6 +233,7 @@ function App() {
   const [erpDays, setErpDays] = useState<number[]>([1, 3, 5]);
   const [ptAvailMode, setPtAvailMode] = useState<PtAvailMode>('static');
   const [filenamePrefix, setFilenamePrefix] = useState<string>('');
+  const [staffingDemandConfig, setStaffingDemandConfig] = useState<StaffingDemandConfig>(DEFAULT_STAFFING_DEMAND_CONFIG);
 
   const defaultShiftStart = useMemo(() => {
     if (shiftPresets && shiftPresets.length > 0) {
@@ -612,6 +616,7 @@ function App() {
     const unsubPtAvailMode = subscribeToPtAvailMode((mode) => setPtAvailMode(mode));
     const unsubFilenamePrefix = subscribeToFilenamePrefix((prefix) => setFilenamePrefix(prefix));
     const unsubAllowMonthSwitch = subscribeToAllowMonthSwitch((allowed) => setAllowMonthSwitch(allowed));
+    const unsubStaffingDemand = subscribeToStaffingDemandConfig((cfg) => setStaffingDemandConfig(cfg));
 
     return () => {
       unsubSchedules();
@@ -633,6 +638,7 @@ function App() {
       unsubPtAvailMode();
       unsubFilenamePrefix();
       unsubAllowMonthSwitch();
+      unsubStaffingDemand();
     };
   }, []);
 
@@ -1152,6 +1158,16 @@ function App() {
       }
     }
     return false;
+  };
+
+  const getDayStaffingRequirement = (dateStr: string) => {
+    return checkDayStaffingRequirement(dateStr, schedules, {
+      operatingStartTime,
+      operatingEndTime,
+      staffingDemandConfig,
+      staffingTargets,
+      getStaffingTargetForHour
+    });
   };
 
   const getStaffingTargetForHour = (hour: number, dateStr?: string): number => {
@@ -2127,6 +2143,7 @@ function App() {
                   shiftPresets={shiftPresets}
                   operatingStartTime={operatingStartTime}
                   operatingEndTime={operatingEndTime}
+                  staffingDemandConfig={staffingDemandConfig}
                 />
               ) : managerViewMode === 'system' ? (
                 <ManagerSystemView
@@ -2151,6 +2168,8 @@ function App() {
                   setPtAvailMode={setPtAvailMode}
                   filenamePrefix={filenamePrefix}
                   setFilenamePrefix={setFilenamePrefix}
+                  staffingDemandConfig={staffingDemandConfig}
+                  setStaffingDemandConfig={setStaffingDemandConfig}
                   onOpenClearModal={() => setIsClearScheduleModalOpen(true)}
                 />
               ) : (
@@ -2259,6 +2278,7 @@ function App() {
                       getDateTotalHours={getDateTotalHours}
                       getAvailabilitiesForDate={getAvailabilitiesForDate}
                       getIsDayUnderstaffed={getIsDayUnderstaffed}
+                      getDayStaffingRequirement={getDayStaffingRequirement}
                       getScheduleTheme={getScheduleTheme}
                       handleOpenAddModal={handleOpenAddModal}
                       handleOpenEditModal={handleOpenEditModal}
@@ -2279,6 +2299,7 @@ function App() {
                       setContextMenu={setContextMenu}
                       getDateTotalHours={getDateTotalHours}
                       getIsDayUnderstaffed={getIsDayUnderstaffed}
+                      getDayStaffingRequirement={getDayStaffingRequirement}
                       getDayNote={getDayNote}
                       handleUpdateDayNote={handleUpdateDayNote}
                       handleMoveEmployeeUp={handleMoveEmployeeUp}
@@ -2374,6 +2395,9 @@ function App() {
         staffingTargets={staffingTargets}
         analysisHoursRange={analysisHoursRange}
         shiftPresets={shiftPresets}
+        operatingStartTime={operatingStartTime}
+        operatingEndTime={operatingEndTime}
+        staffingDemandConfig={staffingDemandConfig}
         onExecuteBatchAutoSchedule={handleBatchApplyAutoSchedules}
       />
 
@@ -2387,6 +2411,9 @@ function App() {
         staffingTargets={staffingTargets}
         analysisHoursRange={analysisHoursRange}
         shiftPresets={shiftPresets}
+        operatingStartTime={operatingStartTime}
+        operatingEndTime={operatingEndTime}
+        staffingDemandConfig={staffingDemandConfig}
         onExecuteBatchAutoSchedule={handleBatchApplyAutoSchedules}
       />
 

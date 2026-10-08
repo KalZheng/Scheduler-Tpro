@@ -1,5 +1,5 @@
 import React from 'react';
-import type { ShiftPreset, RevenueStaffRules } from '../../services/scheduler';
+import type { ShiftPreset, RevenueStaffRules, StaffingDemandConfig, PtAvailMode } from '../../services/scheduler';
 import { ALL_TIME_CHOICES, DAYS_OF_WEEK } from '../../utils/constants';
 import { safeConfirm } from '../../utils/dateUtils';
 import {
@@ -12,9 +12,9 @@ import {
   updateErpDays,
   updatePtAvailMode,
   updateFilenamePrefix,
-  updateAllowMonthSwitch
+  updateAllowMonthSwitch,
+  updateStaffingDemandConfig
 } from '../../services/scheduler';
-import type { PtAvailMode } from '../../services/scheduler';
 
 interface ManagerSystemViewProps {
   operatingStartTime: string;
@@ -38,8 +38,20 @@ interface ManagerSystemViewProps {
   setPtAvailMode: (mode: PtAvailMode) => void;
   filenamePrefix: string;
   setFilenamePrefix: (prefix: string) => void;
+  staffingDemandConfig: StaffingDemandConfig;
+  setStaffingDemandConfig: React.Dispatch<React.SetStateAction<StaffingDemandConfig>>;
   onOpenClearModal?: () => void;
 }
+
+const addMinutesToTime = (time: string, mins: number): string => {
+  const [h, m] = (time || '00:00').split(':').map(Number);
+  if (isNaN(h) || isNaN(m)) return time;
+  let total = h * 60 + m + mins;
+  total = (total + 1440) % 1440;
+  const rh = Math.floor(total / 60);
+  const rm = total % 60;
+  return `${rh.toString().padStart(2, '0')}:${rm.toString().padStart(2, '0')}`;
+};
 
 export const ManagerSystemView: React.FC<ManagerSystemViewProps> = ({
   operatingStartTime,
@@ -63,6 +75,8 @@ export const ManagerSystemView: React.FC<ManagerSystemViewProps> = ({
   setPtAvailMode,
   filenamePrefix,
   setFilenamePrefix,
+  staffingDemandConfig,
+  setStaffingDemandConfig,
   onOpenClearModal
 }) => {
 
@@ -78,6 +92,7 @@ export const ManagerSystemView: React.FC<ManagerSystemViewProps> = ({
       await updateErpDays(erpDays);
       await updatePtAvailMode(ptAvailMode);
       await updateFilenamePrefix(filenamePrefix);
+      await updateStaffingDemandConfig(staffingDemandConfig);
       setRevenueStaffRules(tempRules);
       alert('已成功儲存系統管理設定！');
     } catch (error) {
@@ -109,40 +124,225 @@ export const ManagerSystemView: React.FC<ManagerSystemViewProps> = ({
         </div>
 
         <div className="space-y-4">
-          {/* Section 1: Operating Hours */}
-          <div className="border-t border-[#E5DCD5]/60 pt-4 space-y-3">
-            <h4 className="text-xs font-bold text-[#3E2723] flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#795548]"></span>
-              門市營業/排班時間區間
-            </h4>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-[11px] font-semibold text-[#6D4C41] mb-1.5">營業開始時間</label>
-                <select
-                  value={operatingStartTime}
-                  onChange={(e) => setOperatingStartTime(e.target.value)}
-                  className="w-full glass-input px-3 py-2 rounded-xl text-xs cursor-pointer"
-                >
-                  {ALL_TIME_CHOICES.map(choice => (
-                    <option key={choice} value={choice} className="bg-white text-[#3E2723]">
-                      {choice}
-                    </option>
-                  ))}
-                </select>
+          {/* Section 1: Operating Hours & Staffing (Weekday & Weekend) */}
+          <div className="border-t border-[#E5DCD5]/60 pt-4 space-y-4">
+            <div>
+              <h4 className="text-xs font-bold text-[#3E2723] flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#795548]"></span>
+                門市營業時間與開早／收班守備設定
+              </h4>
+              <p className="text-[11px] text-[#8D6E63] mt-1 leading-relaxed">
+                開早守備為營運開始前 30 分鐘，收班守備為營運結束前 30 分鐘。可依平日與週末分別設定營業起訖時間。
+              </p>
+            </div>
+
+            {/* Weekday Operating Hours */}
+            <div className="bg-[#FAF7F2]/60 p-3.5 rounded-xl border border-[#EADBC8]/50 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-[#5D4037] flex items-center gap-1.5">
+                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-[#EFEBE9] text-[#5D4037] font-semibold">平日</span>
+                  週一至週五營業區間
+                </span>
+                <span className="text-[10px] text-[#8D6E63] font-medium">
+                  開早: {operatingStartTime} ~ {addMinutesToTime(operatingStartTime, 30)} ｜ 收班: {addMinutesToTime(operatingEndTime, -30)} ~ {operatingEndTime}
+                </span>
               </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-[#6D4C41] mb-1">平日開始營業</label>
+                  <select
+                    value={operatingStartTime}
+                    onChange={(e) => setOperatingStartTime(e.target.value)}
+                    className="w-full glass-input px-3 py-2 rounded-xl text-xs cursor-pointer"
+                  >
+                    {ALL_TIME_CHOICES.map(choice => (
+                      <option key={choice} value={choice} className="bg-white text-[#3E2723]">
+                        {choice}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-[#6D4C41] mb-1">平日結束營業</label>
+                  <select
+                    value={operatingEndTime}
+                    onChange={(e) => setOperatingEndTime(e.target.value)}
+                    className="w-full glass-input px-3 py-2 rounded-xl text-xs cursor-pointer"
+                  >
+                    {ALL_TIME_CHOICES.map(choice => (
+                      <option key={choice} value={choice} className="bg-white text-[#3E2723]">
+                        {choice}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Weekend Operating Hours */}
+            <div className="bg-[#FAF7F2]/60 p-3.5 rounded-xl border border-[#EADBC8]/50 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-[#8D6E63] flex items-center gap-1.5">
+                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-[#FBE9E7] text-[#D84315] font-semibold">週末</span>
+                  週六與週日營業區間
+                </span>
+                <span className="text-[10px] text-[#8D6E63] font-medium">
+                  開早: {staffingDemandConfig.operatingStartTimeWeekend} ~ {addMinutesToTime(staffingDemandConfig.operatingStartTimeWeekend, 30)} ｜ 收班: {addMinutesToTime(staffingDemandConfig.operatingEndTimeWeekend, -30)} ~ {staffingDemandConfig.operatingEndTimeWeekend}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-[#6D4C41] mb-1">週末開始營業</label>
+                  <select
+                    value={staffingDemandConfig.operatingStartTimeWeekend}
+                    onChange={(e) => setStaffingDemandConfig(prev => ({ ...prev, operatingStartTimeWeekend: e.target.value }))}
+                    className="w-full glass-input px-3 py-2 rounded-xl text-xs cursor-pointer"
+                  >
+                    {ALL_TIME_CHOICES.map(choice => (
+                      <option key={choice} value={choice} className="bg-white text-[#3E2723]">
+                        {choice}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-[#6D4C41] mb-1">週末結束營業</label>
+                  <select
+                    value={staffingDemandConfig.operatingEndTimeWeekend}
+                    onChange={(e) => setStaffingDemandConfig(prev => ({ ...prev, operatingEndTimeWeekend: e.target.value }))}
+                    className="w-full glass-input px-3 py-2 rounded-xl text-xs cursor-pointer"
+                  >
+                    {ALL_TIME_CHOICES.map(choice => (
+                      <option key={choice} value={choice} className="bg-white text-[#3E2723]">
+                        {choice}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Opening & Closing Staff Required */}
+            <div className="bg-[#FAF7F2]/60 p-3.5 rounded-xl border border-[#EADBC8]/50 space-y-2.5">
+              <span className="text-xs font-bold text-[#3E2723] block">
+                開早與收班需求人數
+              </span>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-[#6D4C41] mb-1">開早在勤人數 (人)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={10}
+                    value={staffingDemandConfig.openingStaffCount}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      setStaffingDemandConfig(prev => ({ ...prev, openingStaffCount: isNaN(val) ? 1 : val }));
+                    }}
+                    className="w-full glass-input px-3 py-2 rounded-xl text-xs font-bold text-[#3E2723]"
+                  />
+                  <span className="text-[10px] text-[#A1887F] mt-0.5 block">前 30 分鐘守備標準</span>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-[#6D4C41] mb-1">收班在勤人數 (人)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={10}
+                    value={staffingDemandConfig.closingStaffCount}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      setStaffingDemandConfig(prev => ({ ...prev, closingStaffCount: isNaN(val) ? 1 : val }));
+                    }}
+                    className="w-full glass-input px-3 py-2 rounded-xl text-xs font-bold text-[#3E2723]"
+                  />
+                  <span className="text-[10px] text-[#A1887F] mt-0.5 block">後 30 分鐘守備標準</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Section 1.5: Peak Customer Time & Headcount Limit */}
+          <div className="border-t border-[#E5DCD5]/60 pt-4 space-y-4">
+            <div>
+              <h4 className="text-xs font-bold text-[#3E2723] flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#795548]"></span>
+                來客尖峰時段與在勤人數上限
+              </h4>
+              <p className="text-[11px] text-[#8D6E63] mt-1 leading-relaxed">
+                尖峰時段為全天需求人數最高時段（最忙時間），平日與週末可分別設定尖峰在勤人數上限。
+              </p>
+            </div>
+
+            <div className="bg-[#FAF7F2]/60 p-3.5 rounded-xl border border-[#EADBC8]/50 space-y-3">
               <div>
-                <label className="block text-[11px] font-semibold text-[#6D4C41] mb-1.5">營業結束時間</label>
-                <select
-                  value={operatingEndTime}
-                  onChange={(e) => setOperatingEndTime(e.target.value)}
-                  className="w-full glass-input px-3 py-2 rounded-xl text-xs cursor-pointer"
-                >
-                  {ALL_TIME_CHOICES.map(choice => (
-                    <option key={choice} value={choice} className="bg-white text-[#3E2723]">
-                      {choice}
-                    </option>
-                  ))}
-                </select>
+                <span className="text-xs font-bold text-[#3E2723] block mb-2">尖峰最忙時段區間</span>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#6D4C41] mb-1">尖峰開始時間</label>
+                    <select
+                      value={staffingDemandConfig.peakStartTime}
+                      onChange={(e) => setStaffingDemandConfig(prev => ({ ...prev, peakStartTime: e.target.value }))}
+                      className="w-full glass-input px-3 py-2 rounded-xl text-xs cursor-pointer"
+                    >
+                      {ALL_TIME_CHOICES.map(choice => (
+                        <option key={choice} value={choice} className="bg-white text-[#3E2723]">
+                          {choice}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#6D4C41] mb-1">尖峰結束時間</label>
+                    <select
+                      value={staffingDemandConfig.peakEndTime}
+                      onChange={(e) => setStaffingDemandConfig(prev => ({ ...prev, peakEndTime: e.target.value }))}
+                      className="w-full glass-input px-3 py-2 rounded-xl text-xs cursor-pointer"
+                    >
+                      {ALL_TIME_CHOICES.map(choice => (
+                        <option key={choice} value={choice} className="bg-white text-[#3E2723]">
+                          {choice}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t border-[#EADBC8]/40 pt-2.5">
+                <span className="text-xs font-bold text-[#3E2723] block mb-2">尖峰在勤人數（最高人力）</span>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#6D4C41] mb-1">平日尖峰人數 (人)</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={15}
+                      value={staffingDemandConfig.weekdayMaxStaff}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value, 10);
+                        setStaffingDemandConfig(prev => ({ ...prev, weekdayMaxStaff: isNaN(val) ? 1 : val }));
+                      }}
+                      className="w-full glass-input px-3 py-2 rounded-xl text-xs font-bold text-[#3E2723]"
+                    />
+                    <span className="text-[10px] text-[#A1887F] mt-0.5 block">週一至週五尖峰上限</span>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#6D4C41] mb-1">週末尖峰人數 (人)</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={15}
+                      value={staffingDemandConfig.weekendMaxStaff}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value, 10);
+                        setStaffingDemandConfig(prev => ({ ...prev, weekendMaxStaff: isNaN(val) ? 1 : val }));
+                      }}
+                      className="w-full glass-input px-3 py-2 rounded-xl text-xs font-bold text-[#3E2723]"
+                    />
+                    <span className="text-[10px] text-[#A1887F] mt-0.5 block">週六與週日尖峰上限</span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
