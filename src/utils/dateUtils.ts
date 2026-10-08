@@ -1,4 +1,4 @@
-import type { WorkSchedule } from '../services/scheduler';
+import type { WorkSchedule, StaffingDemandConfig, StaffingTarget } from '../services/scheduler';
 
 export const safeConfirm = (message: string): boolean => {
   const isNoConfirm = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('noconfirm') === 'true';
@@ -313,4 +313,122 @@ export const getUnstaffedOperatingGaps = (
 
   return gaps.map(g => `${minsToTime(g.start)}-${minsToTime(g.end)}`);
 };
+
+export interface DayStaffingRequirementResult {
+  date: string;
+  isOk: boolean;
+  hasWarning: boolean;
+  isUnderstaffed: boolean;
+  isOverstaffed: boolean;
+  issues: string[];
+}
+
+/**
+ * Validate whether a date meets all operational requirements (opening, closing, hourly targets, max staff cap).
+ * Flags both understaffed and overstaffed conditions.
+ */
+export const checkDayStaffingRequirement = (
+  dateStr: string,
+  schedules: WorkSchedule[],
+  options?: {
+    operatingStartTime?: string;
+    operatingEndTime?: string;
+    staffingDemandConfig?: StaffingDemandConfig;
+    staffingTargets?: StaffingTarget[];
+    getStaffingTargetForHour?: (hour: number, dateStr?: string) => number;
+  }
+): DayStaffingRequirementResult => {
+  const issues: string[] = [];
+  let isUnderstaffed = false;
+  let isOverstaffed = false;
+
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dateObj = new Date(y, (m || 1) - 1, d || 1);
+  const dayOfWeek = dateObj.getDay();
+  const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+
+  const cfg = options?.staffingDemandConfig;
+  const opStart = isWeekend ? (cfg?.operatingStartTimeWeekend || '06:30') : (options?.operatingStartTime || '06:30');
+  const opEnd = isWeekend ? (cfg?.operatingEndTimeWeekend || '18:30') : (options?.operatingEndTime || '20:00');
+  const openTarget = cfg?.openingStaffCount ?? 2;
+  const closeTarget = cfg?.closingStaffCount ?? 2;
+  const maxStaffCap = isWeekend ? (cfg?.weekendMaxStaff ?? 4) : (cfg?.weekdayMaxStaff ?? 3);
+
+  const timeToMins = (t: string) => {
+    if (!t || !t.includes(':')) return 0;
+    const [h, min] = t.split(':').map(Number);
+    return (h || 0) * 60 + (min || 0);
+  };
+
+  const daySchedules = (schedules || []).filter(s => s && s.date === dateStr && s.startTime && s.endTime);
+
+  // 1. Check opening (first 30 minutes of store operation)
+  const opStartM = timeToMins(opStart);
+  const openingActive = daySchedules.filter(s =>
+    timeToMins(s.startTime) <= opStartM && timeToMins(s.endTime) >= opStartM + 30
+  ).length;
+  if (openingActive < openTarget) {
+    issues.push(`開早不足 (${openingActive}/${openTarget}人)`);
+    isUnderstaffed = true;
+  }
+
+  // 2. Check closing (last 30 minutes of store operation)
+  const opEndM = timeToMins(opEnd);
+  const closingActive = daySchedules.filter(s =>
+    timeToMins(s.startTime) <= opEndM - 30 && timeToMins(s.endTime) >= opEndM
+  ).length;
+  if (closingActive < closeTarget) {
+    issues.push(`打烊不足 (${closingActive}/${closeTarget}人)`);
+    isUnderstaffed = true;
+  }
+
+  // 3. Check hourly staffing for understaffed and overstaffed
+  const startHour = Math.floor(opStartM / 60);
+  const endHour = Math.floor((opEndM - 1) / 60);
+
+  const getTarget = (hour: number): number => {
+    if (options?.getStaffingTargetForHour) {
+      return options.getStaffingTargetForHour(hour, dateStr);
+    }
+    if (options?.staffingTargets) {
+      const dateMatch = options.staffingTargets.find(t => t.hour === hour && t.date === dateStr);
+      if (dateMatch) return dateMatch.targetCount;
+      const globalMatch = options.staffingTargets.find(t => t.hour === hour && !t.date);
+      if (globalMatch) return globalMatch.targetCount;
+    }
+    return 2;
+  };
+
+  for (let h = startHour; h <= endHour; h++) {
+    const activeWorkers = daySchedules.filter(s => isShiftActiveAtHour(s.startTime, s.endTime, h)).length;
+    const target = getTarget(h);
+
+    // Overstaff check: strictly exceeding maxStaffCap
+    if (activeWorkers > maxStaffCap) {
+      issues.push(`${h}:00 超額排班 (${activeWorkers}/${maxStaffCap}人上限)`);
+      isOverstaffed = true;
+    }
+
+    // Understaff check: below target
+    if (target > 0 && activeWorkers < target) {
+      if (activeWorkers === 0) {
+        issues.push(`${h}:00 空班無人 (0/${target}人)`);
+      } else {
+        issues.push(`${h}:00 缺工 (${activeWorkers}/${target}人)`);
+      }
+      isUnderstaffed = true;
+    }
+  }
+
+  const hasWarning = isUnderstaffed || isOverstaffed;
+  return {
+    date: dateStr,
+    isOk: !hasWarning,
+    hasWarning,
+    isUnderstaffed,
+    isOverstaffed,
+    issues
+  };
+};
+
 
