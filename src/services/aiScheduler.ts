@@ -1,5 +1,5 @@
 import type { WorkSchedule, WorkerAvailability, Employee, StaffingTarget, StaffingDemandConfig } from './scheduler';
-import { hasSevenConsecutiveDays, isShiftActiveAtHour } from '../utils/dateUtils';
+import { hasSevenConsecutiveDays } from '../utils/dateUtils';
 
 export interface ProposedAISchedule {
   availabilityId: string;
