@@ -65,7 +65,7 @@ export const generateAutoSchedule = (
   availabilities: WorkerAvailability[] = [],
   existingSchedules: WorkSchedule[] = [],
   employees: Employee[] = [],
-  staffingTargets: StaffingTarget[] = [],
+  _staffingTargets: StaffingTarget[] = [],
   _analysisHoursRange: number[] = [],
   shiftPresets: ShiftPreset[] = [],
   options: AutoScheduleOptions
@@ -73,7 +73,6 @@ export const generateAutoSchedule = (
   const safeAvailabilities = availabilities || [];
   const safeSchedules = existingSchedules || [];
   const safeEmployees = employees || [];
-  const safeStaffingTargets = staffingTargets || [];
   const safeShiftPresets = shiftPresets || [];
 
   const {
@@ -133,21 +132,32 @@ export const generateAutoSchedule = (
   };
 
   // Helper: Get target count for a given hour on dateStr
-  const getStaffingTarget = (hour: number, dateStr: string, isWeekend: boolean): number => {
+  const getStaffingTarget = (hour: number, _dateStr: string, isWeekend: boolean): number => {
+    const dayOpenStart = isWeekend ? operatingStartTimeWeekend : operatingStartTime;
+    const dayCloseEnd = isWeekend ? operatingEndTimeWeekend : operatingEndTime;
+    const openH = Math.floor(timeToMinutes(dayOpenStart) / 60);
+    const closeMins = timeToMinutes(dayCloseEnd);
+    const closeH = Math.floor((closeMins - 1) / 60);
+
+    if (hour < openH || hour > closeH) {
+      return 0;
+    }
+
+    const maxCap = getHourMaxCap(hour, isWeekend);
+
     if (isPeakHour(hour)) {
-      return getHourMaxCap(hour, isWeekend);
+      return maxCap;
     }
 
-    let base = 2;
-    const dateMatch = safeStaffingTargets.find(t => t.hour === hour && t.date === dateStr);
-    if (dateMatch) {
-      base = dateMatch.targetCount;
-    } else {
-      const globalMatch = safeStaffingTargets.find(t => t.hour === hour && !t.date);
-      if (globalMatch) base = globalMatch.targetCount;
+    if (hour === openH) {
+      return Math.min(openingStaffCount, maxCap);
     }
 
-    return Math.min(base, getHourMaxCap(hour, isWeekend));
+    if (hour === closeH) {
+      return Math.min(closingStaffCount, maxCap);
+    }
+
+    return Math.min(openingStaffCount, maxCap);
   };
 
   // Helper: Count active workers in a given hour on dateStr
