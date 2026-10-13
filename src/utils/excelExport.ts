@@ -1,8 +1,8 @@
 import * as XLSX from 'xlsx-js-style';
 import JSZip from 'jszip';
-import type { WorkSchedule, WorkerAvailability, Employee } from '../services/scheduler';
+import type { WorkSchedule, WorkerAvailability, Employee, StaffingDemandConfig } from '../services/scheduler';
 import { DAYS_OF_WEEK, ALL_POSITIONS } from './constants';
-import { formatDateString, getDatesInRange, calculateDuration, getCleanNote, getManagerNote, compareTimeStrings, isShiftActiveAtHour } from './dateUtils';
+import { formatDateString, getDatesInRange, calculateDuration, getCleanNote, getManagerNote, compareTimeStrings, timeToMinutes } from './dateUtils';
 
 interface GenerateExcelParams {
   exportStartDate: string;
@@ -494,6 +494,9 @@ export interface ExportComparisonParams {
   manualStats?: any;
   ruleStats?: any;
   aiStats?: any;
+  staffingDemandConfig?: StaffingDemandConfig;
+  operatingStartTime?: string;
+  operatingEndTime?: string;
 }
 
 export const exportComparisonToExcel = async ({
@@ -503,7 +506,10 @@ export const exportComparisonToExcel = async ({
   activeEmployees,
   manualSchedules,
   ruleSchedules,
-  aiSchedules
+  aiSchedules,
+  staffingDemandConfig,
+  operatingStartTime,
+  operatingEndTime
 }: ExportComparisonParams) => {
   const wb = XLSX.utils.book_new();
 
@@ -678,19 +684,23 @@ export const exportComparisonToExcel = async ({
     headcountRow.push({ v: '', t: 's', s: { fill: { fgColor: { rgb: 'FAF7F2' } }, border: borderStyle } });
     combinedRows.push(headcountRow);
 
-    // 開早人數 (06-08)
+    // 開早人數 (前30分)
+    const openTarget = staffingDemandConfig?.openingStaffCount ?? 1;
     const openingRow: any[] = [
-      { v: '開早人數 (06-08)', t: 's', s: { font: { bold: true, sz: 9, color: { rgb: '6D4C41' } }, border: borderStyle, alignment: { vertical: 'center' } } },
-      { v: '目標:2', t: 's', s: { font: { sz: 8, color: { rgb: '8D6E63' } }, border: borderStyle, alignment: { horizontal: 'center', vertical: 'center' } } }
+      { v: '開早人數 (前30分)', t: 's', s: { font: { bold: true, sz: 9, color: { rgb: '6D4C41' } }, border: borderStyle, alignment: { vertical: 'center' } } },
+      { v: `目標:${openTarget}`, t: 's', s: { font: { sz: 8, color: { rgb: '8D6E63' } }, border: borderStyle, alignment: { horizontal: 'center', vertical: 'center' } } }
     ];
     displayedDaysInMonth.forEach(dateObj => {
       const dateStr = formatDateString(dateObj);
-      const count = scheduleList ? scheduleList.filter(s => s.date === dateStr && isShiftActiveAtHour(s.startTime, s.endTime, 6)).length : 0;
+      const isWeekend = dateObj.getDay() === 0 || dateObj.getDay() === 6;
+      const dayOpenStart = isWeekend ? (staffingDemandConfig?.operatingStartTimeWeekend || '06:30') : (operatingStartTime || '06:30');
+      const opStartM = timeToMinutes(dayOpenStart);
+      const count = scheduleList ? scheduleList.filter(s => s.date === dateStr && timeToMinutes(s.startTime) <= opStartM && timeToMinutes(s.endTime) >= opStartM + 30).length : 0;
       openingRow.push({
         v: count,
         t: 'n',
         s: {
-          font: { bold: true, sz: 9, color: { rgb: count >= 2 ? '1B5E20' : 'C2185B' } },
+          font: { bold: true, sz: 9, color: { rgb: count >= openTarget ? '1B5E20' : 'C2185B' } },
           border: borderStyle,
           alignment: { horizontal: 'center', vertical: 'center' }
         }
@@ -699,19 +709,23 @@ export const exportComparisonToExcel = async ({
     openingRow.push({ v: '', t: 's', s: { border: borderStyle } });
     combinedRows.push(openingRow);
 
-    // 收班人數 (17-20)
+    // 收班人數 (後30分)
+    const closeTarget = staffingDemandConfig?.closingStaffCount ?? 1;
     const closingRow: any[] = [
-      { v: '收班人數 (17-20)', t: 's', s: { font: { bold: true, sz: 9, color: { rgb: '6D4C41' } }, border: borderStyle, alignment: { vertical: 'center' } } },
-      { v: '目標:2', t: 's', s: { font: { sz: 8, color: { rgb: '8D6E63' } }, border: borderStyle, alignment: { horizontal: 'center', vertical: 'center' } } }
+      { v: '收班人數 (後30分)', t: 's', s: { font: { bold: true, sz: 9, color: { rgb: '6D4C41' } }, border: borderStyle, alignment: { vertical: 'center' } } },
+      { v: `目標:${closeTarget}`, t: 's', s: { font: { sz: 8, color: { rgb: '8D6E63' } }, border: borderStyle, alignment: { horizontal: 'center', vertical: 'center' } } }
     ];
     displayedDaysInMonth.forEach(dateObj => {
       const dateStr = formatDateString(dateObj);
-      const count = scheduleList ? scheduleList.filter(s => s.date === dateStr && isShiftActiveAtHour(s.startTime, s.endTime, 17)).length : 0;
+      const isWeekend = dateObj.getDay() === 0 || dateObj.getDay() === 6;
+      const dayCloseEnd = isWeekend ? (staffingDemandConfig?.operatingEndTimeWeekend || '18:30') : (operatingEndTime || '20:00');
+      const opEndM = timeToMinutes(dayCloseEnd);
+      const count = scheduleList ? scheduleList.filter(s => s.date === dateStr && timeToMinutes(s.startTime) <= opEndM - 30 && timeToMinutes(s.endTime) >= opEndM).length : 0;
       closingRow.push({
         v: count,
         t: 'n',
         s: {
-          font: { bold: true, sz: 9, color: { rgb: count >= 2 ? '1B5E20' : 'C2185B' } },
+          font: { bold: true, sz: 9, color: { rgb: count >= closeTarget ? '1B5E20' : 'C2185B' } },
           border: borderStyle,
           alignment: { horizontal: 'center', vertical: 'center' }
         }
