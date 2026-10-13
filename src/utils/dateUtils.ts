@@ -30,6 +30,14 @@ export const compareTimeStrings = (timeA: string, timeB: string): number => {
   return mA - mB;
 };
 
+export const timeToMinutes = (t?: string): number => {
+  if (!t || !t.includes(':')) return 0;
+  const [h, m] = t.split(':').map(val => parseInt(val, 10) || 0);
+  return (h || 0) * 60 + (m || 0);
+};
+
+export const timeToMins = timeToMinutes;
+
 export const formatDateString = (date: Date): string => {
   if (!date || !(date instanceof Date) || isNaN(date.getTime())) {
     return '';

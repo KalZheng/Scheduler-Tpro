@@ -166,9 +166,16 @@ export const ManagerComparisonView: React.FC<ManagerComparisonViewProps> = ({
   const ruleResult = useMemo(() => {
     if (activeDateRange.length === 0) return { proposedSchedules: [] };
 
+    // In Comparison View, Table 2 simulates a fresh schedule from active availabilities in the date range,
+    // ignoring whether they were marked 'confirmed' in Table 1 or manual schedule, and starting with 0 existing schedules for that date range!
+    const simAvailabilities = activeAvailabilities.map(a => ({
+      ...a,
+      confirmed: false
+    }));
+
     return generateAutoSchedule(
-      activeAvailabilities,
-      manualMonthSchedules,
+      simAvailabilities,
+      [],
       employees,
       staffingTargets,
       analysisHoursRange,
@@ -183,7 +190,7 @@ export const ManagerComparisonView: React.FC<ManagerComparisonViewProps> = ({
         staffingDemandConfig
       }
     );
-  }, [activeDateRange, activeAvailabilities, manualMonthSchedules, employees, staffingTargets, analysisHoursRange, shiftPresets, operatingStartTime, operatingEndTime, staffingDemandConfig]);
+  }, [activeDateRange, activeAvailabilities, employees, staffingTargets, analysisHoursRange, shiftPresets, operatingStartTime, operatingEndTime, staffingDemandConfig]);
 
   const ruleSchedules = useMemo(() => {
     const simulatedRuleShifts: WorkSchedule[] = ruleResult.proposedSchedules.map((p, idx) => ({
@@ -199,11 +206,11 @@ export const ManagerComparisonView: React.FC<ManagerComparisonViewProps> = ({
       scheduleSource: 'rule' as const
     }));
 
-    const ruleDates = new Set(ruleResult.proposedSchedules.map(p => p.date));
-    const manualForOtherDates = manualMonthSchedules.filter(s => !ruleDates.has(s.date));
+    // If dateRangePart is part1 or part2, retain manual schedules for dates outside activeDateRange
+    const manualForOtherDates = manualMonthSchedules.filter(s => !activeDateRange.includes(s.date));
 
     return [...manualForOtherDates, ...simulatedRuleShifts];
-  }, [manualMonthSchedules, ruleResult]);
+  }, [manualMonthSchedules, ruleResult, activeDateRange]);
 
   // 2. Trigger Gemini AI simulation in-memory
   const handleRunAiSimulation = async () => {
@@ -487,7 +494,10 @@ export const ManagerComparisonView: React.FC<ManagerComparisonViewProps> = ({
         aiSchedules: aiCombinedSchedules,
         manualStats,
         ruleStats,
-        aiStats
+        aiStats,
+        staffingDemandConfig,
+        operatingStartTime,
+        operatingEndTime
       });
     } catch (err) {
       console.error('Export comparison to excel failed:', err);
@@ -743,38 +753,66 @@ export const ManagerComparisonView: React.FC<ManagerComparisonViewProps> = ({
                     {/* Row 2: Opening Shift Headcount */}
                     <tr className="bg-white border-t border-[#DAC0A3]/30 text-[11px]">
                       <td className="py-1.5 px-3 font-bold text-[#6D4C41] border-r border-[#DAC0A3]/40 sticky left-0 z-10 bg-white shadow-xs">
-                        開早人數 (06-08)
+                        開早人數 (前30分)
                       </td>
                       {displayedDaysInMonth.map(dateObj => {
                         const dateStr = formatDateString(dateObj);
-                        const count = scheduleList ? scheduleList.filter(s => s.date === dateStr && isShiftActiveAtHour(s.startTime, s.endTime, 6)).length : 0;
+                        const isWeekend = dateObj.getDay() === 0 || dateObj.getDay() === 6;
+                        const dayOpenStart = isWeekend
+                          ? (staffingDemandConfig?.operatingStartTimeWeekend || '06:30')
+                          : (operatingStartTime || '06:30');
+                        const opStartM = timeToMins(dayOpenStart);
+                        const openTarget = staffingDemandConfig?.openingStaffCount ?? 1;
+
+                        const count = scheduleList
+                          ? scheduleList.filter(s =>
+                              s.date === dateStr &&
+                              timeToMins(s.startTime) <= opStartM &&
+                              timeToMins(s.endTime) >= opStartM + 30
+                            ).length
+                          : 0;
+
                         return (
-                          <td key={dateStr} className={`py-1.5 px-1 text-center font-mono font-bold border-r border-[#DAC0A3]/30 ${count >= 2 ? 'text-emerald-700' : 'text-rose-700 font-extrabold'}`}>
+                          <td key={dateStr} className={`py-1.5 px-1 text-center font-mono font-bold border-r border-[#DAC0A3]/30 ${count >= openTarget ? 'text-emerald-700' : 'text-rose-700 font-extrabold'}`}>
                             {count}
                           </td>
                         );
                       })}
                       <td className="py-1.5 px-2 text-center font-mono text-[10px] text-[#8D6E63]">
-                        目標:2
+                        目標:{staffingDemandConfig?.openingStaffCount ?? 1}
                       </td>
                     </tr>
 
                     {/* Row 3: Closing Shift Headcount */}
                     <tr className="bg-white border-t border-[#DAC0A3]/30 text-[11px]">
                       <td className="py-1.5 px-3 font-bold text-[#6D4C41] border-r border-[#DAC0A3]/40 sticky left-0 z-10 bg-white shadow-xs">
-                        收班人數 (17-20)
+                        收班人數 (後30分)
                       </td>
                       {displayedDaysInMonth.map(dateObj => {
                         const dateStr = formatDateString(dateObj);
-                        const count = scheduleList ? scheduleList.filter(s => s.date === dateStr && isShiftActiveAtHour(s.startTime, s.endTime, 17)).length : 0;
+                        const isWeekend = dateObj.getDay() === 0 || dateObj.getDay() === 6;
+                        const dayCloseEnd = isWeekend
+                          ? (staffingDemandConfig?.operatingEndTimeWeekend || '18:30')
+                          : (operatingEndTime || '20:00');
+                        const opEndM = timeToMins(dayCloseEnd);
+                        const closeTarget = staffingDemandConfig?.closingStaffCount ?? 1;
+
+                        const count = scheduleList
+                          ? scheduleList.filter(s =>
+                              s.date === dateStr &&
+                              timeToMins(s.startTime) <= opEndM - 30 &&
+                              timeToMins(s.endTime) >= opEndM
+                            ).length
+                          : 0;
+
                         return (
-                          <td key={dateStr} className={`py-1.5 px-1 text-center font-mono font-bold border-r border-[#DAC0A3]/30 ${count >= 2 ? 'text-emerald-700' : 'text-rose-700 font-extrabold'}`}>
+                          <td key={dateStr} className={`py-1.5 px-1 text-center font-mono font-bold border-r border-[#DAC0A3]/30 ${count >= closeTarget ? 'text-emerald-700' : 'text-rose-700 font-extrabold'}`}>
                             {count}
                           </td>
                         );
                       })}
                       <td className="py-1.5 px-2 text-center font-mono text-[10px] text-[#8D6E63]">
-                        目標:2
+                        目標:{staffingDemandConfig?.closingStaffCount ?? 1}
                       </td>
                     </tr>
                   </tfoot>
@@ -1227,13 +1265,13 @@ export const ManagerComparisonView: React.FC<ManagerComparisonViewProps> = ({
                 </td>
               </tr>
               <tr>
-                <td className="py-2 px-3 font-bold text-[#6D4C41]">開早達標率 (06-08 ≥2人)</td>
+                <td className="py-2 px-3 font-bold text-[#6D4C41]">開早達標率 (前30分 ≥{staffingDemandConfig?.openingStaffCount ?? 1}人)</td>
                 <td className="py-2 px-3 font-mono font-bold bg-emerald-50/20">{manualStats ? `${manualStats.openingMetRate}%` : '-'}</td>
                 <td className="py-2 px-3 font-mono font-bold bg-blue-50/20 text-blue-900">{ruleStats ? `${ruleStats.openingMetRate}%` : '-'}</td>
                 <td className="py-2 px-3 font-mono font-bold bg-purple-50/20 text-purple-900">{aiStats ? `${aiStats.openingMetRate}%` : '-'}</td>
               </tr>
               <tr>
-                <td className="py-2 px-3 font-bold text-[#6D4C41]">收班達標率 (17-20 ≥2人)</td>
+                <td className="py-2 px-3 font-bold text-[#6D4C41]">收班達標率 (後30分 ≥{staffingDemandConfig?.closingStaffCount ?? 1}人)</td>
                 <td className="py-2 px-3 font-mono font-bold bg-emerald-50/20">{manualStats ? `${manualStats.closingMetRate}%` : '-'}</td>
                 <td className="py-2 px-3 font-mono font-bold bg-blue-50/20 text-blue-900">{ruleStats ? `${ruleStats.closingMetRate}%` : '-'}</td>
                 <td className="py-2 px-3 font-mono font-bold bg-purple-50/20 text-purple-900">{aiStats ? `${aiStats.closingMetRate}%` : '-'}</td>
