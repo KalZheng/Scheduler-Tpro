@@ -11,6 +11,15 @@ export interface AutoScheduleOptions {
   staffingDemandConfig?: StaffingDemandConfig;
 }
 
+export interface PureAutoScheduleOptions {
+  dateRange: string[];
+  prioritizeFullTime?: boolean;
+  maxHoursPerShift?: number;
+  operatingStartTime?: string;
+  operatingEndTime?: string;
+  staffingDemandConfig?: StaffingDemandConfig;
+}
+
 export interface ProposedSchedule {
   availabilityId: string;
   employeeName: string;
@@ -53,37 +62,43 @@ function minutesToTime(mins: number): string {
   return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
 }
 
+interface InternalAutoScheduleConfig {
+  availabilities: WorkerAvailability[];
+  existingSchedules: WorkSchedule[];
+  employees: Employee[];
+  shiftPresets: ShiftPreset[];
+  ignoreConfirmedStatus: boolean;
+  dateRange: string[];
+  prioritizeFullTime?: boolean;
+  maxHoursPerShift?: number;
+  operatingStartTime?: string;
+  operatingEndTime?: string;
+  staffingDemandConfig?: StaffingDemandConfig;
+}
+
 /**
- * Deterministic rule-based automatic scheduler dynamically configured with store parameters:
+ * Internal core auto-scheduling engine:
  * 1. 開早保障 (Opening 30-min window, target openingStaffCount workers)
  * 2. 晚班與收班打烊保障 (Closing 30-min window, target closingStaffCount workers)
  * 3. 尖峰最忙時段與人數上限 (Weekday weekdayMaxStaff / Weekend weekendMaxStaff)
  * 4. 勞基法一例一休檢核 (No 7 consecutive work days, 4-9h bounds, fair rotation)
  * 5. 全整數工時保障 (All shifts in full hours; no 30-min fractional durations, e.g. 4.5h -> 4h)
  */
-export const generateAutoSchedule = (
-  availabilities: WorkerAvailability[] = [],
-  existingSchedules: WorkSchedule[] = [],
-  employees: Employee[] = [],
-  _staffingTargets: StaffingTarget[] = [],
-  _analysisHoursRange: number[] = [],
-  shiftPresets: ShiftPreset[] = [],
-  options: AutoScheduleOptions
-): AutoScheduleResult => {
-  const safeAvailabilities = availabilities || [];
-  const safeSchedules = existingSchedules || [];
-  const safeEmployees = employees || [];
-  const safeShiftPresets = shiftPresets || [];
+function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoScheduleResult {
+  const safeAvailabilities = config.availabilities || [];
+  const safeSchedules = config.existingSchedules || [];
+  const safeEmployees = config.employees || [];
+  const safeShiftPresets = config.shiftPresets || [];
+  const ignoreConfirmedStatus = config.ignoreConfirmedStatus || false;
 
   const {
     dateRange = [],
     prioritizeFullTime = true,
     maxHoursPerShift = 8,
-    onlyFillDeficits: _onlyFillDeficits = false,
     operatingStartTime = '06:30',
     operatingEndTime = '18:00',
     staffingDemandConfig
-  } = options || {};
+  } = config;
 
   const weekdayMaxStaff = staffingDemandConfig?.weekdayMaxStaff ?? 2;
   const weekendMaxStaff = staffingDemandConfig?.weekendMaxStaff ?? 2;
@@ -290,10 +305,14 @@ export const generateAutoSchedule = (
     const dayOpenStartMins = timeToMinutes(dayOpenStart);
     const dayCloseEndMins = timeToMinutes(dayCloseEnd);
 
-    // Get unconfirmed, non-off-day availabilities for this date
-    const dateAvails = safeAvailabilities.filter(
-      a => a && a.date === dateStr && a.confirmed !== true && !(a.startTime === '00:00' && a.endTime === '00:00')
-    );
+    // In pure mode (ignoreConfirmedStatus = true), consider ALL active registered employee availabilities.
+    // In live/incremental mode (ignoreConfirmedStatus = false), only consider unconfirmed ones.
+    const dateAvails = safeAvailabilities.filter(a => {
+      if (!a || a.date !== dateStr) return false;
+      if (a.startTime === '00:00' && a.endTime === '00:00') return false; // off-day marker
+      if (!ignoreConfirmedStatus && a.confirmed === true) return false;
+      return true;
+    });
 
     // Filter out workers who are inactive or already disqualified by 7-day rule
     const availablePool = dateAvails.filter(a => {
@@ -611,4 +630,60 @@ export const generateAutoSchedule = (
     totalNewConfirmedShifts: proposedSchedules.length,
     coveredDeficitHoursTotal
   };
+}
+
+/**
+ * 1. Pure Rule Auto-Scheduler (純程式規則排班演算法核心):
+ * Runs 100% from scratch without existing manual schedules or confirmed locks.
+ * Strictly schedules all shifts adhering to opening, closing, peak caps, integer hours, and labor law.
+ * Used by ManagerComparisonView (Table 2).
+ */
+export const generatePureAutoSchedule = (
+  availabilities: WorkerAvailability[] = [],
+  employees: Employee[] = [],
+  shiftPresets: ShiftPreset[] = [],
+  options: PureAutoScheduleOptions
+): AutoScheduleResult => {
+  return runAutoScheduleEngine({
+    availabilities,
+    existingSchedules: [],
+    employees,
+    shiftPresets,
+    ignoreConfirmedStatus: true,
+    dateRange: options?.dateRange || [],
+    prioritizeFullTime: options?.prioritizeFullTime ?? true,
+    maxHoursPerShift: options?.maxHoursPerShift ?? 8,
+    operatingStartTime: options?.operatingStartTime,
+    operatingEndTime: options?.operatingEndTime,
+    staffingDemandConfig: options?.staffingDemandConfig
+  });
+};
+
+/**
+ * 2. Incremental / Live Auto-Scheduler (現場增量排班):
+ * Plugs in existing confirmed schedules and only schedules unconfirmed availabilities to fill deficits.
+ * Used by RuleScheduleModal in live scheduling view.
+ */
+export const generateAutoSchedule = (
+  availabilities: WorkerAvailability[] = [],
+  existingSchedules: WorkSchedule[] = [],
+  employees: Employee[] = [],
+  _staffingTargets: StaffingTarget[] = [],
+  _analysisHoursRange: number[] = [],
+  shiftPresets: ShiftPreset[] = [],
+  options: AutoScheduleOptions
+): AutoScheduleResult => {
+  return runAutoScheduleEngine({
+    availabilities,
+    existingSchedules,
+    employees,
+    shiftPresets,
+    ignoreConfirmedStatus: false,
+    dateRange: options?.dateRange || [],
+    prioritizeFullTime: options?.prioritizeFullTime ?? true,
+    maxHoursPerShift: options?.maxHoursPerShift ?? 8,
+    operatingStartTime: options?.operatingStartTime,
+    operatingEndTime: options?.operatingEndTime,
+    staffingDemandConfig: options?.staffingDemandConfig
+  });
 };
