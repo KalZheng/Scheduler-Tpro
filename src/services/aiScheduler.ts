@@ -45,12 +45,12 @@ export function buildAIPromptPayload(options: RunAIScheduleOptions) {
   const opEndWk = options.operatingEndTime || '18:00';
   const opStartWknd = options.staffingDemandConfig?.operatingStartTimeWeekend || '06:30';
   const opEndWknd = options.staffingDemandConfig?.operatingEndTimeWeekend || '18:30';
-  const openStaff = options.staffingDemandConfig?.openingStaffCount ?? 2;
-  const closeStaff = options.staffingDemandConfig?.closingStaffCount ?? 2;
+  const openStaff = options.staffingDemandConfig?.openingStaffCount ?? 1;
+  const closeStaff = options.staffingDemandConfig?.closingStaffCount ?? 1;
   const peakStart = options.staffingDemandConfig?.peakStartTime || '11:30';
   const peakEnd = options.staffingDemandConfig?.peakEndTime || '13:30';
-  const weekdayMax = options.staffingDemandConfig?.weekdayMaxStaff ?? 3;
-  const weekendMax = options.staffingDemandConfig?.weekendMaxStaff ?? 4;
+  const weekdayMax = options.staffingDemandConfig?.weekdayMaxStaff ?? 2;
+  const weekendMax = options.staffingDemandConfig?.weekendMaxStaff ?? 2;
 
   const isPeakHour = (h: number): boolean => {
     const [psH, psM] = peakStart.split(':').map(Number);
@@ -306,8 +306,8 @@ export async function runAIScheduler(options: RunAIScheduleOptions): Promise<Pro
     }
 
     // Guard 2: Strict Over-staffing Cap (Weekdays max weekdayMaxStaff, Weekends max weekendMaxStaff)
-    const weekdayMax = options.staffingDemandConfig?.weekdayMaxStaff ?? 3;
-    const weekendMax = options.staffingDemandConfig?.weekendMaxStaff ?? 4;
+    const weekdayMax = options.staffingDemandConfig?.weekdayMaxStaff ?? 2;
+    const weekendMax = options.staffingDemandConfig?.weekendMaxStaff ?? 2;
 
     let causesExcessiveOverstaffing = false;
     for (let h = 5; h <= 21; h++) {

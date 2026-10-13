@@ -80,16 +80,16 @@ export const generateAutoSchedule = (
     dateRange = [],
     prioritizeFullTime = true,
     maxHoursPerShift = 8,
-    onlyFillDeficits = false,
+    onlyFillDeficits: _onlyFillDeficits = false,
     operatingStartTime = '06:30',
     operatingEndTime = '18:00',
     staffingDemandConfig
   } = options || {};
 
-  const weekdayMaxStaff = staffingDemandConfig?.weekdayMaxStaff ?? 3;
-  const weekendMaxStaff = staffingDemandConfig?.weekendMaxStaff ?? 4;
-  const openingStaffCount = staffingDemandConfig?.openingStaffCount ?? 2;
-  const closingStaffCount = staffingDemandConfig?.closingStaffCount ?? 2;
+  const weekdayMaxStaff = staffingDemandConfig?.weekdayMaxStaff ?? 2;
+  const weekendMaxStaff = staffingDemandConfig?.weekendMaxStaff ?? 2;
+  const openingStaffCount = staffingDemandConfig?.openingStaffCount ?? 1;
+  const closingStaffCount = staffingDemandConfig?.closingStaffCount ?? 1;
   const operatingStartTimeWeekend = staffingDemandConfig?.operatingStartTimeWeekend || '06:30';
   const operatingEndTimeWeekend = staffingDemandConfig?.operatingEndTimeWeekend || '18:30';
   const peakStartTime = staffingDemandConfig?.peakStartTime || '11:30';
@@ -482,6 +482,19 @@ export const generateAutoSchedule = (
         continue;
       }
 
+      // Guard: Daily total unique worker ceiling to avoid overstaffing a single date
+      const assignedWorkersOnDate = new Set(
+        virtualSchedules.filter(s => s && s.date === dateStr).map(s => s.employeeName?.trim().toLowerCase())
+      );
+      const maxDailyWorkers = isWeekend
+        ? Math.max(weekendMaxStaff + 1, openingStaffCount + closingStaffCount + 1, 3)
+        : Math.max(weekdayMaxStaff + 1, openingStaffCount + closingStaffCount + 1, 2);
+
+      if (assignedWorkersOnDate.size >= maxDailyWorkers && !assignedWorkersOnDate.has(cand.employeeName.trim().toLowerCase())) {
+        unassignedAvailabilitiesCount++;
+        continue;
+      }
+
       const emp = safeEmployees.find(e => e.name.trim().toLowerCase() === cand.employeeName.trim().toLowerCase());
       const isFT = emp?.status === '正式夥伴';
 
@@ -514,7 +527,7 @@ export const generateAutoSchedule = (
             const pEndStr = preset.endTime;
             if (!wouldExceedCap(pStartStr, pEndStr, dateStr, isWeekend)) {
               const useful = countCoveredDeficitHours(pStartStr, pEndStr, dateStr, isWeekend);
-              if (!onlyFillDeficits || useful > 0) {
+              if (useful > 0) {
                 const score = useful * 20 + presetDur / 60;
                 if (score > bestScore) {
                   bestScore = score;
@@ -547,7 +560,9 @@ export const generateAutoSchedule = (
             }
 
             const useful = countCoveredDeficitHours(sStr, eStr, dateStr, isWeekend);
-            if (onlyFillDeficits && useful === 0) {
+            // CRITICAL: A shift MUST cover at least 1 deficit hour.
+            // If useful <= 0, scheduling this shift would cause overstaffing!
+            if (useful <= 0) {
               continue;
             }
 
@@ -571,7 +586,7 @@ export const generateAutoSchedule = (
           finalStart,
           finalEnd,
           '中段班',
-          `填補門市中段時段人力（涵蓋 ${bestUsefulHours} 小時需求，遵守平日≤3人/假日≤4人上限）`,
+          `填補門市中段時段人力（涵蓋 ${bestUsefulHours} 小時需求，遵守平日≤${weekdayMaxStaff}人/假日≤${weekendMaxStaff}人上限）`,
           bestUsefulHours
         );
       } else {
