@@ -350,9 +350,9 @@ export const checkDayStaffingRequirement = (
   const cfg = options?.staffingDemandConfig;
   const opStart = isWeekend ? (cfg?.operatingStartTimeWeekend || '06:30') : (options?.operatingStartTime || '06:30');
   const opEnd = isWeekend ? (cfg?.operatingEndTimeWeekend || '18:30') : (options?.operatingEndTime || '20:00');
-  const openTarget = cfg?.openingStaffCount ?? 2;
-  const closeTarget = cfg?.closingStaffCount ?? 2;
-  const maxStaffCap = isWeekend ? (cfg?.weekendMaxStaff ?? 4) : (cfg?.weekdayMaxStaff ?? 3);
+  const openTarget = cfg?.openingStaffCount ?? 1;
+  const closeTarget = cfg?.closingStaffCount ?? 1;
+  const maxStaffCap = isWeekend ? (cfg?.weekendMaxStaff ?? 2) : (cfg?.weekdayMaxStaff ?? 2);
 
   const timeToMins = (t: string) => {
     if (!t || !t.includes(':')) return 0;
@@ -390,13 +390,19 @@ export const checkDayStaffingRequirement = (
     if (options?.getStaffingTargetForHour) {
       return options.getStaffingTargetForHour(hour, dateStr);
     }
-    if (options?.staffingTargets) {
-      const dateMatch = options.staffingTargets.find(t => t.hour === hour && t.date === dateStr);
-      if (dateMatch) return dateMatch.targetCount;
-      const globalMatch = options.staffingTargets.find(t => t.hour === hour && !t.date);
-      if (globalMatch) return globalMatch.targetCount;
+    if (cfg) {
+      if (hour < startHour || hour > endHour) return 0;
+      const peakStart = cfg.peakStartTime || '11:30';
+      const peakEnd = cfg.peakEndTime || '13:30';
+      const [psH, psM] = peakStart.split(':').map(Number);
+      const [peH, peM] = peakEnd.split(':').map(Number);
+      const isPeak = Math.max((psH || 0) * 60 + (psM || 0), hour * 60) < Math.min((peH || 0) * 60 + (peM || 0), (hour + 1) * 60);
+      if (isPeak) return maxStaffCap;
+      if (hour === startHour) return Math.min(openTarget, maxStaffCap);
+      if (hour === endHour) return Math.min(closeTarget, maxStaffCap);
+      return Math.min(openTarget, maxStaffCap);
     }
-    return 2;
+    return Math.min(1, maxStaffCap);
   };
 
   for (let h = startHour; h <= endHour; h++) {

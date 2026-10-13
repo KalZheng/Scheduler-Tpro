@@ -69,13 +69,9 @@ export function buildAIPromptPayload(options: RunAIScheduleOptions) {
     for (let h = 6; h <= 19; h++) {
       if (isPeakHour(h)) {
         hourlyMap[`${h.toString().padStart(2, '0')}:00`] = maxCap;
-        continue;
+      } else {
+        hourlyMap[`${h.toString().padStart(2, '0')}:00`] = Math.min(openStaff, maxCap);
       }
-
-      const dateMatch = options.staffingTargets.find(t => t.hour === h && t.date === d);
-      const globalMatch = options.staffingTargets.find(t => t.hour === h && !t.date);
-      let target = dateMatch ? dateMatch.targetCount : (globalMatch ? globalMatch.targetCount : 2);
-      hourlyMap[`${h.toString().padStart(2, '0')}:00`] = Math.min(target, maxCap);
     }
     return { date: d, isWeekend, hourlyTargets: hourlyMap };
   });

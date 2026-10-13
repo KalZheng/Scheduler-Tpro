@@ -67,7 +67,7 @@ export const ManagerSystemView: React.FC<ManagerSystemViewProps> = ({
   shiftPresets,
   setShiftPresets,
   tempRules,
-  setTempRules,
+  setTempRules: _setTempRules,
   setRevenueStaffRules,
   erpDays,
   setErpDays,
@@ -641,117 +641,6 @@ export const ManagerSystemView: React.FC<ManagerSystemViewProps> = ({
             </div>
           </div>
 
-          {/* Section 5: Revenue Staffing Rules */}
-          <div className="border-t border-[#E5DCD5]/60 pt-4 space-y-3">
-            <h4 className="text-xs font-bold text-[#3E2723] flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#795548]"></span>
-              營業額建議排班人數對照規則設定
-            </h4>
-
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-[10px] font-semibold text-[#6D4C41] mb-1">第一階段營業額 (元以下)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={tempRules.tier1Limit}
-                    onChange={(e) => setTempRules({ ...tempRules, tier1Limit: Math.max(0, parseInt(e.target.value) || 0) })}
-                    className="w-full glass-input px-3 py-1.5 rounded-xl font-mono text-xs text-center"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-semibold text-[#6D4C41] mb-1">第一階段建議人數 (人)</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={tempRules.tier1Staff}
-                    onChange={(e) => setTempRules({ ...tempRules, tier1Staff: Math.max(1, parseInt(e.target.value) || 1) })}
-                    className="w-full glass-input px-3 py-1.5 rounded-xl font-mono text-xs text-center"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-[10px] font-semibold text-[#6D4C41] mb-1">第二階段營業額 (元以下)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={tempRules.tier2Limit}
-                    onChange={(e) => setTempRules({ ...tempRules, tier2Limit: Math.max(0, parseInt(e.target.value) || 0) })}
-                    className="w-full glass-input px-3 py-1.5 rounded-xl font-mono text-xs text-center"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-semibold text-[#6D4C41] mb-1">第二階段建議人數 (人)</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={tempRules.tier2Staff}
-                    onChange={(e) => setTempRules({ ...tempRules, tier2Staff: Math.max(1, parseInt(e.target.value) || 1) })}
-                    className="w-full glass-input px-3 py-1.5 rounded-xl font-mono text-xs text-center"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-[10px] font-semibold text-[#6D4C41] mb-1">第三階段營業額 (元以下)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={tempRules.tier3Limit}
-                    onChange={(e) => setTempRules({ ...tempRules, tier3Limit: Math.max(0, parseInt(e.target.value) || 0) })}
-                    className="w-full glass-input px-3 py-1.5 rounded-xl font-mono text-xs text-center"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-semibold text-[#6D4C41] mb-1">第三階段建議人數 (人)</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={tempRules.tier3Staff}
-                    onChange={(e) => setTempRules({ ...tempRules, tier3Staff: Math.max(1, parseInt(e.target.value) || 1) })}
-                    className="w-full glass-input px-3 py-1.5 rounded-xl font-mono text-xs text-center"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-[10px] font-semibold text-[#6D4C41] mb-1">第四階段基準人數 (人)</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={tempRules.tier4Staff}
-                    onChange={(e) => setTempRules({ ...tempRules, tier4Staff: Math.max(1, parseInt(e.target.value) || 1) })}
-                    className="w-full glass-input px-3 py-1.5 rounded-xl font-mono text-xs text-center"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-semibold text-[#6D4C41] mb-1">每增加營業額額度 (元)</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={tempRules.incrementAmount}
-                    onChange={(e) => setTempRules({ ...tempRules, incrementAmount: Math.max(1, parseInt(e.target.value) || 1) })}
-                    className="w-full glass-input px-3 py-1.5 rounded-xl font-mono text-xs text-center"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-semibold text-[#6D4C41] mb-1">最高建議人數上限 (人)</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={tempRules.maxStaff}
-                    onChange={(e) => setTempRules({ ...tempRules, maxStaff: Math.max(1, parseInt(e.target.value) || 1) })}
-                    className="w-full glass-input px-3 py-1.5 rounded-xl font-mono text-xs text-center"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
 
           {/* Section 5: Batch Reset & Clear Confirmed Schedules */}
           {onOpenClearModal && (

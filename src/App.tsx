@@ -1172,13 +1172,48 @@ function App() {
 
   const getStaffingTargetForHour = (hour: number, dateStr?: string): number => {
     const targetDate = dateStr || selectedDateStr;
-    const dateMatch = staffingTargets.find(t => t.hour === hour && t.date === targetDate);
-    if (dateMatch) return dateMatch.targetCount;
+    const isWeekend = targetDate
+      ? (new Date(targetDate + 'T00:00:00').getDay() === 0 || new Date(targetDate + 'T00:00:00').getDay() === 6)
+      : false;
 
-    const globalMatch = staffingTargets.find(t => t.hour === hour && !t.date);
-    if (globalMatch) return globalMatch.targetCount;
+    const opStart = isWeekend ? (staffingDemandConfig.operatingStartTimeWeekend || '06:30') : (operatingStartTime || '06:30');
+    const opEnd = isWeekend ? (staffingDemandConfig.operatingEndTimeWeekend || '18:30') : (operatingEndTime || '20:00');
+    const [startH] = opStart.split(':').map(Number);
+    const [endH, endM] = opEnd.split(':').map(Number);
+    const endHourEffective = endM > 0 ? endH : endH - 1;
 
-    return 2;
+    // Outside store operating hours
+    if (hour < startH || hour > endHourEffective) {
+      return 0;
+    }
+
+    const maxCap = isWeekend ? staffingDemandConfig.weekendMaxStaff : staffingDemandConfig.weekdayMaxStaff;
+
+    // Peak customer window check
+    const peakStart = staffingDemandConfig.peakStartTime || '11:30';
+    const peakEnd = staffingDemandConfig.peakEndTime || '13:30';
+    const [psH, psM] = peakStart.split(':').map(Number);
+    const [peH, peM] = peakEnd.split(':').map(Number);
+    const pStartM = (psH || 0) * 60 + (psM || 0);
+    const pEndM = (peH || 0) * 60 + (peM || 0);
+    const hStartM = hour * 60;
+    const hEndM = (hour + 1) * 60;
+    const isPeak = Math.max(pStartM, hStartM) < Math.min(pEndM, hEndM);
+
+    if (isPeak) {
+      return maxCap;
+    }
+
+    if (hour === startH) {
+      return Math.min(staffingDemandConfig.openingStaffCount, maxCap);
+    }
+
+    if (hour === endHourEffective) {
+      return Math.min(staffingDemandConfig.closingStaffCount, maxCap);
+    }
+
+    // Regular non-peak mid hours: base target
+    return Math.min(staffingDemandConfig.openingStaffCount, maxCap);
   };
 
   const toggleAvailDateSelection = (dateStr: string) => {

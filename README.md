@@ -77,7 +77,14 @@ FTP_REMOTE_APP_DIR=Scheduler-Tpro
 npm run dev
 ```
 
-### 4. 專案打包建置
+### 4. 專案打包建置與部署
 ```bash
-npm run build
+# 單一分支打包與部署 (依當前分支的 .env 自動發布)
+bun run build
+
+# 一鍵全門市生產環境發布 (自動依序 merge master、push、build 部署至 puli-production 與 jinan-production，並返回 master)
+bun run deploy:production
+# 或直接執行腳本：
+bash scripts/deploy-production.sh
 ```
+

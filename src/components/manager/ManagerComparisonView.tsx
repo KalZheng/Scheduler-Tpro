@@ -196,7 +196,7 @@ export const ManagerComparisonView: React.FC<ManagerComparisonViewProps> = ({
       endTime: p.endTime,
       color: p.color,
       createdAt: Date.now(),
-      scheduleSource: 'rule'
+      scheduleSource: 'rule' as const
     }));
 
     const ruleDates = new Set(ruleResult.proposedSchedules.map(p => p.date));
@@ -283,7 +283,7 @@ export const ManagerComparisonView: React.FC<ManagerComparisonViewProps> = ({
           endTime: p.endTime,
           color: 'purple',
           createdAt: Date.now(),
-          scheduleSource: 'ai'
+          scheduleSource: 'ai' as const
         }));
 
         const p2 = await runAIScheduler({
@@ -329,7 +329,7 @@ export const ManagerComparisonView: React.FC<ManagerComparisonViewProps> = ({
       endTime: p.endTime,
       color: p.color || 'purple',
       createdAt: Date.now(),
-      scheduleSource: 'ai'
+      scheduleSource: 'ai' as const
     }));
 
     const aiDates = new Set(aiSchedules.map(s => s.date));
@@ -338,17 +338,45 @@ export const ManagerComparisonView: React.FC<ManagerComparisonViewProps> = ({
     return [...manualForOtherDates, ...simulatedAiShifts];
   }, [aiSchedules, manualMonthSchedules]);
 
-  // Helper to get target count for a given hour on dateStr
+  const timeToMins = (t?: string): number => {
+    if (!t || !t.includes(':')) return 0;
+    const [h, m] = t.split(':').map(Number);
+    return (h || 0) * 60 + (m || 0);
+  };
+
+  // Helper to get target count for a given hour on dateStr based on staffingDemandConfig
   const getStaffingTarget = (hour: number, dateStr: string): number => {
     const isWeekend = new Date(dateStr + 'T00:00:00').getDay() === 0 || new Date(dateStr + 'T00:00:00').getDay() === 6;
-    const dateMatch = staffingTargets.find(t => t.hour === hour && t.date === dateStr);
-    if (dateMatch) return dateMatch.targetCount;
-    const globalMatch = staffingTargets.find(t => t.hour === hour && !t.date);
-    let base = globalMatch ? globalMatch.targetCount : 2;
-    if (isWeekend && hour >= 10 && hour < 15) {
-      base += 1;
+    const dayOpenStart = isWeekend ? (staffingDemandConfig?.operatingStartTimeWeekend || '06:30') : (operatingStartTime || '06:30');
+    const dayCloseEnd = isWeekend ? (staffingDemandConfig?.operatingEndTimeWeekend || '18:30') : (operatingEndTime || '20:00');
+    const openH = Math.floor(timeToMins(dayOpenStart) / 60);
+    const closeM = timeToMins(dayCloseEnd);
+    const closeH = Math.floor((closeM - 1) / 60);
+
+    // Outside store operating hours
+    if (hour < openH || hour > closeH) {
+      return 0;
     }
-    return base;
+
+    const maxCap = isWeekend ? (staffingDemandConfig?.weekendMaxStaff ?? 2) : (staffingDemandConfig?.weekdayMaxStaff ?? 2);
+    const peakStart = staffingDemandConfig?.peakStartTime || '11:30';
+    const peakEnd = staffingDemandConfig?.peakEndTime || '13:30';
+    const isPeak = Math.max(timeToMins(peakStart), hour * 60) < Math.min(timeToMins(peakEnd), (hour + 1) * 60);
+
+    if (isPeak) {
+      return maxCap;
+    }
+
+    if (hour === openH) {
+      return Math.min(staffingDemandConfig?.openingStaffCount ?? 1, maxCap);
+    }
+
+    if (hour === closeH) {
+      return Math.min(staffingDemandConfig?.closingStaffCount ?? 1, maxCap);
+    }
+
+    // Regular non-peak mid hours
+    return Math.min(staffingDemandConfig?.openingStaffCount ?? 1, maxCap);
   };
 
   // Helper to compute stats for a schedule set within targetDates
@@ -365,16 +393,25 @@ export const ManagerComparisonView: React.FC<ManagerComparisonViewProps> = ({
 
     targetDates.forEach(dateStr => {
       const isWeekend = new Date(dateStr + 'T00:00:00').getDay() === 0 || new Date(dateStr + 'T00:00:00').getDay() === 6;
-      const maxCap = isWeekend ? 4 : 3;
+      const maxCap = isWeekend ? (staffingDemandConfig?.weekendMaxStaff ?? 2) : (staffingDemandConfig?.weekdayMaxStaff ?? 2);
+      const openTarget = staffingDemandConfig?.openingStaffCount ?? 1;
+      const closeTarget = staffingDemandConfig?.closingStaffCount ?? 1;
+      const dayOpenStart = isWeekend ? (staffingDemandConfig?.operatingStartTimeWeekend || '06:30') : (operatingStartTime || '06:30');
+      const dayCloseEnd = isWeekend ? (staffingDemandConfig?.operatingEndTimeWeekend || '18:30') : (operatingEndTime || '20:00');
+      const opStartM = timeToMins(dayOpenStart);
+      const opEndM = timeToMins(dayCloseEnd);
 
-      const openingCountH6 = scheduleList.filter(s => s.date === dateStr && isShiftActiveAtHour(s.startTime, s.endTime, 6)).length;
-      const openingCountH7 = scheduleList.filter(s => s.date === dateStr && isShiftActiveAtHour(s.startTime, s.endTime, 7)).length;
-      if (openingCountH6 >= 2 && openingCountH7 >= 2) {
+      const openingActive = scheduleList.filter(s =>
+        s.date === dateStr && timeToMins(s.startTime) <= opStartM && timeToMins(s.endTime) >= opStartM + 30
+      ).length;
+      if (openingActive >= openTarget) {
         openingDaysMet++;
       }
 
-      const closingCountH17 = scheduleList.filter(s => s.date === dateStr && isShiftActiveAtHour(s.startTime, s.endTime, 17)).length;
-      if (closingCountH17 >= 2) {
+      const closingActive = scheduleList.filter(s =>
+        s.date === dateStr && timeToMins(s.startTime) <= opEndM - 30 && timeToMins(s.endTime) >= opEndM
+      ).length;
+      if (closingActive >= closeTarget) {
         closingDaysMet++;
       }
 
