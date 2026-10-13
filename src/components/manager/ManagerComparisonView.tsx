@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import type { WorkSchedule, WorkerAvailability, Employee, StaffingTarget, ShiftPreset, StaffingDemandConfig } from '../../services/scheduler';
-import { generateAutoSchedule } from '../../utils/autoScheduler';
+import { generatePureAutoSchedule } from '../../utils/autoScheduler';
 import { runAIScheduler, type ProposedAISchedule } from '../../services/aiScheduler';
 import {
   formatDateString,
@@ -162,38 +162,27 @@ export const ManagerComparisonView: React.FC<ManagerComparisonViewProps> = ({
     return monthAvailabilities.filter(a => activeDateRange.includes(a.date));
   }, [monthAvailabilities, activeDateRange]);
 
-  // 1. Compute Rule-based simulation purely in-memory
+  // 1. Table 2: Pure Rule-based simulation (100% pure algorithm, zero manual schedule bias)
   const ruleResult = useMemo(() => {
     if (activeDateRange.length === 0) return { proposedSchedules: [] };
 
-    // In Comparison View, Table 2 simulates a fresh schedule from active availabilities in the date range,
-    // ignoring whether they were marked 'confirmed' in Table 1 or manual schedule, and starting with 0 existing schedules for that date range!
-    const simAvailabilities = activeAvailabilities.map(a => ({
-      ...a,
-      confirmed: false
-    }));
-
-    return generateAutoSchedule(
-      simAvailabilities,
-      [],
+    return generatePureAutoSchedule(
+      activeAvailabilities,
       employees,
-      staffingTargets,
-      analysisHoursRange,
       shiftPresets,
       {
         dateRange: activeDateRange,
         prioritizeFullTime: true,
         maxHoursPerShift: 8,
-        onlyFillDeficits: false,
         operatingStartTime,
         operatingEndTime,
         staffingDemandConfig
       }
     );
-  }, [activeDateRange, activeAvailabilities, employees, staffingTargets, analysisHoursRange, shiftPresets, operatingStartTime, operatingEndTime, staffingDemandConfig]);
+  }, [activeDateRange, activeAvailabilities, employees, shiftPresets, operatingStartTime, operatingEndTime, staffingDemandConfig]);
 
   const ruleSchedules = useMemo(() => {
-    const simulatedRuleShifts: WorkSchedule[] = ruleResult.proposedSchedules.map((p, idx) => ({
+    return ruleResult.proposedSchedules.map((p, idx) => ({
       id: `sim-rule-${idx}`,
       title: p.employeeName,
       employeeName: p.employeeName,
@@ -205,12 +194,7 @@ export const ManagerComparisonView: React.FC<ManagerComparisonViewProps> = ({
       createdAt: Date.now(),
       scheduleSource: 'rule' as const
     }));
-
-    // If dateRangePart is part1 or part2, retain manual schedules for dates outside activeDateRange
-    const manualForOtherDates = manualMonthSchedules.filter(s => !activeDateRange.includes(s.date));
-
-    return [...manualForOtherDates, ...simulatedRuleShifts];
-  }, [manualMonthSchedules, ruleResult, activeDateRange]);
+  }, [ruleResult]);
 
   // 2. Trigger Gemini AI simulation in-memory
   const handleRunAiSimulation = async () => {
