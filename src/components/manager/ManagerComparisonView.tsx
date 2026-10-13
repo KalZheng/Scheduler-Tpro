@@ -196,7 +196,7 @@ export const ManagerComparisonView: React.FC<ManagerComparisonViewProps> = ({
       endTime: p.endTime,
       color: p.color,
       createdAt: Date.now(),
-      scheduleSource: 'rule'
+      scheduleSource: 'rule' as const
     }));
 
     const ruleDates = new Set(ruleResult.proposedSchedules.map(p => p.date));
@@ -283,7 +283,7 @@ export const ManagerComparisonView: React.FC<ManagerComparisonViewProps> = ({
           endTime: p.endTime,
           color: 'purple',
           createdAt: Date.now(),
-          scheduleSource: 'ai'
+          scheduleSource: 'ai' as const
         }));
 
         const p2 = await runAIScheduler({
@@ -329,7 +329,7 @@ export const ManagerComparisonView: React.FC<ManagerComparisonViewProps> = ({
       endTime: p.endTime,
       color: p.color || 'purple',
       createdAt: Date.now(),
-      scheduleSource: 'ai'
+      scheduleSource: 'ai' as const
     }));
 
     const aiDates = new Set(aiSchedules.map(s => s.date));
