@@ -1821,12 +1821,12 @@ export const subscribeToStaffingDemandConfig = (callback: (config: StaffingDeman
         callback({
           operatingStartTimeWeekend: data.operatingStartTimeWeekend || '06:30',
           operatingEndTimeWeekend: data.operatingEndTimeWeekend || '18:30',
-          openingStaffCount: data.openingStaffCount !== undefined ? data.openingStaffCount : 2,
-          closingStaffCount: data.closingStaffCount !== undefined ? data.closingStaffCount : 2,
+          openingStaffCount: data.openingStaffCount !== undefined ? data.openingStaffCount : 1,
+          closingStaffCount: data.closingStaffCount !== undefined ? data.closingStaffCount : 1,
           peakStartTime: data.peakStartTime || '11:30',
           peakEndTime: data.peakEndTime || '13:30',
-          weekdayMaxStaff: data.weekdayMaxStaff !== undefined ? data.weekdayMaxStaff : 3,
-          weekendMaxStaff: data.weekendMaxStaff !== undefined ? data.weekendMaxStaff : 4,
+          weekdayMaxStaff: data.weekdayMaxStaff !== undefined ? data.weekdayMaxStaff : 2,
+          weekendMaxStaff: data.weekendMaxStaff !== undefined ? data.weekendMaxStaff : 2,
         });
       } else {
         callback(DEFAULT_STAFFING_DEMAND_CONFIG);
@@ -1837,12 +1837,12 @@ export const subscribeToStaffingDemandConfig = (callback: (config: StaffingDeman
     callback({
       operatingStartTimeWeekend: inMemoryDb.operatingStartTimeWeekend || '06:30',
       operatingEndTimeWeekend: inMemoryDb.operatingEndTimeWeekend || '18:30',
-      openingStaffCount: inMemoryDb.openingStaffCount !== undefined ? inMemoryDb.openingStaffCount : 2,
-      closingStaffCount: inMemoryDb.closingStaffCount !== undefined ? inMemoryDb.closingStaffCount : 2,
+      openingStaffCount: inMemoryDb.openingStaffCount !== undefined ? inMemoryDb.openingStaffCount : 1,
+      closingStaffCount: inMemoryDb.closingStaffCount !== undefined ? inMemoryDb.closingStaffCount : 1,
       peakStartTime: inMemoryDb.peakStartTime || '11:30',
       peakEndTime: inMemoryDb.peakEndTime || '13:30',
-      weekdayMaxStaff: inMemoryDb.weekdayMaxStaff !== undefined ? inMemoryDb.weekdayMaxStaff : 3,
-      weekendMaxStaff: inMemoryDb.weekendMaxStaff !== undefined ? inMemoryDb.weekendMaxStaff : 4,
+      weekdayMaxStaff: inMemoryDb.weekdayMaxStaff !== undefined ? inMemoryDb.weekdayMaxStaff : 2,
+      weekendMaxStaff: inMemoryDb.weekendMaxStaff !== undefined ? inMemoryDb.weekendMaxStaff : 2,
     });
     return () => {
       localStaffingDemandListeners = localStaffingDemandListeners.filter(l => l !== callback);
@@ -1867,12 +1867,12 @@ export const updateStaffingDemandConfig = async (config: Partial<StaffingDemandC
     const currentConfig: StaffingDemandConfig = {
       operatingStartTimeWeekend: inMemoryDb.operatingStartTimeWeekend || '06:30',
       operatingEndTimeWeekend: inMemoryDb.operatingEndTimeWeekend || '18:30',
-      openingStaffCount: inMemoryDb.openingStaffCount !== undefined ? inMemoryDb.openingStaffCount : 2,
-      closingStaffCount: inMemoryDb.closingStaffCount !== undefined ? inMemoryDb.closingStaffCount : 2,
+      openingStaffCount: inMemoryDb.openingStaffCount !== undefined ? inMemoryDb.openingStaffCount : 1,
+      closingStaffCount: inMemoryDb.closingStaffCount !== undefined ? inMemoryDb.closingStaffCount : 1,
       peakStartTime: inMemoryDb.peakStartTime || '11:30',
       peakEndTime: inMemoryDb.peakEndTime || '13:30',
-      weekdayMaxStaff: inMemoryDb.weekdayMaxStaff !== undefined ? inMemoryDb.weekdayMaxStaff : 3,
-      weekendMaxStaff: inMemoryDb.weekendMaxStaff !== undefined ? inMemoryDb.weekendMaxStaff : 4,
+      weekdayMaxStaff: inMemoryDb.weekdayMaxStaff !== undefined ? inMemoryDb.weekdayMaxStaff : 2,
+      weekendMaxStaff: inMemoryDb.weekendMaxStaff !== undefined ? inMemoryDb.weekendMaxStaff : 2,
     };
     localStaffingDemandListeners.forEach(listener => listener(currentConfig));
     await saveDbForDate();
