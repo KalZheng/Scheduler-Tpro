@@ -11,7 +11,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "predeploy": "npm run build",
-    "deploy": "gh-pages -d dist"
+    "deploy": "gh-pages -d dist",
+    "deploy:production": "bash scripts/deploy-production.sh"
   },
   "dependencies": {
     "firebase": "^12.13.0",
