@@ -110,15 +110,6 @@ export const ManagerHeader: React.FC<ManagerHeaderProps> = ({
             排班分析圖表
           </button>
           <button
-            onClick={() => setManagerViewMode('calculation')}
-            className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${managerViewMode === 'calculation'
-              ? 'bg-[#795548] text-white shadow-sm'
-              : 'text-[#8D6E63] hover:text-[#3E2723]'
-              }`}
-          >
-            營業額計算
-          </button>
-          <button
             onClick={() => setManagerViewMode('system')}
             className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${managerViewMode === 'system'
               ? 'bg-[#795548] text-white shadow-sm'
