@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -e
 
+# Ensure git committer identity is present
+export GIT_COMMITTER_NAME="${GIT_COMMITTER_NAME:-Kal Zheng}"
+export GIT_COMMITTER_EMAIL="${GIT_COMMITTER_EMAIL:-kalsing456@gmail.com}"
+export GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-Kal Zheng}"
+export GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-kalsing456@gmail.com}"
+
 # Trap any unexpected error and print a clear recovery message
 trap 'handle_error $? $LINENO' ERR
 
