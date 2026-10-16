@@ -936,8 +936,10 @@ function App() {
     const allDates = Array.from(new Set([...existingDates, ...activeDates]));
 
     if (hasSevenConsecutiveDays(allDates)) {
-      alert('⚠️ 無法送出：登記後將出現連續 7 天或以上的工作天。\n\n根據勞工法規，員工每 7 天中至少需有 1 天例假日，不可連續工作超過 6 天。\n\n請重新調整您的可用日期。');
-      return;
+      const proceed = safeConfirm(
+        '⚠️ 注意：登記後將出現連續 7 天或以上的工作天。\n\n根據勞工法規，員工每 7 天中至少需有 1 天例假日，不可連續工作超過 6 天。\n\n確定仍要送出此可用時間嗎？'
+      );
+      if (!proceed) return;
     }
 
     try {
