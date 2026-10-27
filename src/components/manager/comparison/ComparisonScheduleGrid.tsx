@@ -3,7 +3,8 @@ import type { WorkSchedule, Employee, StaffingDemandConfig } from '../../../serv
 import {
   formatDateString,
   calculateDuration,
-  isOverEightHours
+  isOverEightHours,
+  getUnstaffedOperatingGaps
 } from '../../../utils/dateUtils';
 import { DAYS_OF_WEEK } from '../../../utils/constants';
 import type { ComparisonStats } from '../../../hooks/useComparisonSimulation';
@@ -389,6 +390,79 @@ export const ComparisonScheduleGrid: React.FC<ComparisonScheduleGridProps> = ({
                     })}
                     <td className="py-1.5 px-2 text-center font-mono text-[10px] text-[#8D6E63]">
                       目標:{staffingDemandConfig?.closingStaffCount ?? 1}
+                    </td>
+                  </tr>
+
+                  {/* Row 5: Unstaffed Operating Gaps (營業無人/空班時段) */}
+                  <tr className="bg-white border-t border-[#DAC0A3]/30 text-[11px]">
+                    <td className="py-1.5 px-3 font-bold text-rose-800 border-r border-[#DAC0A3]/40 sticky left-0 z-10 bg-white shadow-xs">
+                      <div className="flex flex-col">
+                        <span>營業無人時段 (空班)</span>
+                        <span className="text-[9px] text-[#8D6E63] font-normal leading-tight">無人在班時間</span>
+                      </div>
+                    </td>
+                    {displayedDaysInMonth.map(dateObj => {
+                      const dateStr = formatDateString(dateObj);
+                      const isWeekend = dateObj.getDay() === 0 || dateObj.getDay() === 6;
+                      const dayOpenStart = isWeekend
+                        ? (staffingDemandConfig?.operatingStartTimeWeekend || '06:30')
+                        : (operatingStartTime || '06:30');
+                      const dayCloseEnd = isWeekend
+                        ? (staffingDemandConfig?.operatingEndTimeWeekend || '18:30')
+                        : (operatingEndTime || '20:00');
+
+                      const daySchedules = scheduleList ? scheduleList.filter(s => s.date === dateStr) : [];
+                      const gaps = getUnstaffedOperatingGaps(dateStr, daySchedules, dayOpenStart, dayCloseEnd);
+                      const hasGaps = gaps.length > 0;
+
+                      return (
+                        <td
+                          key={dateStr}
+                          className={`py-1 px-0.5 text-center border-r border-[#DAC0A3]/30 align-middle ${
+                            hasGaps ? 'bg-rose-50/80' : 'bg-emerald-50/30'
+                          }`}
+                        >
+                          {hasGaps ? (
+                            <div className="flex flex-col gap-0.5 items-center justify-center">
+                              {gaps.map((gap, gIdx) => (
+                                <span
+                                  key={gIdx}
+                                  className="px-1 py-0.2 rounded bg-rose-100 text-rose-800 border border-rose-300 font-mono text-[9px] font-bold leading-tight"
+                                  title={`${dateStr} 營業時間無人在班：${gap}`}
+                                >
+                                  {gap === '全日無人' ? '全日空班' : gap}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-emerald-700 font-bold text-[10px]" title="營業時間全時段有人在班">✓ 全覆蓋</span>
+                          )}
+                        </td>
+                      );
+                    })}
+                    <td className="py-1.5 px-2 text-center font-mono font-bold text-[10px]">
+                      {(() => {
+                        let unstaffedDaysCount = 0;
+                        displayedDaysInMonth.forEach(dateObj => {
+                          const dateStr = formatDateString(dateObj);
+                          const isWeekend = dateObj.getDay() === 0 || dateObj.getDay() === 6;
+                          const dayOpenStart = isWeekend
+                            ? (staffingDemandConfig?.operatingStartTimeWeekend || '06:30')
+                            : (operatingStartTime || '06:30');
+                          const dayCloseEnd = isWeekend
+                            ? (staffingDemandConfig?.operatingEndTimeWeekend || '18:30')
+                            : (operatingEndTime || '20:00');
+                          const daySchedules = scheduleList ? scheduleList.filter(s => s.date === dateStr) : [];
+                          if (getUnstaffedOperatingGaps(dateStr, daySchedules, dayOpenStart, dayCloseEnd).length > 0) {
+                            unstaffedDaysCount++;
+                          }
+                        });
+                        return unstaffedDaysCount > 0 ? (
+                          <span className="text-rose-700 font-extrabold">{unstaffedDaysCount} 天空班</span>
+                        ) : (
+                          <span className="text-emerald-700 font-bold">✓ 0 缺口</span>
+                        );
+                      })()}
                     </td>
                   </tr>
                 </tfoot>
