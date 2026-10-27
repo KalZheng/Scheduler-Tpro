@@ -673,16 +673,61 @@ export const exportComparisonToExcel = async ({
       { v: '出勤人數 (人)', t: 's', s: { fill: { fgColor: { rgb: 'FAF7F2' } }, font: { bold: true, sz: 10, color: { rgb: '5D4037' } }, border: borderStyle, alignment: { vertical: 'center' } } },
       { v: '', t: 's', s: { fill: { fgColor: { rgb: 'FAF7F2' } }, border: borderStyle } }
     ];
+    let totalHeadcountSum = 0;
     displayedDaysInMonth.forEach(dateObj => {
       const dateStr = formatDateString(dateObj);
       const count = activeEmployees.filter(emp => {
         const lookupKey = `${emp.name.trim().toLowerCase()}_${dateStr}`;
         return (scheduleLookup[lookupKey] || []).length > 0;
       }).length;
+      totalHeadcountSum += count;
       headcountRow.push({ v: count, t: 'n', s: { fill: { fgColor: { rgb: 'FAF7F2' } }, font: { bold: true, sz: 10, color: { rgb: '3E2723' } }, border: borderStyle, alignment: { horizontal: 'center', vertical: 'center' } } });
     });
-    headcountRow.push({ v: '', t: 's', s: { fill: { fgColor: { rgb: 'FAF7F2' } }, border: borderStyle } });
+    headcountRow.push({ v: totalHeadcountSum, t: 'n', s: { fill: { fgColor: { rgb: 'FAF7F2' } }, font: { bold: true, sz: 10, color: { rgb: '3E2723' } }, border: borderStyle, alignment: { horizontal: 'center', vertical: 'center' } } });
     combinedRows.push(headcountRow);
+
+    // 當日總工時 (h)
+    const dailyHoursRow: any[] = [
+      { v: '當日總工時 (h)', t: 's', s: { fill: { fgColor: { rgb: 'FAF7F2' } }, font: { bold: true, sz: 10, color: { rgb: '5D4037' } }, border: borderStyle, alignment: { vertical: 'center' } } },
+      { v: '', t: 's', s: { fill: { fgColor: { rgb: 'FAF7F2' } }, border: borderStyle } }
+    ];
+    let totalPeriodHours = 0;
+    displayedDaysInMonth.forEach(dateObj => {
+      const dateStr = formatDateString(dateObj);
+      let dayHours = 0;
+      activeEmployees.forEach(emp => {
+        const lookupKey = `${emp.name.trim().toLowerCase()}_${dateStr}`;
+        const shifts = scheduleLookup[lookupKey] || [];
+        shifts.forEach(s => {
+          if (s.startTime && s.endTime) {
+            dayHours += calculateDuration(s.startTime, s.endTime);
+          }
+        });
+      });
+      const roundedDayHours = Math.round(dayHours * 10) / 10;
+      totalPeriodHours += roundedDayHours;
+      dailyHoursRow.push({
+        v: roundedDayHours,
+        t: 'n',
+        s: {
+          fill: { fgColor: { rgb: 'FAF7F2' } },
+          font: { bold: true, sz: 10, color: { rgb: '795548' } },
+          border: borderStyle,
+          alignment: { horizontal: 'center', vertical: 'center' }
+        }
+      });
+    });
+    dailyHoursRow.push({
+      v: Math.round(totalPeriodHours * 10) / 10,
+      t: 'n',
+      s: {
+        fill: { fgColor: { rgb: 'FAF7F2' } },
+        font: { bold: true, sz: 10, color: { rgb: '795548' } },
+        border: borderStyle,
+        alignment: { horizontal: 'center', vertical: 'center' }
+      }
+    });
+    combinedRows.push(dailyHoursRow);
 
     // 開早人數 (前30分)
     const openTarget = staffingDemandConfig?.openingStaffCount ?? 1;
