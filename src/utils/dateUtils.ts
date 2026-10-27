@@ -102,9 +102,27 @@ export const calculateDuration = (start: string, end: string): number => {
   return (endMinutes - startMinutes) / 60;
 };
 
-export const isOverEightHours = (start: string, end: string): boolean => {
+/**
+ * Calculate net work hours excluding mandatory breaks (扣除休息時間後的實質工時)
+ * Rules:
+ * 1. If raw duration >= 8.5 hours (e.g. 9 hours span for full 8h work): break is 1.0 hour -> net = raw - 1.0 (9h -> 8h)
+ * 2. If raw duration >= 4.0 hours and < 8.5 hours (e.g. 4.5 hours span for 4h work, or 4~8h): break is 0.5 hour (30 mins) -> net = raw - 0.5 (4.5h -> 4h)
+ * 3. If raw duration < 4.0 hours: no mandatory break -> net = raw
+ */
+export const calculateEffectiveWorkHours = (start: string, end: string): number => {
   const raw = calculateDuration(start, end);
-  const effective = raw - 1; // deduct mandatory 1-hour break
+  if (raw <= 0) return 0;
+  if (raw >= 8.5) {
+    return Math.max(0, raw - 1.0);
+  }
+  if (raw >= 4.0) {
+    return Math.max(0, raw - 0.5);
+  }
+  return raw;
+};
+
+export const isOverEightHours = (start: string, end: string): boolean => {
+  const effective = calculateEffectiveWorkHours(start, end);
   return effective > 8;
 };
 
@@ -140,7 +158,12 @@ export const getColorFromName = (name: string): string => {
   return colors[index];
 };
 
-export const isShiftActiveAtHour = (startTime: string, endTime: string, hourIndex: number): boolean => {
+export const isShiftActiveAtHour = (
+  startTime: string,
+  endTime: string,
+  hourIndex: number,
+  startMinuteOffset: number = 30
+): boolean => {
   if (!startTime || !endTime) return false;
   const [sh, sm] = startTime.split(':').map(Number);
   const [eh, em] = endTime.split(':').map(Number);
@@ -150,8 +173,11 @@ export const isShiftActiveAtHour = (startTime: string, endTime: string, hourInde
   let end = eh + em / 60;
   if (end < start) end += 24;
 
-  // Calculate overlap length in hours between [start, end] and [hourIndex, hourIndex + 1]
-  const overlap = Math.max(0, Math.min(end, hourIndex + 1) - Math.max(start, hourIndex));
+  const slotStart = hourIndex + startMinuteOffset / 60;
+  const slotEnd = slotStart + 1.0;
+
+  // Calculate overlap length in hours between [start, end] and [slotStart, slotEnd]
+  const overlap = Math.max(0, Math.min(end, slotEnd) - Math.max(start, slotStart));
   return overlap >= 0.49; // at least 30 minutes active in this hour slot
 };
 

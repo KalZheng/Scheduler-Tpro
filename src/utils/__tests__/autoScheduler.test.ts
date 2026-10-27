@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { generatePureAutoSchedule, generateAutoSchedule } from '../autoScheduler';
+import { calculateEffectiveWorkHours, isShiftActiveAtHour } from '../dateUtils';
 import type { Employee, WorkerAvailability, WorkSchedule } from '../../services/scheduler';
 
 describe('autoScheduler', () => {
@@ -76,15 +77,15 @@ describe('autoScheduler', () => {
       expect(shift.startTime).toBe('06:30');
     });
 
-    it('ensures all assigned shift durations are full integer hours', () => {
+    it('schedules 9-hour span for 8-hour work shift (including 1-hour break)', () => {
       const availabilities: WorkerAvailability[] = [
         {
           id: 'avail-1',
-          employeeName: '李夥伴',
+          employeeName: '張店長',
           date: '2026-10-01',
           workplace: '濟南店',
           startTime: '06:30',
-          endTime: '15:00', // 8.5 hours
+          endTime: '16:00', // >= 9 hours available
           createdAt: 1000
         }
       ];
@@ -101,12 +102,45 @@ describe('autoScheduler', () => {
         }
       );
 
-      result.proposedSchedules.forEach(schedule => {
-        const [sh, sm] = schedule.startTime.split(':').map(Number);
-        const [eh, em] = schedule.endTime.split(':').map(Number);
-        const durationMinutes = (eh * 60 + em) - (sh * 60 + sm);
-        expect(durationMinutes % 60).toBe(0); // Must be full integer hours
-      });
+      expect(result.proposedSchedules.length).toBeGreaterThanOrEqual(1);
+      const shift = result.proposedSchedules[0];
+      const [sh, sm] = shift.startTime.split(':').map(Number);
+      const [eh, em] = shift.endTime.split(':').map(Number);
+      const durationHours = ((eh * 60 + em) - (sh * 60 + sm)) / 60;
+      expect(durationHours).toBe(9); // 9 hours span = 8h work + 1h break
+    });
+
+    it('schedules 4.5-hour span for 4-hour work shift (including 30-min break)', () => {
+      const availabilities: WorkerAvailability[] = [
+        {
+          id: 'avail-pt',
+          employeeName: '李夥伴',
+          date: '2026-10-01',
+          workplace: '濟南店',
+          startTime: '08:30',
+          endTime: '13:00', // 4.5 hours available
+          createdAt: 1000
+        }
+      ];
+
+      const result = generatePureAutoSchedule(
+        availabilities,
+        mockEmployees,
+        [],
+        {
+          dateRange: ['2026-10-01'],
+          operatingStartTime: '06:30',
+          operatingEndTime: '18:00',
+          staffingDemandConfig: defaultDemandConfig
+        }
+      );
+
+      expect(result.proposedSchedules.length).toBeGreaterThanOrEqual(1);
+      const shift = result.proposedSchedules[0];
+      const [sh, sm] = shift.startTime.split(':').map(Number);
+      const [eh, em] = shift.endTime.split(':').map(Number);
+      const durationHours = ((eh * 60 + em) - (sh * 60 + sm)) / 60;
+      expect(durationHours).toBe(4.5); // 4.5 hours span = 4h work + 30m break
     });
 
     it('prevents scheduling 7 consecutive work days for an employee', () => {
@@ -197,6 +231,29 @@ describe('autoScheduler', () => {
 
       expect(result.proposedSchedules.length).toBeGreaterThanOrEqual(1);
       expect(result.proposedSchedules[0].employeeName).toBe('王夥伴');
+    });
+  });
+
+  describe('break rules and effective work hours (Rule 4 & Point 5)', () => {
+    it('deducts 1 hour break for 9-hour span -> 8 hours work', () => {
+      expect(calculateEffectiveWorkHours('06:30', '15:30')).toBe(8);
+      expect(calculateEffectiveWorkHours('08:00', '17:00')).toBe(8);
+    });
+
+    it('deducts 30 mins break for 4.5-hour span -> 4 hours work', () => {
+      expect(calculateEffectiveWorkHours('08:30', '13:00')).toBe(4);
+    });
+
+    it('deducts 30 mins break for intermediate shifts between 4h and 8.5h', () => {
+      expect(calculateEffectiveWorkHours('08:30', '15:30')).toBe(6.5); // 7h - 0.5h
+      expect(calculateEffectiveWorkHours('08:30', '12:30')).toBe(3.5); // 4h - 0.5h
+    });
+
+    it('correctly evaluates 08:30-12:30 shift: active in 11:30-12:30, NOT active in 12:30-13:30', () => {
+      // hour 11 corresponds to slot 11:30 - 12:30
+      expect(isShiftActiveAtHour('08:30', '12:30', 11)).toBe(true);
+      // hour 12 corresponds to slot 12:30 - 13:30 (張以恩 is off work, overlap is 0)
+      expect(isShiftActiveAtHour('08:30', '12:30', 12)).toBe(false);
     });
   });
 });
