@@ -2,7 +2,7 @@ import * as XLSX from 'xlsx-js-style';
 import JSZip from 'jszip';
 import type { WorkSchedule, WorkerAvailability, Employee, StaffingDemandConfig } from '../services/scheduler';
 import { DAYS_OF_WEEK, ALL_POSITIONS } from './constants';
-import { formatDateString, getDatesInRange, calculateDuration, getCleanNote, getManagerNote, compareTimeStrings, timeToMinutes } from './dateUtils';
+import { formatDateString, getDatesInRange, calculateDuration, getCleanNote, getManagerNote, compareTimeStrings, timeToMinutes, getUnstaffedOperatingGaps } from './dateUtils';
 
 interface GenerateExcelParams {
   exportStartDate: string;
@@ -778,6 +778,54 @@ export const exportComparisonToExcel = async ({
     });
     closingRow.push({ v: '', t: 's', s: { border: borderStyle } });
     combinedRows.push(closingRow);
+
+    // 營業無人時段 (空班)
+    const gapRow: any[] = [
+      { v: '營業無人時段', t: 's', s: { font: { bold: true, sz: 9, color: { rgb: 'C2185B' } }, border: borderStyle, alignment: { vertical: 'center' } } },
+      { v: '空班時段', t: 's', s: { font: { sz: 8, color: { rgb: '8D6E63' } }, border: borderStyle, alignment: { horizontal: 'center', vertical: 'center' } } }
+    ];
+    let totalUnstaffedDays = 0;
+    displayedDaysInMonth.forEach(dateObj => {
+      const dateStr = formatDateString(dateObj);
+      const isWeekend = dateObj.getDay() === 0 || dateObj.getDay() === 6;
+      const dayOpenStart = isWeekend ? (staffingDemandConfig?.operatingStartTimeWeekend || '06:30') : (operatingStartTime || '06:30');
+      const dayCloseEnd = isWeekend ? (staffingDemandConfig?.operatingEndTimeWeekend || '18:30') : (operatingEndTime || '20:00');
+      const daySchedules = scheduleList ? scheduleList.filter(s => s.date === dateStr) : [];
+      const gaps = getUnstaffedOperatingGaps(dateStr, daySchedules, dayOpenStart, dayCloseEnd);
+      if (gaps.length > 0) {
+        totalUnstaffedDays++;
+        gapRow.push({
+          v: gaps.map(g => g === '全日無人' ? '全日空班' : g).join('\n'),
+          t: 's',
+          s: {
+            fill: { fgColor: { rgb: 'FFEBEE' } },
+            font: { bold: true, sz: 8, color: { rgb: 'C2185B' } },
+            border: borderStyle,
+            alignment: { horizontal: 'center', vertical: 'center', wrapText: true }
+          }
+        });
+      } else {
+        gapRow.push({
+          v: '✓ 全覆蓋',
+          t: 's',
+          s: {
+            font: { bold: true, sz: 8, color: { rgb: '1B5E20' } },
+            border: borderStyle,
+            alignment: { horizontal: 'center', vertical: 'center' }
+          }
+        });
+      }
+    });
+    gapRow.push({
+      v: totalUnstaffedDays > 0 ? `${totalUnstaffedDays}天空班` : '0缺口',
+      t: 's',
+      s: {
+        font: { bold: true, sz: 9, color: { rgb: totalUnstaffedDays > 0 ? 'C2185B' : '1B5E20' } },
+        border: borderStyle,
+        alignment: { horizontal: 'center', vertical: 'center' }
+      }
+    });
+    combinedRows.push(gapRow);
   };
 
   // 1. Table 1: 手動現有排班表 (現行門市資料庫實績)
