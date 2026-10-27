@@ -3,6 +3,7 @@ import type { WorkSchedule, Employee, StaffingDemandConfig } from '../../../serv
 import {
   formatDateString,
   calculateDuration,
+  calculateEffectiveWorkHours,
   isOverEightHours,
   getUnstaffedOperatingGaps
 } from '../../../utils/dateUtils';
@@ -203,14 +204,15 @@ export const ComparisonScheduleGrid: React.FC<ComparisonScheduleGridProps> = ({
                           if (shifts.length > 0) {
                             shifts.forEach(s => {
                               if (s.startTime && s.endTime) {
-                                empTotalHours += calculateDuration(s.startTime, s.endTime);
+                                empTotalHours += calculateEffectiveWorkHours(s.startTime, s.endTime);
                               }
                             });
 
                             cellContent = (
                               <div className="flex flex-col gap-1 items-center justify-center">
                                 {shifts.map((s, idx) => {
-                                  const dur = s.startTime && s.endTime ? calculateDuration(s.startTime, s.endTime) : 0;
+                                  const netDur = s.startTime && s.endTime ? calculateEffectiveWorkHours(s.startTime, s.endTime) : 0;
+                                  const rawDur = s.startTime && s.endTime ? calculateDuration(s.startTime, s.endTime) : 0;
                                   const isOvertime = s.startTime && s.endTime && isOverEightHours(s.startTime, s.endTime);
 
                                   return (
@@ -219,7 +221,7 @@ export const ComparisonScheduleGrid: React.FC<ComparisonScheduleGridProps> = ({
                                       className={`px-1.5 py-0.5 rounded border text-[10px] font-mono font-bold leading-tight shadow-2xs whitespace-nowrap ${themeClasses.cellBg} ${
                                         isOvertime ? 'ring-1 ring-rose-500' : ''
                                       }`}
-                                      title={`${emp.name} (${dateStr})\n班次: ${s.startTime}-${s.endTime} (${dur}h)`}
+                                      title={`${emp.name} (${dateStr})\n班次: ${s.startTime}-${s.endTime}\n實質工時: ${netDur}h (排定${rawDur}h, 休息${Math.round((rawDur - netDur) * 10) / 10}h)`}
                                     >
                                       <div>{s.startTime}-{s.endTime}</div>
                                     </div>
@@ -296,7 +298,7 @@ export const ComparisonScheduleGrid: React.FC<ComparisonScheduleGridProps> = ({
                         const shifts = scheduleLookup[lookupKey] || [];
                         shifts.forEach(s => {
                           if (s.startTime && s.endTime) {
-                            dayHours += calculateDuration(s.startTime, s.endTime);
+                            dayHours += calculateEffectiveWorkHours(s.startTime, s.endTime);
                           }
                         });
                       });
@@ -317,7 +319,7 @@ export const ComparisonScheduleGrid: React.FC<ComparisonScheduleGridProps> = ({
                             const shifts = scheduleLookup[lookupKey] || [];
                             shifts.forEach(s => {
                               if (s.startTime && s.endTime) {
-                                totalPeriodHours += calculateDuration(s.startTime, s.endTime);
+                                totalPeriodHours += calculateEffectiveWorkHours(s.startTime, s.endTime);
                               }
                             });
                           });

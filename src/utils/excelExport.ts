@@ -2,7 +2,7 @@ import * as XLSX from 'xlsx-js-style';
 import JSZip from 'jszip';
 import type { WorkSchedule, WorkerAvailability, Employee, StaffingDemandConfig } from '../services/scheduler';
 import { DAYS_OF_WEEK, ALL_POSITIONS } from './constants';
-import { formatDateString, getDatesInRange, calculateDuration, getCleanNote, getManagerNote, compareTimeStrings, timeToMinutes, getUnstaffedOperatingGaps } from './dateUtils';
+import { formatDateString, getDatesInRange, calculateDuration, calculateEffectiveWorkHours, getCleanNote, getManagerNote, compareTimeStrings, timeToMinutes, getUnstaffedOperatingGaps } from './dateUtils';
 
 interface GenerateExcelParams {
   exportStartDate: string;
@@ -634,7 +634,7 @@ export const exportComparisonToExcel = async ({
         if (shifts.length > 0) {
           const shiftText = shifts.map(s => {
             if (s.startTime && s.endTime) {
-              empHours += calculateDuration(s.startTime, s.endTime);
+              empHours += calculateEffectiveWorkHours(s.startTime, s.endTime);
             }
             return `${s.startTime}-${s.endTime}`;
           }).join('\n');
@@ -700,7 +700,7 @@ export const exportComparisonToExcel = async ({
         const shifts = scheduleLookup[lookupKey] || [];
         shifts.forEach(s => {
           if (s.startTime && s.endTime) {
-            dayHours += calculateDuration(s.startTime, s.endTime);
+            dayHours += calculateEffectiveWorkHours(s.startTime, s.endTime);
           }
         });
       });
