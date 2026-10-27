@@ -1,44 +1,25 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
-  subscribeToSchedules,
   addSchedule,
   updateSchedule,
   deleteSchedule,
-  subscribeToAvailabilities,
   addAvailability,
   deleteAvailability,
-  subscribeToStaffingTargets,
   updateStaffingTarget,
   syncActiveMonth,
-  subscribeToEmployees,
   addEmployee,
   updateEmployee,
   deleteEmployee,
   updateDayNote,
-  subscribeToDeadlineDay,
-  subscribeToStartDay,
-  subscribeToOperatingStartTime,
-  subscribeToOperatingEndTime,
-  subscribeToShiftMorningStart,
-  subscribeToShiftMorningEnd,
-  subscribeToShiftPresets,
-  subscribeToEmployeeOrder,
   updateEmployeeOrder,
   updateAvailability,
-  subscribeToMonthlyRevenues,
   updateMonthlyRevenues,
-  subscribeToRevenueStaffRules,
-  subscribeToMarkedEmptyCells,
-  updateMarkedEmptyCells,
-  subscribeToErpDays,
-  subscribeToPtAvailMode,
-  subscribeToFilenamePrefix,
-  subscribeToAllowMonthSwitch,
-  subscribeToStaffingDemandConfig,
-  DEFAULT_STAFFING_DEMAND_CONFIG
+  updateMarkedEmptyCells
 } from './services/scheduler';
-import type { PtAvailMode, StaffingDemandConfig } from './services/scheduler';
-import type { WorkSchedule, WorkerAvailability, StaffingTarget, Employee, ShiftPreset, RevenueStaffRules } from './services/scheduler';
+import type { WorkSchedule, WorkerAvailability, Employee } from './services/scheduler';
+import { useAuthRouting } from './hooks/useAuthRouting';
+import { useScheduleData } from './hooks/useScheduleData';
+import { useStaffingRules } from './hooks/useStaffingRules';
 import { isValidConfig } from './firebase';
 import workplaces from './config/workplaces.json';
 
@@ -95,204 +76,56 @@ export interface WorkerAvailConfig {
 }
 
 function App() {
-  const [schedules, setSchedules] = useState<WorkSchedule[]>([]);
-  const [availabilities, setAvailabilities] = useState<WorkerAvailability[]>([]);
-  const [staffingTargets, setStaffingTargets] = useState<StaffingTarget[]>([]);
+  // 1. Role routing & manager authentication
+  const {
+    activeRole,
+    isAuthenticated,
+    managerRole,
+    passcodeInput,
+    setPasscodeInput,
+    loginError,
+    navigateToRole,
+    handleLogin,
+    handleLogout
+  } = useAuthRouting();
 
-  // Role selection state: worker or manager
-  const [activeRole, setActiveRole] = useState<'worker' | 'manager'>('worker');
-
-  // Manager authentication state
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => sessionStorage.getItem('manager_auth') === 'true');
-  const [managerRole, setManagerRole] = useState<'manager' | 'admin'>(() => (sessionStorage.getItem('manager_role') as 'manager' | 'admin') || 'manager');
-  const [passcodeInput, setPasscodeInput] = useState('');
-  const [loginError, setLoginError] = useState('');
-
-  // Helper for uniform SPA paths (/manager, /worker)
-  const getAppPath = (subPath: 'manager' | 'worker') => {
-    const base = import.meta.env.BASE_URL || '/';
-    const cleanBase = base.endsWith('/') ? base.slice(0, -1) : base;
-    return `${cleanBase}/${subPath}`;
-  };
-
-  const navigateToRole = (role: 'manager' | 'worker') => {
-    const targetPath = getAppPath(role);
-    window.history.pushState(null, '', targetPath);
-    window.dispatchEvent(new PopStateEvent('popstate'));
-  };
-
-  // Path, Hash & Query-based routing with automatic URL normalization & ?i=1 cleanup
-  useEffect(() => {
-    const handleRouteChange = () => {
-      const hash = window.location.hash;
-      const pathname = window.location.pathname;
-      const searchParams = new URLSearchParams(window.location.search);
-      const hasSecurityParam = searchParams.has('i'); // InfinityFree ?i=1 challenge param
-
-      const isManager =
-        hash.includes('manager') ||
-        pathname.endsWith('/manager') ||
-        pathname.endsWith('/manager/') ||
-        searchParams.get('role') === 'manager';
-
-      const isWorker =
-        hash.includes('worker') ||
-        pathname.endsWith('/worker') ||
-        pathname.endsWith('/worker/') ||
-        searchParams.get('role') === 'worker';
-
-      const savedRole = sessionStorage.getItem('last_role');
-      const isAuth = sessionStorage.getItem('manager_auth') === 'true';
-
-      if (isManager || (hasSecurityParam && savedRole === 'manager')) {
-        setActiveRole('manager');
-        sessionStorage.setItem('last_role', 'manager');
-        const targetPath = getAppPath('manager');
-        if (window.location.pathname !== targetPath || window.location.hash || hasSecurityParam || searchParams.has('role')) {
-          window.history.replaceState(null, '', targetPath);
-        }
-      } else if (isWorker) {
-        setActiveRole('worker');
-        sessionStorage.setItem('last_role', 'worker');
-        const targetPath = getAppPath('worker');
-        if (window.location.pathname !== targetPath || window.location.hash || hasSecurityParam || searchParams.has('role')) {
-          window.history.replaceState(null, '', targetPath);
-        }
-      } else {
-        // Fallback: If authenticated as manager or remembered from session
-        if (savedRole === 'manager' || (isAuth && !hash && !isWorker)) {
-          setActiveRole('manager');
-          const targetPath = getAppPath('manager');
-          if (window.location.pathname !== targetPath || window.location.hash || hasSecurityParam) {
-            window.history.replaceState(null, '', targetPath);
-          }
-        } else {
-          setActiveRole('worker');
-          if (hasSecurityParam || (hash && hash !== '#/worker')) {
-            const targetPath = getAppPath('worker');
-            window.history.replaceState(null, '', targetPath);
-          }
-        }
-      }
-    };
-
-    handleRouteChange();
-    window.addEventListener('hashchange', handleRouteChange);
-    window.addEventListener('popstate', handleRouteChange);
-    return () => {
-      window.removeEventListener('hashchange', handleRouteChange);
-      window.removeEventListener('popstate', handleRouteChange);
-    };
-  }, []);
-
-  // Handle Login authentication
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    const MANAGER_PASSCODE = 'coffee888';
-    const ADMIN_PASSCODE = 'admincoffee888';
-    if (passcodeInput === ADMIN_PASSCODE) {
-      setIsAuthenticated(true);
-      setManagerRole('admin');
-      sessionStorage.setItem('manager_auth', 'true');
-      sessionStorage.setItem('manager_role', 'admin');
-      setLoginError('');
-      setPasscodeInput('');
-    } else if (passcodeInput === MANAGER_PASSCODE) {
-      setIsAuthenticated(true);
-      setManagerRole('manager');
-      sessionStorage.setItem('manager_auth', 'true');
-      sessionStorage.setItem('manager_role', 'manager');
-      setLoginError('');
-      setPasscodeInput('');
-    } else {
-      setLoginError('密碼不正確，請重新輸入 ☕');
-    }
-  };
-
-  // Handle Logout
-  const handleLogout = () => {
-    setIsAuthenticated(false);
-    setManagerRole('manager');
-    sessionStorage.removeItem('manager_auth');
-    sessionStorage.removeItem('manager_role');
-    setPasscodeInput('');
-    navigateToRole('worker');
-  };
+  // 2. Schedule, employee, and configuration data
+  const {
+    schedules,
+    availabilities,
+    staffingTargets,
+    employees,
+    deadlineDay,
+    setDeadlineDay,
+    startDay,
+    setStartDay,
+    allowMonthSwitch,
+    setAllowMonthSwitch,
+    operatingStartTime,
+    setOperatingStartTime,
+    operatingEndTime,
+    setOperatingEndTime,
+    shiftPresets,
+    setShiftPresets,
+    employeeOrder,
+    setEmployeeOrder,
+    erpDays,
+    setErpDays,
+    ptAvailMode,
+    setPtAvailMode,
+    filenamePrefix,
+    setFilenamePrefix,
+    staffingDemandConfig,
+    setStaffingDemandConfig,
+    markedEmptyCells,
+    defaultShiftStart,
+    defaultShiftEnd,
+    timeSlots,
+    analysisHoursRange
+  } = useScheduleData();
 
   // Manager view sub-mode
   const [managerViewMode, setManagerViewMode] = useState<'calendar' | 'grid' | 'employees' | 'calculation' | 'system' | 'analysis' | 'comparison'>('calendar');
-  const [deadlineDay, setDeadlineDay] = useState<number>(20);
-  const [startDay, setStartDay] = useState<number>(15);
-  const [allowMonthSwitch, setAllowMonthSwitch] = useState<boolean>(false);
-  const [operatingStartTime, setOperatingStartTime] = useState<string>('06:30');
-  const [operatingEndTime, setOperatingEndTime] = useState<string>('20:00');
-  const [shiftMorningStart, setShiftMorningStart] = useState<string>('06:30');
-  const [shiftMorningEnd, setShiftMorningEnd] = useState<string>('15:30');
-  const [shiftPresets, setShiftPresets] = useState<ShiftPreset[]>([]);
-  const [employeeOrder, setEmployeeOrder] = useState<string[]>([]);
-  const [erpDays, setErpDays] = useState<number[]>([1, 3, 5]);
-  const [ptAvailMode, setPtAvailMode] = useState<PtAvailMode>('static');
-  const [filenamePrefix, setFilenamePrefix] = useState<string>('');
-  const [staffingDemandConfig, setStaffingDemandConfig] = useState<StaffingDemandConfig>(DEFAULT_STAFFING_DEMAND_CONFIG);
-
-  const defaultShiftStart = useMemo(() => {
-    if (shiftPresets && shiftPresets.length > 0) {
-      return shiftPresets[0].startTime;
-    }
-    return shiftMorningStart || '06:30';
-  }, [shiftPresets, shiftMorningStart]);
-
-  const defaultShiftEnd = useMemo(() => {
-    if (shiftPresets && shiftPresets.length > 0) {
-      return shiftPresets[0].endTime;
-    }
-    return shiftMorningEnd || '15:30';
-  }, [shiftPresets, shiftMorningEnd]);
-
-
-  const timeSlots = useMemo(() => {
-    if (!operatingStartTime || !operatingEndTime) return [];
-    const [startH, startM] = operatingStartTime.split(':').map(Number);
-    const [endH, endM] = operatingEndTime.split(':').map(Number);
-    if (isNaN(startH) || isNaN(startM) || isNaN(endH) || isNaN(endM)) return [];
-
-    const startMinutes = startH * 60 + startM;
-    let endMinutes = endH * 60 + endM;
-
-    if (endMinutes < startMinutes) {
-      endMinutes += 24 * 60;
-    }
-
-    const slots: string[] = [];
-    for (let min = startMinutes; min <= endMinutes; min += 30) {
-      const adjustedMin = min % (24 * 60);
-      const h = Math.floor(adjustedMin / 60).toString().padStart(2, '0');
-      const m = (adjustedMin % 60).toString().padStart(2, '0');
-      slots.push(`${h}:${m}`);
-    }
-    return slots;
-  }, [operatingStartTime, operatingEndTime]);
-
-  const analysisHoursRange = useMemo(() => {
-    if (!operatingStartTime || !operatingEndTime) return Array.from({ length: 14 }, (_, i) => i + 6);
-    const [startH] = operatingStartTime.split(':').map(Number);
-    const [endH, endM] = operatingEndTime.split(':').map(Number);
-
-    const start = startH;
-    let end = endM > 0 ? endH : endH - 1;
-
-    if (isNaN(start) || isNaN(end)) return Array.from({ length: 14 }, (_, i) => i + 6);
-
-    if (end < start) {
-      end += 24;
-    }
-
-    const list: number[] = [];
-    for (let h = start; h <= end; h++) {
-      list.push(h % 24);
-    }
-    return list;
-  }, [operatingStartTime, operatingEndTime]);
 
   const gridContainerRef = useRef<HTMLDivElement>(null);
   const [isScrolled, setIsScrolled] = useState(false);
@@ -327,46 +160,17 @@ function App() {
     };
   }, [managerViewMode, activeRole, isAuthenticated]);
 
-  const [monthlyRevenues, setMonthlyRevenues] = useState<Record<number, number>>({});
-  const [revenueStaffRules, setRevenueStaffRules] = useState<RevenueStaffRules>({
-    tier1Limit: 1500,
-    tier2Limit: 2500,
-    tier3Limit: 3500,
-    tier1Staff: 2,
-    tier2Staff: 3,
-    tier3Staff: 4,
-    tier4Staff: 5,
-    incrementAmount: 1000,
-    maxStaff: 8
-  });
-  const [tempRules, setTempRules] = useState<RevenueStaffRules>({
-    tier1Limit: 1500,
-    tier2Limit: 2500,
-    tier3Limit: 3500,
-    tier1Staff: 2,
-    tier2Staff: 3,
-    tier3Staff: 4,
-    tier4Staff: 5,
-    incrementAmount: 1000,
-    maxStaff: 8
-  });
-
-  const getRecommendedStaff = (dailyAvg: number, rules: RevenueStaffRules) => {
-    const { tier1Limit, tier2Limit, tier3Limit, tier1Staff, tier2Staff, tier3Staff, tier4Staff, incrementAmount, maxStaff } = rules;
-    if (dailyAvg <= tier1Limit) {
-      return tier1Staff;
-    } else if (dailyAvg <= tier2Limit) {
-      return tier2Staff;
-    } else if (dailyAvg <= tier3Limit) {
-      return tier3Staff;
-    } else {
-      const extraAmount = dailyAvg - tier3Limit;
-      const extraStaff = Math.floor(extraAmount / incrementAmount);
-      return Math.min(maxStaff, tier4Staff + extraStaff);
-    }
-  };
-
-  const [employees, setEmployees] = useState<Employee[]>([]);
+  // 3. Staffing calculation and revenue rules
+  const {
+    monthlyRevenues,
+    setMonthlyRevenues,
+    revenueStaffRules,
+    setRevenueStaffRules,
+    tempRules,
+    setTempRules,
+    getRecommendedStaff,
+    handleApplyRevenuesToGlobalTargets
+  } = useStaffingRules(analysisHoursRange);
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
   const [isAutoScheduleModalOpen, setIsAutoScheduleModalOpen] = useState(false);
   const [isRuleScheduleModalOpen, setIsRuleScheduleModalOpen] = useState(false);
@@ -428,8 +232,6 @@ function App() {
   const [contextMenu, setContextMenu] = useState<{
     x: number; y: number; schedule?: WorkSchedule; emptyCell?: { employeeName: string; dateStr: string };
   } | null>(null);
-
-  const [markedEmptyCells, setMarkedEmptyCells] = useState<Record<string, boolean>>({});
 
   const [employeeName, setEmployeeName] = useState('');
   const [workplace, setWorkplace] = useState(workplaces[0]?.name || '');
@@ -593,54 +395,6 @@ function App() {
     }
   };
 
-  useEffect(() => {
-    const unsubSchedules = subscribeToSchedules((data) => setSchedules(data));
-    const unsubAvailabilities = subscribeToAvailabilities((data) => setAvailabilities(data));
-    const unsubStaffingTargets = subscribeToStaffingTargets((data) => setStaffingTargets(data));
-    const unsubEmployees = subscribeToEmployees((data) => setEmployees(data));
-    const unsubDeadlineDay = subscribeToDeadlineDay((day) => setDeadlineDay(day));
-    const unsubStartDay = subscribeToStartDay((day) => setStartDay(day));
-    const unsubOperatingStartTime = subscribeToOperatingStartTime((time) => setOperatingStartTime(time));
-    const unsubOperatingEndTime = subscribeToOperatingEndTime((time) => setOperatingEndTime(time));
-    const unsubShiftMorningStart = subscribeToShiftMorningStart((time) => setShiftMorningStart(time));
-    const unsubShiftMorningEnd = subscribeToShiftMorningEnd((time) => setShiftMorningEnd(time));
-    const unsubShiftPresets = subscribeToShiftPresets((data) => setShiftPresets(data));
-    const unsubEmployeeOrder = subscribeToEmployeeOrder((data) => setEmployeeOrder(data));
-    const unsubMonthlyRevenues = subscribeToMonthlyRevenues((data) => setMonthlyRevenues(data));
-    const unsubRevenueStaffRules = subscribeToRevenueStaffRules((rules) => {
-      setRevenueStaffRules(rules);
-      setTempRules(rules);
-    });
-    const unsubMarkedEmptyCells = subscribeToMarkedEmptyCells((cells) => setMarkedEmptyCells(cells));
-    const unsubErpDays = subscribeToErpDays((days) => setErpDays(days));
-    const unsubPtAvailMode = subscribeToPtAvailMode((mode) => setPtAvailMode(mode));
-    const unsubFilenamePrefix = subscribeToFilenamePrefix((prefix) => setFilenamePrefix(prefix));
-    const unsubAllowMonthSwitch = subscribeToAllowMonthSwitch((allowed) => setAllowMonthSwitch(allowed));
-    const unsubStaffingDemand = subscribeToStaffingDemandConfig((cfg) => setStaffingDemandConfig(cfg));
-
-    return () => {
-      unsubSchedules();
-      unsubAvailabilities();
-      unsubStaffingTargets();
-      unsubEmployees();
-      unsubDeadlineDay();
-      unsubStartDay();
-      unsubOperatingStartTime();
-      unsubOperatingEndTime();
-      unsubShiftMorningStart();
-      unsubShiftMorningEnd();
-      unsubShiftPresets();
-      unsubEmployeeOrder();
-      unsubMonthlyRevenues();
-      unsubRevenueStaffRules();
-      unsubMarkedEmptyCells();
-      unsubErpDays();
-      unsubPtAvailMode();
-      unsubFilenamePrefix();
-      unsubAllowMonthSwitch();
-      unsubStaffingDemand();
-    };
-  }, []);
 
   useEffect(() => {
     if (currentMonthStart) {
@@ -731,22 +485,6 @@ function App() {
     localStorage.removeItem('scheduler_worker_verified');
   };
 
-  const handleApplyRevenuesToGlobalTargets = async () => {
-    if (safeConfirm('確定要將此營業額計算出的建議人數，套用為系統的預設排班目標 (db-global) 嗎？\n這將直接覆蓋目前的預設排班人數需求。')) {
-      try {
-        for (const hour of analysisHoursRange) {
-          const monthlyVal = monthlyRevenues[hour] || 0;
-          const dailyAvg = monthlyVal / 30;
-          const recommendedStaff = getRecommendedStaff(dailyAvg, revenueStaffRules);
-          await updateStaffingTarget(hour, recommendedStaff);
-        }
-        alert('已成功將營業額建議人數套用為預設排班目標需求！');
-      } catch (error) {
-        console.error("Failed to apply revenue targets: ", error);
-        alert('套用預設目標失敗，請重試。');
-      }
-    }
-  };
 
   const handleResetRevenues = async () => {
     if (safeConfirm('確定要清空所有時段的月營業額輸入數據嗎？')) {
