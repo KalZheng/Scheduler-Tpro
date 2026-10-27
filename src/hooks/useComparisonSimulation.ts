@@ -11,7 +11,7 @@ import { generatePureAutoSchedule } from '../utils/autoScheduler';
 import { runAIScheduler, type ProposedAISchedule } from '../services/aiScheduler';
 import {
   formatDateString,
-  calculateDuration,
+  calculateEffectiveWorkHours,
   isShiftActiveAtHour,
   hasSevenConsecutiveDays
 } from '../utils/dateUtils';
@@ -372,7 +372,7 @@ export function useComparisonSimulation(options: UseComparisonSimulationOptions)
     scheduleList.forEach(s => {
       if (!targetDateSet.has(s.date)) return;
       if (s.startTime && s.endTime) {
-        const dur = calculateDuration(s.startTime, s.endTime);
+        const dur = calculateEffectiveWorkHours(s.startTime, s.endTime);
         totalLaborHours += dur;
       }
       const emp = s.employeeName.trim().toLowerCase();

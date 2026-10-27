@@ -94,7 +94,7 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
   const {
     dateRange = [],
     prioritizeFullTime = true,
-    maxHoursPerShift = 8,
+    maxHoursPerShift: _maxHoursPerShift = 8,
     operatingStartTime = '06:30',
     operatingEndTime = '18:00',
     staffingDemandConfig
@@ -377,20 +377,21 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
         const openStart = dayOpenStart;
         const openStartMins = dayOpenStartMins;
         const candEndMins = timeToMinutes(cand.endTime);
+        const availDurationMins = candEndMins - openStartMins;
 
-        let targetDurationMins = Math.min(maxHoursPerShift * 60, candEndMins - openStartMins);
-        // Part-time 2nd opening worker on weekdays can work 5h (>= 4h) to avoid blocking afternoon closing
+        // Rules 1, 2, 3:
+        // 8h work -> 9h span (1h break). 4h work -> 4.5h span (30m break).
+        // Intermediate spans (5.5h, 6.5h, 7.5h) only unless it is a must.
+        let candidateSpans = [9.0, 4.5, 7.5, 6.5, 5.5];
         if (slot >= 2 && !isFT && !isWeekend) {
-          targetDurationMins = Math.min(targetDurationMins, 5 * 60);
+          candidateSpans = [4.5, 5.5, 9.0, 7.5, 6.5];
         }
 
-        // All workers work in full hours (integer multiple of 60 mins): round down to full hours
-        const maxFullHours = Math.floor(targetDurationMins / 60);
-
-        // Try candidate end times stepping down by 60 mins (full hours) to avoid exceeding cap
         let bestEndMins = -1;
-        for (let h = maxFullHours; h >= 4; h--) {
-          const endM = openStartMins + h * 60;
+        for (const span of candidateSpans) {
+          const durMins = Math.round(span * 60);
+          if (durMins > availDurationMins) continue;
+          const endM = openStartMins + durMins;
           const endStr = minutesToTime(endM);
           if (!wouldExceedCap(openStart, endStr, dateStr, isWeekend)) {
             bestEndMins = endM;
@@ -455,12 +456,20 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
 
         // Try ending at registered end time, or adjusted to store close
         const targetEndMins = Math.min(candEndMins, dayCloseEndMins);
+        const availDurationMins = targetEndMins - candStartMins;
 
-        // All workers work in full hours (no 30 mins fractional duration, e.g. 4.5h -> 4h)
-        const maxDurHours = Math.min(maxHoursPerShift, Math.floor((targetEndMins - candStartMins) / 60));
+        const emp = safeEmployees.find(e => e.name.trim().toLowerCase() === cand.employeeName.trim().toLowerCase());
+        const isFT = emp?.status === '正式夥伴';
 
-        for (let h = maxDurHours; h >= 4; h--) {
-          const durMins = h * 60;
+        // Rules 1, 2, 3:
+        // Prioritize 9.0h (8h work + 1h break) and 4.5h (4h work + 30m break)
+        // Intermediate spans only unless it is a must
+        const candidateSpans = isFT ? [9.0, 4.5, 7.5, 6.5, 5.5] : [4.5, 9.0, 5.5, 6.5, 7.5];
+
+        for (const span of candidateSpans) {
+          const durMins = Math.round(span * 60);
+          if (durMins > availDurationMins) continue;
+
           const testStartMins = targetEndMins - durMins;
           if (testStartMins < candStartMins) continue;
 
@@ -469,8 +478,10 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
 
           if (!wouldExceedCap(sStr, eStr, dateStr, isWeekend)) {
             const useful = countCoveredDeficitHours(sStr, eStr, dateStr, isWeekend);
-            if (useful > maxUseful) {
-              maxUseful = useful;
+            const isStandard = span === 9.0 || span === 4.5;
+            const score = useful * 20 + (isStandard ? 30 : 0) + span;
+            if (score > maxUseful) {
+              maxUseful = score;
               bestStartMins = testStartMins;
               bestEndMins = targetEndMins;
             }
@@ -570,14 +581,15 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
         }
       }
 
-      // Sliding window evaluation across available range (from min 4h to max 8h/maxHoursPerShift)
-      // All workers work in full hours (no 30 mins fractional duration, e.g. 4.5h -> 4h)
+      // Sliding window evaluation across available range
+      // Rules 1, 2, 3: Prioritize standard 9.0h (8h work + 1h break) and 4.5h (4h work + 30m break)
       if (bestScore < 0) {
-        const maxDurHours = Math.min(maxHoursPerShift, Math.floor(availSpan / 60));
-        const minDurHours = 4;
+        const candidateSpans = isFT ? [9.0, 4.5, 7.5, 6.5, 5.5] : [4.5, 9.0, 5.5, 6.5, 7.5];
 
-        for (let h = maxDurHours; h >= minDurHours; h--) {
-          const dur = h * 60;
+        for (const span of candidateSpans) {
+          const dur = Math.round(span * 60);
+          if (dur > availSpan) continue;
+
           for (let sM = candStartMins; sM <= candEndMins - dur; sM += 30) {
             const eM = sM + dur;
             const sStr = minutesToTime(sM);
@@ -590,13 +602,13 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
 
             const useful = countCoveredDeficitHours(sStr, eStr, dateStr, isWeekend);
             // CRITICAL: A shift MUST cover at least 1 deficit hour.
-            // If useful <= 0, scheduling this shift would cause overstaffing!
             if (useful <= 0) {
               continue;
             }
 
-            // Score: heavy weight on covering deficit hours + light weight on duration
-            const score = useful * 20 + h;
+            // Standard shifts (9.0h and 4.5h) get a priority bonus; intermediate shifts chosen only when necessary
+            const isStandard = span === 9.0 || span === 4.5;
+            const score = useful * 20 + (isStandard ? 30 : 0) + span;
             if (score > bestScore) {
               bestScore = score;
               bestStartMins = sM;
