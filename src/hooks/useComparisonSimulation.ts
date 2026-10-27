@@ -15,6 +15,11 @@ import {
   isShiftActiveAtHour,
   hasSevenConsecutiveDays
 } from '../utils/dateUtils';
+import {
+  getStoredSampleSchedules,
+  saveStoredSampleSchedules,
+  clearStoredSampleSchedules
+} from '../utils/excelSampleParser';
 
 export interface ComparisonStats {
   totalShifts: number;
@@ -69,32 +74,93 @@ export function useComparisonSimulation(options: UseComparisonSimulationOptions)
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
 
+  // Sample manual schedules state (strictly isolated in browser localStorage to prevent Firestore contamination)
+  const [sampleSchedules, setSampleSchedules] = useState<WorkSchedule[]>(() => getStoredSampleSchedules());
+
   // Clear AI simulation when month changes
   useEffect(() => {
     setAiSchedules(null);
     setAiError(null);
   }, [monthStr]);
 
-  // Filter existing schedules for this month (Manual / Live data)
-  const manualMonthSchedules = useMemo(() => {
+  // Actual database schedules for this month
+  const actualManualMonthSchedules = useMemo(() => {
     return schedules.filter(s => s.date && s.date.startsWith(monthStr));
   }, [schedules, monthStr]);
 
-  // Month availabilities
-  const monthAvailabilities = useMemo(() => {
-    return availabilities.filter(a => a.date && a.date.startsWith(monthStr));
-  }, [availabilities, monthStr]);
+  // Sample manual schedules for this month
+  const sampleMonthSchedules = useMemo(() => {
+    return sampleSchedules.filter(s => s.date && s.date.startsWith(monthStr));
+  }, [sampleSchedules, monthStr]);
+
+  // Core rule: "also if actual manual data exist even for 1 day then this sample data uploaded should be ignore"
+  const hasActualManualData = actualManualMonthSchedules.length > 0;
+  const isUsingSampleData = !hasActualManualData && sampleMonthSchedules.length > 0;
+
+  const manualMonthSchedules = useMemo(() => {
+    if (hasActualManualData) {
+      return actualManualMonthSchedules;
+    }
+    if (sampleMonthSchedules.length > 0) {
+      return sampleMonthSchedules;
+    }
+    return [];
+  }, [hasActualManualData, actualManualMonthSchedules, sampleMonthSchedules]);
+
+  const handleUploadSampleSchedules = (newSchedules: WorkSchedule[], targetMonthStr?: string) => {
+    const month = targetMonthStr || (newSchedules[0]?.date ? newSchedules[0].date.substring(0, 7) : '');
+    setSampleSchedules(prev => {
+      const remaining = month ? prev.filter(s => !s.date || !s.date.startsWith(month)) : prev;
+      const updated = [...remaining, ...newSchedules];
+      saveStoredSampleSchedules(updated);
+      return updated;
+    });
+  };
+
+  const handleClearSampleSchedules = (targetMonthStr?: string) => {
+    clearStoredSampleSchedules(targetMonthStr);
+    setSampleSchedules(getStoredSampleSchedules());
+  };
 
   // Relevant active employees sorted by FT first, then PT
+  // Also include any employees from manualMonthSchedules (e.g. from sample file) so all rows render properly
   const activeEmployees = useMemo(() => {
-    return [...employees]
+    const list = [...employees]
       .filter(e => e.active !== false)
       .sort((a, b) => {
         if (a.status === '正式夥伴' && b.status !== '正式夥伴') return -1;
         if (a.status !== '正式夥伴' && b.status === '正式夥伴') return 1;
         return a.name.localeCompare(b.name, 'zh-Hant');
       });
-  }, [employees]);
+
+    const existingNames = new Set(list.map(e => e.name.trim().toLowerCase()));
+    const extraNames = new Set<string>();
+    manualMonthSchedules.forEach(s => {
+      const name = s.employeeName?.trim();
+      if (name && !existingNames.has(name.toLowerCase())) {
+        extraNames.add(name);
+      }
+    });
+
+    if (extraNames.size > 0) {
+      extraNames.forEach(name => {
+        list.push({
+          id: `sample-emp-${name}`,
+          name,
+          status: '兼職夥伴',
+          active: true,
+          roles: ['門市夥伴']
+        } as unknown as Employee);
+      });
+    }
+
+    return list;
+  }, [employees, manualMonthSchedules]);
+
+  // Month availabilities
+  const monthAvailabilities = useMemo(() => {
+    return availabilities.filter(a => a.date && a.date.startsWith(monthStr));
+  }, [availabilities, monthStr]);
 
   // Active date range based on dateRangePart ('all' | 'part1' | 'part2')
   const activeDateRange = useMemo(() => {
@@ -421,6 +487,11 @@ export function useComparisonSimulation(options: UseComparisonSimulationOptions)
     ruleStats,
     aiStats,
     timeToMins,
-    getStaffingTarget
+    getStaffingTarget,
+    hasActualManualData,
+    isUsingSampleData,
+    sampleMonthSchedules,
+    handleUploadSampleSchedules,
+    handleClearSampleSchedules
   };
 }

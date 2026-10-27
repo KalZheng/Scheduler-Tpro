@@ -17,7 +17,7 @@ export interface ComparisonScheduleGridProps {
   badgeText: string;
   badgeColor?: string;
   cardBorderColor: string;
-  cellTheme: 'emerald' | 'blue' | 'purple';
+  cellTheme: 'emerald' | 'blue' | 'purple' | 'amber';
   scheduleList: WorkSchedule[] | null;
   stats: ComparisonStats | null;
   isCollapsed: boolean;
@@ -55,6 +55,13 @@ export const ComparisonScheduleGrid: React.FC<ComparisonScheduleGridProps> = ({
       headerBg: 'bg-emerald-50/70 text-emerald-950',
       summaryBg: 'bg-emerald-50/40 text-emerald-900 font-bold',
       accentText: 'text-emerald-800'
+    },
+    amber: {
+      badgeBg: 'bg-amber-600',
+      cellBg: 'bg-amber-50 text-amber-900 border-amber-300',
+      headerBg: 'bg-amber-50/70 text-amber-950',
+      summaryBg: 'bg-amber-50/40 text-amber-900 font-bold',
+      accentText: 'text-amber-800'
     },
     blue: {
       badgeBg: 'bg-blue-600',
