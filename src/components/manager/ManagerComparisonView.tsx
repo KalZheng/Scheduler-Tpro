@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import type {
   WorkSchedule,
   WorkerAvailability,
@@ -12,6 +12,7 @@ import {
   getDaysInMonth
 } from '../../utils/dateUtils';
 import { exportComparisonToExcel } from '../../utils/excelExport';
+import { parseComparisonSampleExcel } from '../../utils/excelSampleParser';
 import { useComparisonSimulation } from '../../hooks/useComparisonSimulation';
 import { ComparisonScheduleGrid } from './comparison/ComparisonScheduleGrid';
 import { ComparisonHeatmapGrid } from './comparison/ComparisonHeatmapGrid';
@@ -130,7 +131,12 @@ export const ManagerComparisonView: React.FC<ManagerComparisonViewProps> = ({
     ruleStats,
     aiStats,
     timeToMins,
-    getStaffingTarget
+    getStaffingTarget,
+    hasActualManualData,
+    isUsingSampleData,
+    sampleMonthSchedules,
+    handleUploadSampleSchedules,
+    handleClearSampleSchedules
   } = useComparisonSimulation({
     monthStr,
     daysInMonth,
@@ -147,6 +153,57 @@ export const ManagerComparisonView: React.FC<ManagerComparisonViewProps> = ({
     staffingDemandConfig,
     analysisHoursRange
   });
+
+  // Excel Sample Upload state
+  const sampleFileInputRef = useRef<HTMLInputElement>(null);
+  const [sampleStatus, setSampleStatus] = useState<{
+    type: 'success' | 'info' | 'error';
+    message: string;
+  } | null>(null);
+
+  const handleSampleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const buffer = await file.arrayBuffer();
+      const result = parseComparisonSampleExcel(buffer, monthStr);
+
+      // If month in Excel is different from current displayed month, switch month
+      if (result.extractedMonthStr && result.extractedMonthStr !== monthStr && setCurrentMonthStart) {
+        const [y, m] = result.extractedMonthStr.split('-').map(Number);
+        if (!isNaN(y) && !isNaN(m)) {
+          setCurrentMonthStart(new Date(y, m - 1, 1));
+        }
+      }
+
+      handleUploadSampleSchedules(result.schedules, result.extractedMonthStr);
+
+      const monthHasRealData = schedules.some(s => s.date && s.date.startsWith(result.extractedMonthStr));
+
+      if (monthHasRealData) {
+        setSampleStatus({
+          type: 'info',
+          message: `已解析「${result.extractedMonthStr}」樣本資料 (${result.totalShiftsCount} 筆班次 / ${result.employeeCount} 位同仁)。【提醒】資料庫中該月份已存在真實排班實績，系統依規則優先採用真實資料，此樣本將被略過 (Ignore)。`
+        });
+      } else {
+        setSampleStatus({
+          type: 'success',
+          message: `成功匯入「${result.extractedMonthStr}」比對樣本排班！共解析 ${result.totalShiftsCount} 筆班次 (${result.employeeCount} 位同仁)。樣本已獨立儲存於本地瀏覽器，絕不污染正式資料庫。`
+        });
+      }
+    } catch (err: any) {
+      console.error('Failed to parse sample excel:', err);
+      setSampleStatus({
+        type: 'error',
+        message: `匯入比對樣本失敗：${err?.message || '檔案格式無法辨識'}`
+      });
+    } finally {
+      if (e.target) {
+        e.target.value = '';
+      }
+    }
+  };
 
   const handleExportExcel = async () => {
     try {
@@ -279,8 +336,26 @@ export const ManagerComparisonView: React.FC<ManagerComparisonViewProps> = ({
             </button>
           </div>
 
-          {/* Action buttons: Run AI & Export Excel */}
+          {/* Action buttons: Import Sample Excel, Run AI & Export Excel */}
           <div className="flex items-center gap-2.5">
+            {/* Hidden Excel Sample file input */}
+            <input
+              type="file"
+              ref={sampleFileInputRef}
+              accept=".xlsx,.xls"
+              className="hidden"
+              onChange={handleSampleFileUpload}
+            />
+
+            <button
+              onClick={() => sampleFileInputRef.current?.click()}
+              className="px-3.5 py-2.5 rounded-xl text-xs font-black text-amber-900 bg-amber-50 border border-amber-300 hover:bg-amber-100 hover:border-amber-400 transition-all shadow-xs cursor-pointer flex items-center gap-1.5"
+              title="從 Excel 檔案匯入手動排班比對樣本（獨立儲存於瀏覽器，絕不污染正式資料庫）"
+            >
+              <span className="text-sm">📁</span>
+              <span>匯入比對樣本 Excel</span>
+            </button>
+
             <button
               onClick={handleExportExcel}
               disabled={isExporting}
@@ -320,6 +395,30 @@ export const ManagerComparisonView: React.FC<ManagerComparisonViewProps> = ({
         </div>
       </div>
 
+      {/* Sample upload notification banner */}
+      {sampleStatus && (
+        <div
+          className={`p-3 rounded-xl text-xs font-bold animate-fade-in flex items-center justify-between border ${
+            sampleStatus.type === 'success'
+              ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
+              : sampleStatus.type === 'info'
+              ? 'bg-amber-50 border-amber-300 text-amber-900'
+              : 'bg-rose-50 border-rose-300 text-rose-900'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <span>{sampleStatus.type === 'success' ? '✅' : sampleStatus.type === 'info' ? 'ℹ️' : '⚠️'}</span>
+            <span>{sampleStatus.message}</span>
+          </div>
+          <button
+            onClick={() => setSampleStatus(null)}
+            className="text-gray-500 hover:text-gray-800 text-xs font-bold cursor-pointer ml-3 px-1"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {aiError && (
         <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 font-bold animate-fade-in flex items-center justify-between">
           <span>⚠️ {aiError}</span>
@@ -342,8 +441,12 @@ export const ManagerComparisonView: React.FC<ManagerComparisonViewProps> = ({
             <thead>
               <tr className="border-b border-[#DAC0A3]/40 text-[#5D4037]">
                 <th className="py-2 px-3 font-extrabold w-1/4">評估指標維度</th>
-                <th className="py-2 px-3 font-extrabold w-1/4 bg-emerald-500/10 text-emerald-950 rounded-t-lg">
-                  📋 手動現有排班 (現行實績)
+                <th className={`py-2 px-3 font-extrabold w-1/4 rounded-t-lg ${
+                  isUsingSampleData
+                    ? 'bg-amber-500/15 text-amber-950'
+                    : 'bg-emerald-500/10 text-emerald-950'
+                }`}>
+                  {isUsingSampleData ? '📋 比對樣本排班 (Excel 樣本)' : '📋 手動現有排班 (現行實績)'}
                 </th>
                 <th className="py-2 px-3 font-extrabold w-1/4 bg-blue-500/10 text-blue-950 rounded-t-lg">
                   ⚙️ 程式規則演算法 (autoScheduler)
@@ -479,15 +582,62 @@ export const ManagerComparisonView: React.FC<ManagerComparisonViewProps> = ({
       {viewMode === 'excel' ? (
         /* Excel Grids */
         <div className="space-y-6">
-          {/* Table 1: Manual Live Schedules */}
+          {/* Sample Data Banner / Priority Notice */}
+          {isUsingSampleData && (
+            <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl text-xs text-amber-950 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-base">📌</span>
+                <span>
+                  <strong>目前採用 Excel 比對樣本</strong>：本月資料庫尚無排班實績，表格一正顯示您匯入之比對樣本（共 {manualMonthSchedules.length} 筆班次，僅獨立保存在本機瀏覽器，絕未寫入正式資料庫）。
+                </span>
+              </div>
+              <button
+                onClick={() => {
+                  if (window.confirm(`確定要清除 ${monthStr} 月份的本機比對樣本排班嗎？`)) {
+                    handleClearSampleSchedules(monthStr);
+                  }
+                }}
+                className="px-2.5 py-1 text-xs font-bold bg-amber-200 hover:bg-amber-300 text-amber-900 rounded-lg transition-colors cursor-pointer shrink-0"
+              >
+                🗑️ 清除此月樣本
+              </button>
+            </div>
+          )}
+
+          {hasActualManualData && sampleMonthSchedules.length > 0 && (
+            <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-xl text-xs text-emerald-950 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-base">ℹ️</span>
+                <span>
+                  <strong>優先採用正式資料庫實績</strong>：本月份資料庫中已存在真實手動排班記錄，依系統規則自動略過 (Ignore) 上傳之比對樣本（本月上傳樣本 {sampleMonthSchedules.length} 筆已略過）。
+                </span>
+              </div>
+              <button
+                onClick={() => {
+                  if (window.confirm(`確定要清除 ${monthStr} 月份已略過的本機比對樣本嗎？`)) {
+                    handleClearSampleSchedules(monthStr);
+                  }
+                }}
+                className="px-2.5 py-1 text-xs font-bold bg-emerald-200 hover:bg-emerald-300 text-emerald-900 rounded-lg transition-colors cursor-pointer shrink-0"
+              >
+                🗑️ 清除已略過樣本
+              </button>
+            </div>
+          )}
+
+          {/* Table 1: Manual Live Schedules or Sample Manual Schedules */}
           <ComparisonScheduleGrid
             keyId="manual"
-            title="📋 表格一：手動現有排班 (Manual Schedule)"
-            subtitle="現行門市資料庫實績"
-            badgeText="手動實績"
-            badgeColor="bg-emerald-700"
-            cardBorderColor="border-emerald-300"
-            cellTheme="emerald"
+            title={isUsingSampleData ? "📋 表格一：比對樣本排班 (Sample Manual Schedule)" : "📋 表格一：手動現有排班 (Manual Schedule)"}
+            subtitle={
+              isUsingSampleData
+                ? "比對專用樣本資料 (由 Excel 匯入，獨立儲存，未污染正式資料庫)"
+                : (hasActualManualData ? "現行門市資料庫實績" : "目前暫無手動排班資料")
+            }
+            badgeText={isUsingSampleData ? "Excel 樣本" : "手動實績"}
+            badgeColor={isUsingSampleData ? "bg-amber-700" : "bg-emerald-700"}
+            cardBorderColor={isUsingSampleData ? "border-amber-400" : "border-emerald-300"}
+            cellTheme={isUsingSampleData ? "amber" : "emerald"}
             scheduleList={manualMonthSchedules}
             stats={manualStats}
             isCollapsed={collapsedTables.manual}
@@ -548,11 +698,23 @@ export const ManagerComparisonView: React.FC<ManagerComparisonViewProps> = ({
           {(heatmapFilter === 'all' || heatmapFilter === 'manual') && (
             <ComparisonHeatmapGrid
               keyId="manual"
-              title="📋 圖表一：手動現有排班 (Manual Schedule) - 每小時在勤人數分析"
-              subtitle="現行門市資料庫實績各小時在勤人數與缺額分析"
-              badgeText="手動實績"
-              themeClasses={{ badgeBg: 'bg-emerald-700', headerBg: 'bg-emerald-50/70' }}
-              cardBorderColor="border-emerald-300"
+              title={
+                isUsingSampleData
+                  ? "📋 圖表一：比對樣本排班 (Sample Manual Schedule) - 每小時在勤人數分析"
+                  : "📋 圖表一：手動現有排班 (Manual Schedule) - 每小時在勤人數分析"
+              }
+              subtitle={
+                isUsingSampleData
+                  ? "由 Excel 匯入之比對樣本各小時在勤人數與缺額分析"
+                  : "現行門市資料庫實績各小時在勤人數與缺額分析"
+              }
+              badgeText={isUsingSampleData ? "Excel 樣本" : "手動實績"}
+              themeClasses={
+                isUsingSampleData
+                  ? { badgeBg: 'bg-amber-700', headerBg: 'bg-amber-50/70' }
+                  : { badgeBg: 'bg-emerald-700', headerBg: 'bg-emerald-50/70' }
+              }
+              cardBorderColor={isUsingSampleData ? "border-amber-400" : "border-emerald-300"}
               scheduleList={manualMonthSchedules}
               stats={manualStats}
               isCollapsed={collapsedTables.heatmap_manual}
