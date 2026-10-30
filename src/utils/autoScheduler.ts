@@ -494,25 +494,32 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
 
   /**
    * Helper to compare candidates according to FT status, 5-day overtime avoidance,
-   * 2-3 consecutive days preference, and fair rotation.
+   * 2-3 consecutive days preference, short-operating-day PT preference, and fair rotation.
    */
   const compareCandidatePreferences = (
     a: WorkerAvailability,
     b: WorkerAvailability,
     dateStr: string,
-    preferFT: boolean
+    preferFT: boolean,
+    preferPTFirst: boolean = false
   ): number => {
     const empA = safeEmployees.find(e => e.name.trim().toLowerCase() === a.employeeName.trim().toLowerCase());
     const empB = safeEmployees.find(e => e.name.trim().toLowerCase() === b.employeeName.trim().toLowerCase());
     const isFTA = empA?.status === '正式夥伴';
     const isFTB = empB?.status === '正式夥伴';
 
+    // On short operating days (< 9h, where FT cannot get a full 9h shift span),
+    // strictly prefer Part-Time first unless Part-Time is unavailable.
+    if (preferPTFirst && isFTA !== isFTB) {
+      return isFTA ? 1 : -1;
+    }
+
     const prefScoreA = getWorkerDayPreferenceScore(a.employeeName, dateStr, !!isFTA);
     const prefScoreB = getWorkerDayPreferenceScore(b.employeeName, dateStr, !!isFTB);
 
     let baseFTA = 0;
     let baseFTB = 0;
-    if (preferFT) {
+    if (preferFT && !preferPTFirst) {
       if (isFTA) baseFTA += 60;
       if (isFTB) baseFTB += 60;
     }
@@ -544,6 +551,10 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
     const dayCloseEnd = isWeekend ? operatingEndTimeWeekend : operatingEndTime;
     const dayOpenStartMins = timeToMinutes(dayOpenStart);
     const dayCloseEndMins = timeToMinutes(dayCloseEnd);
+    const dayOperatingMins = dayCloseEndMins - dayOpenStartMins;
+    // If store operating hours on this day are < 9 hours, FT cannot work a full 9h span (8h + 1h break),
+    // so prefer PT first and only use FT if PT is unavailable.
+    const isShortOperatingDay = dayOperatingMins < 9 * 60;
 
     // In pure mode (ignoreConfirmedStatus = true), consider ALL active registered employee availabilities.
     // In live/incremental mode (ignoreConfirmedStatus = false), only consider unconfirmed ones.
@@ -574,10 +585,10 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
     const openingNeeded = Math.max(0, openingTarget - activeOpening);
 
     if (openingNeeded > 0) {
-      // Find candidates who can start at or before dayOpenStart and have >= 4h availability
+      // Find candidates who can start at or before dayOpenStart and have >= 4h availability within operating hours
       const openingCandidates = remainingAvails.filter(a => {
         const sMins = timeToMinutes(a.startTime);
-        const eMins = timeToMinutes(a.endTime);
+        const eMins = Math.min(timeToMinutes(a.endTime), dayCloseEndMins);
         return sMins <= dayOpenStartMins && (eMins - dayOpenStartMins) >= 4 * 60;
       });
 
@@ -586,10 +597,10 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
         const pool = openingCandidates.filter(a => remainingAvails.some(r => r.id === a.id));
         if (pool.length === 0) break;
 
-        // Sort candidates: considers FT status, FT 5-day overtime avoidance, 2-3 consecutive days fit, and fair rotation
+        // Sort candidates: considers FT status (or PT first on <9h operating days), FT 5-day overtime avoidance, 2-4 consecutive days fit, and fair rotation
         pool.sort((a, b) => {
           const preferFT = (slot === 1 || isWeekend) ? (prioritizeFullTime ?? true) : false;
-          const cmp = compareCandidatePreferences(a, b, dateStr, preferFT);
+          const cmp = compareCandidatePreferences(a, b, dateStr, preferFT, isShortOperatingDay);
           if (cmp !== 0) return cmp;
           return compareTimeStrings(a.startTime, b.startTime);
         });
@@ -602,15 +613,19 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
 
           const openStart = dayOpenStart;
           const openStartMins = dayOpenStartMins;
-          const candEndMins = timeToMinutes(cand.endTime);
+          // Strictly clamp candidate end time to store closing time (dayCloseEndMins)
+          const candEndMins = Math.min(timeToMinutes(cand.endTime), dayCloseEndMins);
           const availDurationMins = candEndMins - openStartMins;
 
           // Rules 1, 2, 3:
           // 8h work -> 9h span (1h break). 4h work -> 4.5h span (30m break).
-          // Intermediate spans (5.5h, 6.5h, 7.5h) only unless it is a must.
-          let candidateSpans = [9.0, 4.5, 7.5, 6.5, 5.5];
+          // Intermediate spans (5.5h, 6.5h, 7.0h, 7.5h) only unless it is a must.
+          let candidateSpans = [9.0, 4.5, 7.5, 7.0, 6.5, 5.5];
           if (slot >= 2 && !isFT && !isWeekend) {
-            candidateSpans = [4.5, 5.5, 9.0, 7.5, 6.5];
+            candidateSpans = [4.5, 5.5, 9.0, 7.5, 7.0, 6.5];
+          } else if (isShortOperatingDay && isFT) {
+            // If no PT was available on a short operating day (<9h) and FT must cover as fallback, allow open-to-close span
+            candidateSpans = [9.0, 7.5, 7.0, 6.5, 5.5, 4.5];
           }
 
           let bestEndMins = -1;
@@ -651,16 +666,16 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
     const closingNeeded = Math.max(0, closingTarget - activeClosing);
 
     if (closingNeeded > 0) {
-      // Find candidates who can work until dayCloseEnd (or dayCloseEnd - 30 mins) with >= 4h availability
+      // Find candidates who can work until dayCloseEnd (or dayCloseEnd - 30 mins) with >= 4h availability within operating hours
       const closingCandidates = remainingAvails.filter(a => {
-        const eMins = timeToMinutes(a.endTime);
-        const sMins = timeToMinutes(a.startTime);
+        const eMins = Math.min(timeToMinutes(a.endTime), dayCloseEndMins);
+        const sMins = Math.max(timeToMinutes(a.startTime), dayOpenStartMins);
         return eMins >= (dayCloseEndMins - 30) && (eMins - sMins) >= 4 * 60;
       });
 
-      // Sort closing candidates: FT status, 5-day overtime avoidance, 2-3 consecutive days fit, fairness, latest end time
+      // Sort closing candidates: FT status (or PT first on <9h operating days), 5-day overtime avoidance, 2-4 consecutive days fit, fairness, latest end time
       closingCandidates.sort((a, b) => {
-        const cmp = compareCandidatePreferences(a, b, dateStr, prioritizeFullTime ?? true);
+        const cmp = compareCandidatePreferences(a, b, dateStr, prioritizeFullTime ?? true, isShortOperatingDay);
         if (cmp !== 0) return cmp;
         return compareTimeStrings(b.endTime, a.endTime); // latest endTime first
       });
@@ -670,7 +685,7 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
         if (assignedClosing >= closingNeeded) break;
         if (!canWorkerWorkOnDate(cand.employeeName, dateStr)) continue;
 
-        const candStartMins = timeToMinutes(cand.startTime);
+        const candStartMins = Math.max(timeToMinutes(cand.startTime), dayOpenStartMins);
         const candEndMins = timeToMinutes(cand.endTime);
 
         let bestStartMins = -1;
@@ -687,7 +702,7 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
         // Rules 1, 2, 3:
         // Prioritize 9.0h (8h work + 1h break) and 4.5h (4h work + 30m break)
         // Intermediate spans only unless it is a must
-        const candidateSpans = isFT ? [9.0, 4.5, 7.5, 6.5, 5.5] : [4.5, 9.0, 5.5, 6.5, 7.5];
+        const candidateSpans = isFT ? [9.0, 4.5, 7.5, 7.0, 6.5, 5.5] : [4.5, 9.0, 5.5, 6.5, 7.0, 7.5];
 
         for (const span of candidateSpans) {
           const durMins = Math.round(span * 60);
@@ -727,9 +742,9 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
     // =========================================================================
     // PHASE 3: 尖峰與中段補缺 (Midday Rush & Deficit Fill with Strict Caps)
     // =========================================================================
-    // Sort remaining candidates: FT status, 5-day overtime avoidance, 2-3 consecutive days fit, fairness, earliest start
+    // Sort remaining candidates: FT status (or PT first on <9h operating days), 5-day overtime avoidance, 2-4 consecutive days fit, fairness, earliest start
     remainingAvails.sort((a, b) => {
-      const cmp = compareCandidatePreferences(a, b, dateStr, prioritizeFullTime ?? true);
+      const cmp = compareCandidatePreferences(a, b, dateStr, prioritizeFullTime ?? true, isShortOperatingDay);
       if (cmp !== 0) return cmp;
       return compareTimeStrings(a.startTime, b.startTime);
     });
@@ -759,7 +774,8 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
       // Start Phase 3 at dayOpenStart + 90 mins or 08:30 to ensure opening window remains dedicated to opening workers
       const minMidStartMins = Math.max(dayOpenStartMins + 90, timeToMinutes('08:30'));
       const candStartMins = Math.max(timeToMinutes(cand.startTime), minMidStartMins);
-      const candEndMins = timeToMinutes(cand.endTime);
+      // Strictly clamp candidate end time to store closing time (dayCloseEndMins)
+      const candEndMins = Math.min(timeToMinutes(cand.endTime), dayCloseEndMins);
       const availSpan = candEndMins - candStartMins;
 
       // Minimum shift 4h (240 min)
