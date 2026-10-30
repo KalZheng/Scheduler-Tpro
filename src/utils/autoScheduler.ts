@@ -411,11 +411,12 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
    * Calculate preference score for an employee on dateStr:
    * 1. Rule 1: Full-time 5-day preference (overtime on 6th day penalty):
    *    If isFT and week count >= 5, heavily deprioritize (-100 pts) so other workers / PT are scheduled first to avoid 6th day overtime.
-   * 2. Rule 2: Consecutive 2-3 days work preference (split holiday):
+   * 2. Rule 2: Consecutive 2-4 days work preference (split holiday):
    *    - If streak is 1 or 2 (scheduling today makes it 2 or 3 days): +30 pts (ideal sweet spot!)
+   *    - If streak is 3 (scheduling today makes it 4 consecutive days): +15 pts (also good, still splits the 2 weekly rest days!)
    *    - If streak is 0 (first day of a block): +10 pts.
    *      Bonus on Sunday if Saturday was off (+20 pts) to split weekend holidays instead of having 2 consecutive weekend days off.
-   *    - If streak >= 3 (scheduling today makes it 4+ consecutive days): -50 pts (prefer taking day off to split holidays).
+   *    - If streak >= 4 (scheduling today makes it 5+ consecutive days): -50 pts (prefer taking day off so the 2 rest days are split).
    */
   const getWorkerDayPreferenceScore = (empName: string, dateStr: string, isFT: boolean): number => {
     let score = 0;
@@ -428,17 +429,20 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
       }
     }
 
-    // Rule 2: Prefer working 2-3 consecutive days to split holidays
+    // Rule 2: Prefer working 2-4 consecutive days to split holidays
     const streak = getConsecutiveWorkDaysBefore(empName, dateStr);
     const current = new Date(dateStr + 'T00:00:00');
     const dayOfWeek = current.getDay();
 
-    if (streak >= 3) {
-      // Already worked 3 days: working today makes 4+ days. Penalize to encourage a split rest day!
+    if (streak >= 4) {
+      // Already worked 4 days: working today makes 5+ consecutive days, which forces the 2 rest days to be consecutive. Penalize!
       score -= 50;
     } else if (streak === 1 || streak === 2) {
       // Working today results in 2 or 3 consecutive days: ideal!
       score += 30;
+    } else if (streak === 3) {
+      // Working today results in 4 consecutive days: also allowed & keeps rest days split (e.g. 4 + 1 work pattern)
+      score += 15;
     } else {
       // streak === 0: worker had yesterday off.
       // If today is Sunday and Saturday was a day off: giving them Sunday avoids 2 consecutive weekend days off
