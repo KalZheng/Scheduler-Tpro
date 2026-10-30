@@ -372,11 +372,11 @@ export const exportEmployeesToExcel = async (
         }
       },
       {
-        v: emp.status,
+        v: emp.isOverseasStudent ? '僑生兼職' : emp.status,
         t: 's',
         s: {
           ...cellBaseStyle,
-          font: { ...cellBaseStyle.font, bold: true, color: { rgb: emp.status === '正式夥伴' ? '1565C0' : '6A1B9A' } },
+          font: { ...cellBaseStyle.font, bold: true, color: { rgb: emp.status === '正式夥伴' ? '1565C0' : emp.isOverseasStudent ? 'D84315' : '6A1B9A' } },
           alignment: { horizontal: 'center', vertical: 'center' }
         }
       },
@@ -620,7 +620,7 @@ export const exportComparisonToExcel = async ({
           s: { fill: { fgColor: { rgb: rowBg } }, font: { bold: true, sz: 10, color: { rgb: '3E2723' } }, border: borderStyle, alignment: { vertical: 'center' } }
         },
         {
-          v: emp.status === '正式夥伴' ? '正職' : '兼職',
+          v: emp.status === '正式夥伴' ? '正職' : emp.isOverseasStudent ? '僑生' : '兼職',
           t: 's',
           s: { fill: { fgColor: { rgb: rowBg } }, font: { sz: 9, color: { rgb: '6D4C41' } }, border: borderStyle, alignment: { horizontal: 'center', vertical: 'center' } }
         }

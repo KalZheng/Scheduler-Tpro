@@ -9,8 +9,8 @@ interface ManagerEmployeeViewProps {
   setEmpSearch: (val: string) => void;
   empActiveFilter: 'all' | 'active' | 'inactive';
   setEmpActiveFilter: (val: 'all' | 'active' | 'inactive') => void;
-  empStatusFilter: 'all' | '正式夥伴' | '兼職夥伴';
-  setEmpStatusFilter: (val: 'all' | '正式夥伴' | '兼職夥伴') => void;
+  empStatusFilter: 'all' | '正式夥伴' | '兼職夥伴' | '僑生兼職';
+  setEmpStatusFilter: (val: 'all' | '正式夥伴' | '兼職夥伴' | '僑生兼職') => void;
   handleOpenEmployeeModal: (emp?: Employee) => void;
   handleDeleteEmployee: (id: string) => void;
 }
@@ -28,7 +28,9 @@ export const ManagerEmployeeView: React.FC<ManagerEmployeeViewProps> = ({
 }) => {
   const filteredEmployees = employees.filter(e => {
     const matchesSearch = e.name.toLowerCase().includes(empSearch.toLowerCase());
-    const matchesStatus = empStatusFilter === 'all' || e.status === empStatusFilter;
+    const matchesStatus =
+      empStatusFilter === 'all' ||
+      (empStatusFilter === '僑生兼職' ? e.isOverseasStudent === true : e.status === empStatusFilter);
     const matchesActive = empActiveFilter === 'all' ||
       (empActiveFilter === 'active' && e.active !== false) ||
       (empActiveFilter === 'inactive' && e.active === false);
@@ -166,6 +168,15 @@ export const ManagerEmployeeView: React.FC<ManagerEmployeeViewProps> = ({
             >
               兼職夥伴
             </button>
+            <button
+              onClick={() => setEmpStatusFilter('僑生兼職')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${empStatusFilter === '僑生兼職'
+                ? 'bg-amber-700 text-white shadow-xs'
+                : 'text-[#8D6E63] hover:text-[#3E2723]'
+                }`}
+            >
+              🎓 僑生兼職 ({employees.filter(e => e.isOverseasStudent === true).length})
+            </button>
           </div>
         </div>
       </div>
@@ -204,6 +215,12 @@ export const ManagerEmployeeView: React.FC<ManagerEmployeeViewProps> = ({
                           <span className={`w-1.5 h-1.5 rounded-full ${emp.status === '正式夥伴' ? 'bg-emerald-500' : 'bg-indigo-500'}`}></span>
                           {emp.status}
                         </span>
+                        {emp.isOverseasStudent === true && (
+                          <span className="inline-flex items-center gap-1 text-[10px] px-2.5 py-0.5 rounded-full font-bold border bg-amber-50 text-amber-800 border-amber-300">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-600"></span>
+                            🎓 僑生 (週≤20h)
+                          </span>
+                        )}
                         {emp.isNewcomer === true && (
                           <span className="inline-flex items-center gap-1 text-[10px] px-2.5 py-0.5 rounded-full font-bold border bg-pink-50 text-pink-700 border-pink-200">
                             <span className="w-1.5 h-1.5 rounded-full bg-pink-500"></span>

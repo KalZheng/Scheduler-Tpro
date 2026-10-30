@@ -14,6 +14,8 @@ interface EmployeeModalProps {
   setEmpActive: (val: boolean) => void;
   empIsNewcomer: boolean;
   setEmpIsNewcomer: (val: boolean) => void;
+  empIsOverseasStudent: boolean;
+  setEmpIsOverseasStudent: (val: boolean) => void;
   empTrainingPos: '餐吧' | 'POS機' | '後吧' | '收班' | '開早' | null;
   setEmpTrainingPos: (val: '餐吧' | 'POS機' | '後吧' | '收班' | '開早' | null) => void;
   empTrainedPoss: ('餐吧' | 'POS機' | '後吧' | '收班' | '開早')[];
@@ -42,6 +44,8 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
   setEmpActive,
   empIsNewcomer,
   setEmpIsNewcomer,
+  empIsOverseasStudent,
+  setEmpIsOverseasStudent,
   empTrainingPos,
   empTrainedPoss,
   empCertificates,
@@ -105,22 +109,53 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
 
           {/* Employee Type Selection */}
           <div>
-            <label className="block text-xs font-bold text-[#6D4C41] uppercase tracking-wider mb-2">職務類別</label>
-            <div className="grid grid-cols-2 gap-3">
-              {(['正式夥伴', '兼職夥伴'] as const).map(type => (
-                <button
-                  key={type}
-                  type="button"
-                  onClick={() => setEmpStatus(type)}
-                  className={`py-3 px-4 rounded-xl text-xs font-bold transition-all border cursor-pointer ${empStatus === type
-                    ? 'bg-[#795548] text-white border-[#795548] shadow-md shadow-[#795548]/10'
-                    : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:border-[#8D6E63]'
-                    }`}
-                >
-                  {type === '正式夥伴' ? '☕ 正式夥伴' : '🍹 兼職夥伴'}
-                </button>
-              ))}
+            <label className="block text-xs font-bold text-[#6D4C41] uppercase tracking-wider mb-2">職務類別 / 身分</label>
+            <div className="grid grid-cols-3 gap-2.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setEmpStatus('正式夥伴');
+                  setEmpIsOverseasStudent(false);
+                }}
+                className={`py-3 px-3 rounded-xl text-xs font-bold transition-all border cursor-pointer ${empStatus === '正式夥伴'
+                  ? 'bg-[#795548] text-white border-[#795548] shadow-md shadow-[#795548]/10'
+                  : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:border-[#8D6E63]'
+                  }`}
+              >
+                ☕ 正式夥伴
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setEmpStatus('兼職夥伴');
+                  setEmpIsOverseasStudent(false);
+                }}
+                className={`py-3 px-3 rounded-xl text-xs font-bold transition-all border cursor-pointer ${empStatus === '兼職夥伴' && !empIsOverseasStudent
+                  ? 'bg-[#795548] text-white border-[#795548] shadow-md shadow-[#795548]/10'
+                  : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:border-[#8D6E63]'
+                  }`}
+              >
+                🍹 一般兼職
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setEmpStatus('兼職夥伴');
+                  setEmpIsOverseasStudent(true);
+                }}
+                className={`py-3 px-3 rounded-xl text-xs font-bold transition-all border cursor-pointer ${empStatus === '兼職夥伴' && empIsOverseasStudent
+                  ? 'bg-amber-700 text-white border-amber-700 shadow-md shadow-amber-700/10'
+                  : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:border-[#8D6E63]'
+                  }`}
+              >
+                🎓 僑生兼職 (≤20h)
+              </button>
             </div>
+            {empIsOverseasStudent && (
+              <p className="mt-2 text-[11px] font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">
+                🎓 勞動部規定：僑生工讀每週實質工時上限為 20 小時，自動排班將嚴格控管單週不超過 20 小時。
+              </p>
+            )}
           </div>
 
           {/* Active Status & Newcomer Checkbox */}
