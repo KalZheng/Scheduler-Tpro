@@ -446,5 +446,81 @@ describe('autoScheduler', () => {
       expect(result.proposedSchedules[0].date).toBe('2026-10-07');
       expect(calculateEffectiveWorkHours(result.proposedSchedules[0].startTime, result.proposedSchedules[0].endTime)).toBe(4);
     });
+
+    it('strictly caps consecutive working days at 4 days (never 5 or 6 consecutive days) and FT at 5 days/week', () => {
+      // 7-day week from Mon 2026-10-05 to Sun 2026-10-11
+      const dateRange = [
+        '2026-10-05',
+        '2026-10-06',
+        '2026-10-07',
+        '2026-10-08',
+        '2026-10-09',
+        '2026-10-10',
+        '2026-10-11'
+      ];
+
+      // Even if a full-time employee (張店長) and part-time employee (李夥伴) submit availability for all 7 days
+      const availabilities: WorkerAvailability[] = [];
+      dateRange.forEach((date, idx) => {
+        availabilities.push({
+          id: `ft-${idx}`,
+          employeeName: '張店長',
+          date,
+          workplace: '濟南店',
+          startTime: '06:30',
+          endTime: '18:30',
+          createdAt: 100 + idx
+        });
+        availabilities.push({
+          id: `pt-${idx}`,
+          employeeName: '李夥伴',
+          date,
+          workplace: '濟南店',
+          startTime: '06:30',
+          endTime: '18:30',
+          createdAt: 200 + idx
+        });
+      });
+
+      const result = generatePureAutoSchedule(
+        availabilities,
+        mockEmployees,
+        [],
+        {
+          dateRange,
+          operatingStartTime: '06:30',
+          operatingEndTime: '18:00',
+          staffingDemandConfig: defaultDemandConfig
+        }
+      );
+
+      for (const empName of ['張店長', '李夥伴']) {
+        const empDates = result.proposedSchedules
+          .filter(s => s.employeeName === empName)
+          .map(s => s.date)
+          .sort();
+
+        // FT should work at most 5 days in the Mon-Sun week
+        if (empName === '張店長') {
+          expect(empDates.length).toBeLessThanOrEqual(5);
+        }
+
+        // Check max consecutive working days <= 4
+        let maxStreak = empDates.length > 0 ? 1 : 0;
+        let currentStreak = empDates.length > 0 ? 1 : 0;
+        for (let i = 1; i < empDates.length; i++) {
+          const prev = new Date(empDates[i - 1] + 'T00:00:00');
+          const curr = new Date(empDates[i] + 'T00:00:00');
+          const diff = Math.round((curr.getTime() - prev.getTime()) / (1000 * 60 * 60 * 24));
+          if (diff === 1) {
+            currentStreak++;
+            if (currentStreak > maxStreak) maxStreak = currentStreak;
+          } else {
+            currentStreak = 1;
+          }
+        }
+        expect(maxStreak).toBeLessThanOrEqual(4);
+      }
+    });
   });
 });
