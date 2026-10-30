@@ -522,5 +522,87 @@ describe('autoScheduler', () => {
         expect(maxStreak).toBeLessThanOrEqual(4);
       }
     });
+
+    it('strictly caps shifts at store closing time (e.g. 16:30 on Sunday) and prefers PT over FT when operating hours < 9h', () => {
+      // Sunday 2026-10-04 with 09:30 - 16:30 weekend hours (7 hours total, < 9h)
+      // Both FT (張店長) and PT (李夥伴, 王夥伴) submit availability up to 18:30
+      const availabilities: WorkerAvailability[] = [
+        {
+          id: 'sun-ft',
+          employeeName: '張店長',
+          date: '2026-10-04',
+          workplace: '濟南店',
+          startTime: '09:30',
+          endTime: '18:30',
+          createdAt: 1
+        },
+        {
+          id: 'sun-pt1',
+          employeeName: '李夥伴',
+          date: '2026-10-04',
+          workplace: '濟南店',
+          startTime: '09:30',
+          endTime: '18:30',
+          createdAt: 2
+        },
+        {
+          id: 'sun-pt2',
+          employeeName: '王夥伴',
+          date: '2026-10-04',
+          workplace: '濟南店',
+          startTime: '09:30',
+          endTime: '18:30',
+          createdAt: 3
+        }
+      ];
+
+      const shortWeekendConfig = {
+        ...defaultDemandConfig,
+        operatingStartTimeWeekend: '09:30',
+        operatingEndTimeWeekend: '16:30',
+        weekendMaxStaff: 2
+      };
+
+      const result = generatePureAutoSchedule(
+        availabilities,
+        mockEmployees,
+        [],
+        {
+          dateRange: ['2026-10-04'],
+          operatingStartTime: '07:30',
+          operatingEndTime: '18:30',
+          staffingDemandConfig: shortWeekendConfig
+        }
+      );
+
+      // Every shift must end on or before 16:30 (never 18:30)
+      for (const s of result.proposedSchedules) {
+        expect(s.endTime <= '16:30').toBe(true);
+        expect(s.startTime >= '09:30').toBe(true);
+      }
+
+      // PT workers should be scheduled first, saving FT (張店長) for 9h weekday shifts
+      const scheduledNames = result.proposedSchedules.map(s => s.employeeName);
+      expect(scheduledNames).toContain('李夥伴');
+      expect(scheduledNames).toContain('王夥伴');
+      expect(scheduledNames).not.toContain('張店長');
+
+      // Fallback check: if only FT (張店長) is available on that Sunday, FT is used and capped at 16:30
+      const fallbackResult = generatePureAutoSchedule(
+        [availabilities[0]],
+        mockEmployees,
+        [],
+        {
+          dateRange: ['2026-10-04'],
+          operatingStartTime: '07:30',
+          operatingEndTime: '18:30',
+          staffingDemandConfig: shortWeekendConfig
+        }
+      );
+      expect(fallbackResult.proposedSchedules.length).toBe(1);
+      expect(fallbackResult.proposedSchedules[0].employeeName).toBe('張店長');
+      expect(fallbackResult.proposedSchedules[0].startTime).toBe('09:30');
+      expect(fallbackResult.proposedSchedules[0].endTime).toBe('16:30');
+    });
   });
 });
