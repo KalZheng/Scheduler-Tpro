@@ -325,34 +325,28 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
     return (currentWeekHours + shiftEffectiveHours) > 20;
   };
 
-  // Helper: Check if worker can work on this date (not already scheduled, no consecutive 7 days, overseas <= 20h/week)
-  const canWorkerWorkOnDate = (empName: string, dateStr: string): boolean => {
-    const empKey = empName.trim().toLowerCase();
+  /**
+   * Helper to check if a set of date strings contains more than maxConsecutive consecutive work days
+   */
+  const hasMoreThanMaxConsecutiveDays = (dateStrings: string[], maxConsecutive: number): boolean => {
+    const uniqueDates = Array.from(new Set(dateStrings)).sort();
+    if (uniqueDates.length <= maxConsecutive) return false;
 
-    // Already scheduled on this date?
-    const alreadyScheduled = virtualSchedules.some(
-      s => s && s.date === dateStr && s.employeeName && s.employeeName.trim().toLowerCase() === empKey
-    );
-    if (alreadyScheduled) return false;
-
-    // Consecutive 7 days check
-    const currentDates = Array.from(empAssignedDates[empKey] || new Set<string>());
-    const prospective = Array.from(new Set([...currentDates, dateStr]));
-    if (hasSevenConsecutiveDays(prospective)) {
-      return false;
-    }
-
-    // Overseas student (僑外生) 20-hour weekly limit check:
-    // Minimum shift is 4 effective hours, so if they already have > 16h this week, they cannot take another shift.
-    const emp = safeEmployees.find(e => e.name && e.name.trim().toLowerCase() === empKey);
-    if (emp?.isOverseasStudent) {
-      const currentWeekHours = getWeeklyEffectiveHours(empName, dateStr);
-      if (currentWeekHours + 4 > 20) {
-        return false;
+    let consecutiveCount = 1;
+    for (let i = 1; i < uniqueDates.length; i++) {
+      const prev = new Date(uniqueDates[i - 1] + 'T00:00:00');
+      const curr = new Date(uniqueDates[i] + 'T00:00:00');
+      const diffDays = Math.round((curr.getTime() - prev.getTime()) / (1000 * 60 * 60 * 24));
+      if (diffDays === 1) {
+        consecutiveCount++;
+        if (consecutiveCount > maxConsecutive) {
+          return true;
+        }
+      } else {
+        consecutiveCount = 1;
       }
     }
-
-    return true;
+    return false;
   };
 
   /**
@@ -384,6 +378,44 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
     return count;
   };
 
+  // Helper: Check if worker can work on this date (not already scheduled, <= 4 consecutive days, FT <= 5 days/week, overseas <= 20h/week)
+  const canWorkerWorkOnDate = (empName: string, dateStr: string): boolean => {
+    const empKey = empName.trim().toLowerCase();
+
+    // Already scheduled on this date?
+    const alreadyScheduled = virtualSchedules.some(
+      s => s && s.date === dateStr && s.employeeName && s.employeeName.trim().toLowerCase() === empKey
+    );
+    if (alreadyScheduled) return false;
+
+    // Consecutive days check: strictly max 4 consecutive work days (Rule 2: 2-4 consecutive days, never 5 or 6+)
+    const currentDates = Array.from(empAssignedDates[empKey] || new Set<string>());
+    const prospective = Array.from(new Set([...currentDates, dateStr]));
+    if (hasSevenConsecutiveDays(prospective) || hasMoreThanMaxConsecutiveDays(prospective, 4)) {
+      return false;
+    }
+
+    const emp = safeEmployees.find(e => e.name && e.name.trim().toLowerCase() === empKey);
+
+    // Rule 1: Full-time (正式夥伴) works at most 5 days per week to avoid 6th-day overtime pay
+    if (emp?.status === '正式夥伴') {
+      if (getDaysScheduledInWeek(empName, dateStr) >= 5) {
+        return false;
+      }
+    }
+
+    // Overseas student (僑外生) 20-hour weekly limit check:
+    // Minimum shift is 4 effective hours, so if they already have > 16h this week, they cannot take another shift.
+    if (emp?.isOverseasStudent) {
+      const currentWeekHours = getWeeklyEffectiveHours(empName, dateStr);
+      if (currentWeekHours + 4 > 20) {
+        return false;
+      }
+    }
+
+    return true;
+  };
+
   /**
    * Helper to count consecutive days worked immediately prior to dateStr
    */
@@ -409,14 +441,11 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
 
   /**
    * Calculate preference score for an employee on dateStr:
-   * 1. Rule 1: Full-time 5-day preference (overtime on 6th day penalty):
-   *    If isFT and week count >= 5, heavily deprioritize (-100 pts) so other workers / PT are scheduled first to avoid 6th day overtime.
+   * 1. Rule 1: Full-time 5-day cap is enforced in canWorkerWorkOnDate (and penalized if >= 5).
    * 2. Rule 2: Consecutive 2-4 days work preference (split holiday):
    *    - If streak is 1 or 2 (scheduling today makes it 2 or 3 days): +30 pts (ideal sweet spot!)
-   *    - If streak is 3 (scheduling today makes it 4 consecutive days): +15 pts (also good, still splits the 2 weekly rest days!)
-   *    - If streak is 0 (first day of a block): +10 pts.
-   *      Bonus on Sunday if Saturday was off (+20 pts) to split weekend holidays instead of having 2 consecutive weekend days off.
-   *    - If streak >= 4 (scheduling today makes it 5+ consecutive days): -50 pts (prefer taking day off so the 2 rest days are split).
+   *    - If streak is 0 (first day of a block): +15 pts (+25 pts on Sunday if Saturday was off).
+   *    - If streak is 3 (scheduling today makes it 4 consecutive days): -20 pts (allowed when needed, while preferring 2-3 days when another candidate is available).
    */
   const getWorkerDayPreferenceScore = (empName: string, dateStr: string, isFT: boolean): number => {
     let score = 0;
@@ -435,14 +464,13 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
     const dayOfWeek = current.getDay();
 
     if (streak >= 4) {
-      // Already worked 4 days: working today makes 5+ consecutive days, which forces the 2 rest days to be consecutive. Penalize!
-      score -= 50;
+      score -= 100;
     } else if (streak === 1 || streak === 2) {
       // Working today results in 2 or 3 consecutive days: ideal!
       score += 30;
     } else if (streak === 3) {
-      // Working today results in 4 consecutive days: also allowed & keeps rest days split (e.g. 4 + 1 work pattern)
-      score += 15;
+      // Working today results in 4 consecutive days: allowed (up to 4 days max), but prefer candidates with 0-2 streak first
+      score -= 20;
     } else {
       // streak === 0: worker had yesterday off.
       // If today is Sunday and Saturday was a day off: giving them Sunday avoids 2 consecutive weekend days off
@@ -452,12 +480,12 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
         const satStr = formatDateString(sat);
         const empKey = empName.trim().toLowerCase();
         if (!empAssignedDates[empKey]?.has(satStr)) {
-          score += 20; // Split weekend holiday!
+          score += 25; // Split weekend holiday!
         } else {
-          score += 10;
+          score += 15;
         }
       } else {
-        score += 10;
+        score += 15;
       }
     }
 
