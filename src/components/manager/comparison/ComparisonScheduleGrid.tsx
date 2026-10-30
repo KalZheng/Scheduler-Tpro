@@ -193,9 +193,13 @@ export const ComparisonScheduleGrid: React.FC<ComparisonScheduleGridProps> = ({
                           <div className="flex items-center justify-between gap-1.5">
                             <span className="font-extrabold text-[#3E2723] truncate">{emp.name}</span>
                             <span className={`text-[9px] px-1 py-0.2 rounded font-bold shrink-0 ${
-                              emp.status === '正式夥伴' ? 'bg-[#795548] text-white' : 'bg-[#DAC0A3]/40 text-[#6D4C41]'
+                              emp.status === '正式夥伴'
+                                ? 'bg-[#795548] text-white'
+                                : emp.isOverseasStudent
+                                ? 'bg-amber-600 text-white'
+                                : 'bg-[#DAC0A3]/40 text-[#6D4C41]'
                             }`}>
-                              {emp.status === '正式夥伴' ? '正職' : '兼職'}
+                              {emp.status === '正式夥伴' ? '正職' : emp.isOverseasStudent ? '僑生' : '兼職'}
                             </span>
                           </div>
                         </td>

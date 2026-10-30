@@ -1,5 +1,5 @@
 import type { WorkSchedule, WorkerAvailability, Employee, StaffingTarget, ShiftPreset, StaffingDemandConfig } from '../services/scheduler';
-import { isShiftActiveAtHour, hasSevenConsecutiveDays, getColorFromName, compareTimeStrings } from './dateUtils';
+import { isShiftActiveAtHour, hasSevenConsecutiveDays, getColorFromName, compareTimeStrings, formatDateString, calculateEffectiveWorkHours } from './dateUtils';
 
 export interface AutoScheduleOptions {
   dateRange: string[];
@@ -272,7 +272,60 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
     });
   };
 
-  // Helper: Check if worker can work on this date (not already scheduled, no consecutive 7 days)
+  /**
+   * Helper to calculate how many effective work hours an employee has already been scheduled
+   * within the calendar week (Mon-Sun) of dateStr.
+   */
+  const getWeeklyEffectiveHours = (empName: string, dateStr: string): number => {
+    const empKey = empName.trim().toLowerCase();
+    const current = new Date(dateStr + 'T00:00:00');
+    const dayOfWeek = current.getDay();
+    const diffToMonday = (dayOfWeek === 0 ? -6 : 1) - dayOfWeek;
+    const monday = new Date(current);
+    monday.setDate(current.getDate() + diffToMonday);
+
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+
+    const monStr = formatDateString(monday);
+    const sunStr = formatDateString(sunday);
+
+    let totalHours = 0;
+    for (const s of virtualSchedules) {
+      if (
+        s &&
+        s.employeeName &&
+        s.employeeName.trim().toLowerCase() === empKey &&
+        s.date >= monStr &&
+        s.date <= sunStr &&
+        s.startTime &&
+        s.endTime
+      ) {
+        totalHours += calculateEffectiveWorkHours(s.startTime, s.endTime);
+      }
+    }
+    return totalHours;
+  };
+
+  /**
+   * Helper: Check if assigning [candStart, candEnd] on dateStr to empName would violate
+   * the Ministry of Labor 20-hour weekly cap for overseas students (僑外生每週工時上限 20 小時).
+   */
+  const wouldExceedOverseasWeeklyLimit = (
+    empName: string,
+    dateStr: string,
+    candStart: string,
+    candEnd: string
+  ): boolean => {
+    const emp = safeEmployees.find(e => e.name && e.name.trim().toLowerCase() === empName.trim().toLowerCase());
+    if (!emp?.isOverseasStudent) return false;
+
+    const currentWeekHours = getWeeklyEffectiveHours(empName, dateStr);
+    const shiftEffectiveHours = calculateEffectiveWorkHours(candStart, candEnd);
+    return (currentWeekHours + shiftEffectiveHours) > 20;
+  };
+
+  // Helper: Check if worker can work on this date (not already scheduled, no consecutive 7 days, overseas <= 20h/week)
   const canWorkerWorkOnDate = (empName: string, dateStr: string): boolean => {
     const empKey = empName.trim().toLowerCase();
 
@@ -289,7 +342,162 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
       return false;
     }
 
+    // Overseas student (僑外生) 20-hour weekly limit check:
+    // Minimum shift is 4 effective hours, so if they already have > 16h this week, they cannot take another shift.
+    const emp = safeEmployees.find(e => e.name && e.name.trim().toLowerCase() === empKey);
+    if (emp?.isOverseasStudent) {
+      const currentWeekHours = getWeeklyEffectiveHours(empName, dateStr);
+      if (currentWeekHours + 4 > 20) {
+        return false;
+      }
+    }
+
     return true;
+  };
+
+  /**
+   * Helper to count how many days an employee is already scheduled in the calendar week (Mon-Sun) of dateStr
+   */
+  const getDaysScheduledInWeek = (empName: string, dateStr: string): number => {
+    const empKey = empName.trim().toLowerCase();
+    const dates = empAssignedDates[empKey];
+    if (!dates || dates.size === 0) return 0;
+
+    const current = new Date(dateStr + 'T00:00:00');
+    const dayOfWeek = current.getDay();
+    const diffToMonday = (dayOfWeek === 0 ? -6 : 1) - dayOfWeek;
+    const monday = new Date(current);
+    monday.setDate(current.getDate() + diffToMonday);
+
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+
+    const monStr = formatDateString(monday);
+    const sunStr = formatDateString(sunday);
+
+    let count = 0;
+    dates.forEach(d => {
+      if (d >= monStr && d <= sunStr) {
+        count++;
+      }
+    });
+    return count;
+  };
+
+  /**
+   * Helper to count consecutive days worked immediately prior to dateStr
+   */
+  const getConsecutiveWorkDaysBefore = (empName: string, dateStr: string): number => {
+    const empKey = empName.trim().toLowerCase();
+    const dates = empAssignedDates[empKey];
+    if (!dates || dates.size === 0) return 0;
+
+    let streak = 0;
+    const current = new Date(dateStr + 'T00:00:00');
+    for (let i = 1; i <= 6; i++) {
+      const prev = new Date(current);
+      prev.setDate(current.getDate() - i);
+      const prevStr = formatDateString(prev);
+      if (dates.has(prevStr)) {
+        streak++;
+      } else {
+        break;
+      }
+    }
+    return streak;
+  };
+
+  /**
+   * Calculate preference score for an employee on dateStr:
+   * 1. Rule 1: Full-time 5-day preference (overtime on 6th day penalty):
+   *    If isFT and week count >= 5, heavily deprioritize (-100 pts) so other workers / PT are scheduled first to avoid 6th day overtime.
+   * 2. Rule 2: Consecutive 2-3 days work preference (split holiday):
+   *    - If streak is 1 or 2 (scheduling today makes it 2 or 3 days): +30 pts (ideal sweet spot!)
+   *    - If streak is 0 (first day of a block): +10 pts.
+   *      Bonus on Sunday if Saturday was off (+20 pts) to split weekend holidays instead of having 2 consecutive weekend days off.
+   *    - If streak >= 3 (scheduling today makes it 4+ consecutive days): -50 pts (prefer taking day off to split holidays).
+   */
+  const getWorkerDayPreferenceScore = (empName: string, dateStr: string, isFT: boolean): number => {
+    let score = 0;
+
+    // Rule 1: Full-time 5 days preference (avoid 6th day overtime)
+    if (isFT) {
+      const weekCount = getDaysScheduledInWeek(empName, dateStr);
+      if (weekCount >= 5) {
+        score -= 100;
+      }
+    }
+
+    // Rule 2: Prefer working 2-3 consecutive days to split holidays
+    const streak = getConsecutiveWorkDaysBefore(empName, dateStr);
+    const current = new Date(dateStr + 'T00:00:00');
+    const dayOfWeek = current.getDay();
+
+    if (streak >= 3) {
+      // Already worked 3 days: working today makes 4+ days. Penalize to encourage a split rest day!
+      score -= 50;
+    } else if (streak === 1 || streak === 2) {
+      // Working today results in 2 or 3 consecutive days: ideal!
+      score += 30;
+    } else {
+      // streak === 0: worker had yesterday off.
+      // If today is Sunday and Saturday was a day off: giving them Sunday avoids 2 consecutive weekend days off
+      if (dayOfWeek === 0) {
+        const sat = new Date(current);
+        sat.setDate(current.getDate() - 1);
+        const satStr = formatDateString(sat);
+        const empKey = empName.trim().toLowerCase();
+        if (!empAssignedDates[empKey]?.has(satStr)) {
+          score += 20; // Split weekend holiday!
+        } else {
+          score += 10;
+        }
+      } else {
+        score += 10;
+      }
+    }
+
+    return score;
+  };
+
+  /**
+   * Helper to compare candidates according to FT status, 5-day overtime avoidance,
+   * 2-3 consecutive days preference, and fair rotation.
+   */
+  const compareCandidatePreferences = (
+    a: WorkerAvailability,
+    b: WorkerAvailability,
+    dateStr: string,
+    preferFT: boolean
+  ): number => {
+    const empA = safeEmployees.find(e => e.name.trim().toLowerCase() === a.employeeName.trim().toLowerCase());
+    const empB = safeEmployees.find(e => e.name.trim().toLowerCase() === b.employeeName.trim().toLowerCase());
+    const isFTA = empA?.status === '正式夥伴';
+    const isFTB = empB?.status === '正式夥伴';
+
+    const prefScoreA = getWorkerDayPreferenceScore(a.employeeName, dateStr, !!isFTA);
+    const prefScoreB = getWorkerDayPreferenceScore(b.employeeName, dateStr, !!isFTB);
+
+    let baseFTA = 0;
+    let baseFTB = 0;
+    if (preferFT) {
+      if (isFTA) baseFTA += 60;
+      if (isFTB) baseFTB += 60;
+    }
+
+    const totalScoreA = baseFTA + prefScoreA;
+    const totalScoreB = baseFTB + prefScoreB;
+
+    if (totalScoreA !== totalScoreB) {
+      return totalScoreB - totalScoreA; // higher score first
+    }
+
+    // Fair rotation: fewer total shifts first
+    const countA = empShiftCounts[a.employeeName.trim().toLowerCase()] || 0;
+    const countB = empShiftCounts[b.employeeName.trim().toLowerCase()] || 0;
+    if (countA !== countB) return countA - countB;
+
+    return 0;
   };
 
   // Sort dates chronologically
@@ -346,65 +554,56 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
         const pool = openingCandidates.filter(a => remainingAvails.some(r => r.id === a.id));
         if (pool.length === 0) break;
 
-        // Sort: slot 1 prefers FT; slot 2 on weekdays prefers PT to allow staggered 5.5h shift and free up afternoon!
+        // Sort candidates: considers FT status, FT 5-day overtime avoidance, 2-3 consecutive days fit, and fair rotation
         pool.sort((a, b) => {
-          const empA = safeEmployees.find(e => e.name.trim().toLowerCase() === a.employeeName.trim().toLowerCase());
-          const empB = safeEmployees.find(e => e.name.trim().toLowerCase() === b.employeeName.trim().toLowerCase());
-          const isFTA = empA?.status === '正式夥伴';
-          const isFTB = empB?.status === '正式夥伴';
-
-          if (slot === 1 || isWeekend) {
-            if (prioritizeFullTime && isFTA !== isFTB) return isFTA ? -1 : 1;
-          } else {
-            // Slot 2 on weekdays: prefer PT so PT can work 5.5h, freeing afternoon for closing!
-            if (isFTA !== isFTB) return isFTA ? 1 : -1;
-          }
-
-          const countA = empShiftCounts[a.employeeName.trim().toLowerCase()] || 0;
-          const countB = empShiftCounts[b.employeeName.trim().toLowerCase()] || 0;
-          if (countA !== countB) return countA - countB;
-
+          const preferFT = (slot === 1 || isWeekend) ? (prioritizeFullTime ?? true) : false;
+          const cmp = compareCandidatePreferences(a, b, dateStr, preferFT);
+          if (cmp !== 0) return cmp;
           return compareTimeStrings(a.startTime, b.startTime);
         });
 
-        const cand = pool[0];
-        if (!cand) break;
-        if (!canWorkerWorkOnDate(cand.employeeName, dateStr)) continue;
+        for (const cand of pool) {
+          if (!canWorkerWorkOnDate(cand.employeeName, dateStr)) continue;
 
-        const emp = safeEmployees.find(e => e.name.trim().toLowerCase() === cand.employeeName.trim().toLowerCase());
-        const isFT = emp?.status === '正式夥伴';
+          const emp = safeEmployees.find(e => e.name.trim().toLowerCase() === cand.employeeName.trim().toLowerCase());
+          const isFT = emp?.status === '正式夥伴';
 
-        const openStart = dayOpenStart;
-        const openStartMins = dayOpenStartMins;
-        const candEndMins = timeToMinutes(cand.endTime);
-        const availDurationMins = candEndMins - openStartMins;
+          const openStart = dayOpenStart;
+          const openStartMins = dayOpenStartMins;
+          const candEndMins = timeToMinutes(cand.endTime);
+          const availDurationMins = candEndMins - openStartMins;
 
-        // Rules 1, 2, 3:
-        // 8h work -> 9h span (1h break). 4h work -> 4.5h span (30m break).
-        // Intermediate spans (5.5h, 6.5h, 7.5h) only unless it is a must.
-        let candidateSpans = [9.0, 4.5, 7.5, 6.5, 5.5];
-        if (slot >= 2 && !isFT && !isWeekend) {
-          candidateSpans = [4.5, 5.5, 9.0, 7.5, 6.5];
-        }
+          // Rules 1, 2, 3:
+          // 8h work -> 9h span (1h break). 4h work -> 4.5h span (30m break).
+          // Intermediate spans (5.5h, 6.5h, 7.5h) only unless it is a must.
+          let candidateSpans = [9.0, 4.5, 7.5, 6.5, 5.5];
+          if (slot >= 2 && !isFT && !isWeekend) {
+            candidateSpans = [4.5, 5.5, 9.0, 7.5, 6.5];
+          }
 
-        let bestEndMins = -1;
-        for (const span of candidateSpans) {
-          const durMins = Math.round(span * 60);
-          if (durMins > availDurationMins) continue;
-          const endM = openStartMins + durMins;
-          const endStr = minutesToTime(endM);
-          if (!wouldExceedCap(openStart, endStr, dateStr, isWeekend)) {
-            bestEndMins = endM;
+          let bestEndMins = -1;
+          for (const span of candidateSpans) {
+            const durMins = Math.round(span * 60);
+            if (durMins > availDurationMins) continue;
+            const endM = openStartMins + durMins;
+            const endStr = minutesToTime(endM);
+            if (
+              !wouldExceedCap(openStart, endStr, dateStr, isWeekend) &&
+              !wouldExceedOverseasWeeklyLimit(cand.employeeName, dateStr, openStart, endStr)
+            ) {
+              bestEndMins = endM;
+              break;
+            }
+          }
+
+          if (bestEndMins !== -1) {
+            const finalEnd = minutesToTime(bestEndMins);
+            const useful = countCoveredDeficitHours(openStart, finalEnd, dateStr, isWeekend);
+            commitShift(cand, openStart, finalEnd, '開早班', `滿足 ${openStart} 開早 ${openingTarget} 人守備需求`, useful);
+            remainingAvails = remainingAvails.filter(a => a.id !== cand.id);
+            assignedOpening++;
             break;
           }
-        }
-
-        if (bestEndMins !== -1) {
-          const finalEnd = minutesToTime(bestEndMins);
-          const useful = countCoveredDeficitHours(openStart, finalEnd, dateStr, isWeekend);
-          commitShift(cand, openStart, finalEnd, '開早班', `滿足 ${openStart} 開早 ${openingTarget} 人守備需求`, useful);
-          remainingAvails = remainingAvails.filter(a => a.id !== cand.id);
-          assignedOpening++;
         }
       }
     }
@@ -427,18 +626,10 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
         return eMins >= (dayCloseEndMins - 30) && (eMins - sMins) >= 4 * 60;
       });
 
-      // Sort closing candidates: FT first, then fewest shifts (fairness), then latest end time
+      // Sort closing candidates: FT status, 5-day overtime avoidance, 2-3 consecutive days fit, fairness, latest end time
       closingCandidates.sort((a, b) => {
-        const empA = safeEmployees.find(e => e.name.trim().toLowerCase() === a.employeeName.trim().toLowerCase());
-        const empB = safeEmployees.find(e => e.name.trim().toLowerCase() === b.employeeName.trim().toLowerCase());
-        const isFTA = empA?.status === '正式夥伴';
-        const isFTB = empB?.status === '正式夥伴';
-        if (prioritizeFullTime && isFTA !== isFTB) return isFTA ? -1 : 1;
-
-        const countA = empShiftCounts[a.employeeName.trim().toLowerCase()] || 0;
-        const countB = empShiftCounts[b.employeeName.trim().toLowerCase()] || 0;
-        if (countA !== countB) return countA - countB;
-
+        const cmp = compareCandidatePreferences(a, b, dateStr, prioritizeFullTime ?? true);
+        if (cmp !== 0) return cmp;
         return compareTimeStrings(b.endTime, a.endTime); // latest endTime first
       });
 
@@ -476,7 +667,10 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
           const sStr = minutesToTime(testStartMins);
           const eStr = minutesToTime(targetEndMins);
 
-          if (!wouldExceedCap(sStr, eStr, dateStr, isWeekend)) {
+          if (
+            !wouldExceedCap(sStr, eStr, dateStr, isWeekend) &&
+            !wouldExceedOverseasWeeklyLimit(cand.employeeName, dateStr, sStr, eStr)
+          ) {
             const useful = countCoveredDeficitHours(sStr, eStr, dateStr, isWeekend);
             const isStandard = span === 9.0 || span === 4.5;
             const score = useful * 20 + (isStandard ? 30 : 0) + span;
@@ -501,18 +695,10 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
     // =========================================================================
     // PHASE 3: 尖峰與中段補缺 (Midday Rush & Deficit Fill with Strict Caps)
     // =========================================================================
-    // Sort remaining candidates: FT first, then fewest shifts assigned (fair rotation), then earliest start
+    // Sort remaining candidates: FT status, 5-day overtime avoidance, 2-3 consecutive days fit, fairness, earliest start
     remainingAvails.sort((a, b) => {
-      const empA = safeEmployees.find(e => e.name.trim().toLowerCase() === a.employeeName.trim().toLowerCase());
-      const empB = safeEmployees.find(e => e.name.trim().toLowerCase() === b.employeeName.trim().toLowerCase());
-      const isFTA = empA?.status === '正式夥伴';
-      const isFTB = empB?.status === '正式夥伴';
-      if (prioritizeFullTime && isFTA !== isFTB) return isFTA ? -1 : 1;
-
-      const countA = empShiftCounts[a.employeeName.trim().toLowerCase()] || 0;
-      const countB = empShiftCounts[b.employeeName.trim().toLowerCase()] || 0;
-      if (countA !== countB) return countA - countB;
-
+      const cmp = compareCandidatePreferences(a, b, dateStr, prioritizeFullTime ?? true);
+      if (cmp !== 0) return cmp;
       return compareTimeStrings(a.startTime, b.startTime);
     });
 
@@ -595,8 +781,11 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
             const sStr = minutesToTime(sM);
             const eStr = minutesToTime(eM);
 
-            // Strict hourly cap: never schedule if any hour exceeds cap
-            if (wouldExceedCap(sStr, eStr, dateStr, isWeekend)) {
+            // Strict hourly cap & overseas student 20h weekly limit: never schedule if violated
+            if (
+              wouldExceedCap(sStr, eStr, dateStr, isWeekend) ||
+              wouldExceedOverseasWeeklyLimit(cand.employeeName, dateStr, sStr, eStr)
+            ) {
               continue;
             }
 
