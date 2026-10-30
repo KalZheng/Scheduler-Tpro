@@ -186,12 +186,13 @@ function App() {
   const [empTrainedPoss, setEmpTrainedPoss] = useState<('餐吧' | 'POS機' | '後吧' | '收班' | '開早')[]>([]);
   const [empCertificates, setEmpCertificates] = useState<('FBI' | '黃金吧檯手')[]>([]);
   const [empIsNewcomer, setEmpIsNewcomer] = useState<boolean>(false);
+  const [empIsOverseasStudent, setEmpIsOverseasStudent] = useState<boolean>(false);
   const [isUploadingExcel, setIsUploadingExcel] = useState<boolean>(false);
   const [uploadExcelStatus, setUploadExcelStatus] = useState<'idle' | 'success' | 'error' | 'noconfig'>('idle');
   const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
 
   const [empSearch, setEmpSearch] = useState('');
-  const [empStatusFilter, setEmpStatusFilter] = useState<'all' | '正式夥伴' | '兼職夥伴'>('all');
+  const [empStatusFilter, setEmpStatusFilter] = useState<'all' | '正式夥伴' | '兼職夥伴' | '僑生兼職'>('all');
   const [empActiveFilter, setEmpActiveFilter] = useState<'all' | 'active' | 'inactive'>('active');
 
   const [workerName, setWorkerName] = useState(() => localStorage.getItem('scheduler_worker_name') || '');
@@ -333,6 +334,7 @@ function App() {
       setEmpStatus(emp.status);
       setEmpActive(emp.active !== false);
       setEmpIsNewcomer(emp.isNewcomer || false);
+      setEmpIsOverseasStudent(emp.isOverseasStudent || false);
       setEmpTrainingPos(emp.trainingPosition || null);
       setEmpTrainedPoss(emp.trainedPositions || []);
       setEmpCertificates(emp.certificates || []);
@@ -344,6 +346,7 @@ function App() {
       setEmpStatus('兼職夥伴');
       setEmpActive(true);
       setEmpIsNewcomer(false);
+      setEmpIsOverseasStudent(false);
       setEmpTrainingPos(null);
       setEmpTrainedPoss([]);
       setEmpCertificates([]);
@@ -367,6 +370,7 @@ function App() {
       status: empStatus,
       active: empActive,
       isNewcomer: empIsNewcomer,
+      isOverseasStudent: empStatus === '兼職夥伴' ? empIsOverseasStudent : false,
       trainingPosition: empTrainingPos,
       trainedPositions: empTrainedPoss,
       certificates: empCertificates
@@ -2252,6 +2256,8 @@ function App() {
         setEmpActive={setEmpActive}
         empIsNewcomer={empIsNewcomer}
         setEmpIsNewcomer={setEmpIsNewcomer}
+        empIsOverseasStudent={empIsOverseasStudent}
+        setEmpIsOverseasStudent={setEmpIsOverseasStudent}
         empTrainingPos={empTrainingPos}
         setEmpTrainingPos={setEmpTrainingPos}
         empTrainedPoss={empTrainedPoss}

@@ -256,4 +256,195 @@ describe('autoScheduler', () => {
       expect(isShiftActiveAtHour('08:30', '12:30', 12)).toBe(false);
     });
   });
+
+  describe('new preferences: FT 5-day overtime avoidance and 2-3 consecutive days', () => {
+    it('prefers PT over FT on 6th day of the week to avoid paying overtime for full-time workers', () => {
+      // 張店長 is FT, already worked 5 days this week (2026-10-05 to 2026-10-09, Mon to Fri)
+      const existingSchedules: WorkSchedule[] = [
+        { id: 's-1', title: '張店長', employeeName: '張店長', date: '2026-10-05', startTime: '06:30', endTime: '15:30', workplace: '濟南店', color: 'blue', createdAt: 1 },
+        { id: 's-2', title: '張店長', employeeName: '張店長', date: '2026-10-06', startTime: '06:30', endTime: '15:30', workplace: '濟南店', color: 'blue', createdAt: 2 },
+        { id: 's-3', title: '張店長', employeeName: '張店長', date: '2026-10-07', startTime: '06:30', endTime: '15:30', workplace: '濟南店', color: 'blue', createdAt: 3 },
+        { id: 's-4', title: '張店長', employeeName: '張店長', date: '2026-10-08', startTime: '06:30', endTime: '15:30', workplace: '濟南店', color: 'blue', createdAt: 4 },
+        { id: 's-5', title: '張店長', employeeName: '張店長', date: '2026-10-09', startTime: '06:30', endTime: '15:30', workplace: '濟南店', color: 'blue', createdAt: 5 }
+      ];
+
+      // On Saturday 2026-10-10, both 張店長 (FT, 5 days already) and 李夥伴 (PT, 0 days) are available
+      const availabilities: WorkerAvailability[] = [
+        {
+          id: 'avail-sat-ft',
+          employeeName: '張店長',
+          date: '2026-10-10',
+          workplace: '濟南店',
+          startTime: '06:30',
+          endTime: '15:30',
+          createdAt: 10
+        },
+        {
+          id: 'avail-sat-pt',
+          employeeName: '李夥伴',
+          date: '2026-10-10',
+          workplace: '濟南店',
+          startTime: '06:30',
+          endTime: '15:30',
+          createdAt: 11
+        }
+      ];
+
+      const result = generateAutoSchedule(
+        availabilities,
+        existingSchedules,
+        mockEmployees,
+        [],
+        [],
+        [],
+        {
+          dateRange: ['2026-10-10'],
+          prioritizeFullTime: true,
+          maxHoursPerShift: 8,
+          onlyFillDeficits: true,
+          operatingStartTime: '06:30',
+          operatingEndTime: '18:00',
+          staffingDemandConfig: {
+            ...defaultDemandConfig,
+            openingStaffCount: 1,
+            weekdayMaxStaff: 1,
+            weekendMaxStaff: 1
+          }
+        }
+      );
+
+      // 李夥伴 (PT) should be picked instead of assigning 張店長 a 6th overtime day!
+      expect(result.proposedSchedules.length).toBe(1);
+      expect(result.proposedSchedules[0].employeeName).toBe('李夥伴');
+    });
+
+    it('prefers candidate with 1-2 consecutive days over candidate with 3 consecutive days to split holidays', () => {
+      // 李夥伴 worked 3 days in a row (2026-10-05, 10-06, 10-07)
+      // 王夥伴 worked 1 day (2026-10-07)
+      const existingSchedules: WorkSchedule[] = [
+        { id: 's-1', title: '李夥伴', employeeName: '李夥伴', date: '2026-10-05', startTime: '06:30', endTime: '15:30', workplace: '濟南店', color: 'blue', createdAt: 1 },
+        { id: 's-2', title: '李夥伴', employeeName: '李夥伴', date: '2026-10-06', startTime: '06:30', endTime: '15:30', workplace: '濟南店', color: 'blue', createdAt: 2 },
+        { id: 's-3', title: '李夥伴', employeeName: '李夥伴', date: '2026-10-07', startTime: '06:30', endTime: '15:30', workplace: '濟南店', color: 'blue', createdAt: 3 },
+        { id: 's-4', title: '王夥伴', employeeName: '王夥伴', date: '2026-10-07', startTime: '06:30', endTime: '15:30', workplace: '濟南店', color: 'green', createdAt: 4 }
+      ];
+
+      // On Thursday 2026-10-08, both are available.
+      // Scheduling 李夥伴 would make it 4 consecutive days (violates 2-3 consecutive days preference).
+      // Scheduling 王夥伴 makes it 2 consecutive days (in the ideal 2-3 sweet spot!).
+      const availabilities: WorkerAvailability[] = [
+        {
+          id: 'avail-thu-1',
+          employeeName: '李夥伴',
+          date: '2026-10-08',
+          workplace: '濟南店',
+          startTime: '06:30',
+          endTime: '15:30',
+          createdAt: 10
+        },
+        {
+          id: 'avail-thu-2',
+          employeeName: '王夥伴',
+          date: '2026-10-08',
+          workplace: '濟南店',
+          startTime: '06:30',
+          endTime: '15:30',
+          createdAt: 11
+        }
+      ];
+
+      const result = generateAutoSchedule(
+        availabilities,
+        existingSchedules,
+        mockEmployees,
+        [],
+        [],
+        [],
+        {
+          dateRange: ['2026-10-08'],
+          prioritizeFullTime: true,
+          maxHoursPerShift: 8,
+          onlyFillDeficits: true,
+          operatingStartTime: '06:30',
+          operatingEndTime: '18:00',
+          staffingDemandConfig: {
+            ...defaultDemandConfig,
+            openingStaffCount: 1,
+            weekdayMaxStaff: 1,
+            weekendMaxStaff: 1
+          }
+        }
+      );
+
+      expect(result.proposedSchedules.length).toBe(1);
+      expect(result.proposedSchedules[0].employeeName).toBe('王夥伴');
+    });
+
+    it('strictly enforces the 20-hour weekly cap for overseas students (僑生兼職)', () => {
+      const employeesWithOverseas: Employee[] = [
+        ...mockEmployees,
+        {
+          id: 'emp-overseas',
+          name: '陳僑生',
+          phone: '0955667788',
+          status: '兼職夥伴',
+          isOverseasStudent: true,
+          active: true,
+          trainedPositions: ['開早', '餐吧'],
+          createdAt: 4000
+        }
+      ];
+
+      // 陳僑生 already worked 16 effective hours in the week (Mon 8h + Tue 8h)
+      const existingSchedules: WorkSchedule[] = [
+        { id: 'os-1', title: '陳僑生', employeeName: '陳僑生', date: '2026-10-05', startTime: '06:30', endTime: '15:30', workplace: '濟南店', color: 'amber', createdAt: 1 },
+        { id: 'os-2', title: '陳僑生', employeeName: '陳僑生', date: '2026-10-06', startTime: '06:30', endTime: '15:30', workplace: '濟南店', color: 'amber', createdAt: 2 }
+      ];
+
+      // On Wed 2026-10-07 ( permits at most 4h more work to stay <= 20h) and Thu 2026-10-08 (should be blocked once at 20h)
+      const availabilities: WorkerAvailability[] = [
+        {
+          id: 'avail-os-wed',
+          employeeName: '陳僑生',
+          date: '2026-10-07',
+          workplace: '濟南店',
+          startTime: '06:30',
+          endTime: '15:30',
+          createdAt: 10
+        },
+        {
+          id: 'avail-os-thu',
+          employeeName: '陳僑生',
+          date: '2026-10-08',
+          workplace: '濟南店',
+          startTime: '06:30',
+          endTime: '15:30',
+          createdAt: 11
+        }
+      ];
+
+      const result = generateAutoSchedule(
+        availabilities,
+        existingSchedules,
+        employeesWithOverseas,
+        [],
+        [],
+        [],
+        {
+          dateRange: ['2026-10-07', '2026-10-08'],
+          prioritizeFullTime: true,
+          maxHoursPerShift: 8,
+          onlyFillDeficits: true,
+          operatingStartTime: '06:30',
+          operatingEndTime: '18:00',
+          staffingDemandConfig: defaultDemandConfig
+        }
+      );
+
+      // Should only be scheduled on Wed for 4.5h span (4h effective work) -> 16 + 4 = 20h total
+      // And blocked on Thu because 20h weekly cap is reached!
+      expect(result.proposedSchedules.length).toBe(1);
+      expect(result.proposedSchedules[0].date).toBe('2026-10-07');
+      expect(calculateEffectiveWorkHours(result.proposedSchedules[0].startTime, result.proposedSchedules[0].endTime)).toBe(4);
+    });
+  });
 });
