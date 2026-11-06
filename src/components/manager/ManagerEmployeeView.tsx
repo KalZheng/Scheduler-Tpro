@@ -9,8 +9,8 @@ interface ManagerEmployeeViewProps {
   setEmpSearch: (val: string) => void;
   empActiveFilter: 'all' | 'active' | 'inactive';
   setEmpActiveFilter: (val: 'all' | 'active' | 'inactive') => void;
-  empStatusFilter: 'all' | '正式夥伴' | '兼職夥伴' | '僑生兼職';
-  setEmpStatusFilter: (val: 'all' | '正式夥伴' | '兼職夥伴' | '僑生兼職') => void;
+  empStatusFilter: 'all' | '正式夥伴' | '儲備幹部' | '兼職夥伴' | '僑生兼職';
+  setEmpStatusFilter: (val: 'all' | '正式夥伴' | '儲備幹部' | '兼職夥伴' | '僑生兼職') => void;
   handleOpenEmployeeModal: (emp?: Employee) => void;
   handleDeleteEmployee: (id: string) => void;
 }
@@ -30,7 +30,11 @@ export const ManagerEmployeeView: React.FC<ManagerEmployeeViewProps> = ({
     const matchesSearch = e.name.toLowerCase().includes(empSearch.toLowerCase());
     const matchesStatus =
       empStatusFilter === 'all' ||
-      (empStatusFilter === '僑生兼職' ? e.isOverseasStudent === true : e.status === empStatusFilter);
+      (empStatusFilter === '僑生兼職'
+        ? e.isOverseasStudent === true
+        : empStatusFilter === '儲備幹部'
+        ? e.isSpecialPartner === true
+        : e.status === empStatusFilter);
     const matchesActive = empActiveFilter === 'all' ||
       (empActiveFilter === 'active' && e.active !== false) ||
       (empActiveFilter === 'inactive' && e.active === false);
@@ -160,6 +164,15 @@ export const ManagerEmployeeView: React.FC<ManagerEmployeeViewProps> = ({
               正式夥伴
             </button>
             <button
+              onClick={() => setEmpStatusFilter('儲備幹部')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${empStatusFilter === '儲備幹部'
+                ? 'bg-purple-800 text-white shadow-xs'
+                : 'text-[#8D6E63] hover:text-[#3E2723]'
+                }`}
+            >
+              ⭐ 儲備/約聘 ({employees.filter(e => e.isSpecialPartner === true).length})
+            </button>
+            <button
               onClick={() => setEmpStatusFilter('兼職夥伴')}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${empStatusFilter === '兼職夥伴'
                 ? 'bg-[#795548] text-white shadow-xs'
@@ -215,6 +228,12 @@ export const ManagerEmployeeView: React.FC<ManagerEmployeeViewProps> = ({
                           <span className={`w-1.5 h-1.5 rounded-full ${emp.status === '正式夥伴' ? 'bg-emerald-500' : 'bg-indigo-500'}`}></span>
                           {emp.status}
                         </span>
+                        {emp.isSpecialPartner === true && (
+                          <span className="inline-flex items-center gap-1 text-[10px] px-2.5 py-0.5 rounded-full font-bold border bg-purple-50 text-purple-800 border-purple-300">
+                            <span className="w-1.5 h-1.5 rounded-full bg-purple-600"></span>
+                            ⭐ 儲備幹部 / 約聘
+                          </span>
+                        )}
                         {emp.isOverseasStudent === true && (
                           <span className="inline-flex items-center gap-1 text-[10px] px-2.5 py-0.5 rounded-full font-bold border bg-amber-50 text-amber-800 border-amber-300">
                             <span className="w-1.5 h-1.5 rounded-full bg-amber-600"></span>

@@ -372,11 +372,11 @@ export const exportEmployeesToExcel = async (
         }
       },
       {
-        v: emp.isOverseasStudent ? '僑生兼職' : emp.status,
+        v: emp.isSpecialPartner ? '儲備/約聘' : emp.isOverseasStudent ? '僑生兼職' : emp.status,
         t: 's',
         s: {
           ...cellBaseStyle,
-          font: { ...cellBaseStyle.font, bold: true, color: { rgb: emp.status === '正式夥伴' ? '1565C0' : emp.isOverseasStudent ? 'D84315' : '6A1B9A' } },
+          font: { ...cellBaseStyle.font, bold: true, color: { rgb: emp.status === '正式夥伴' ? '1565C0' : emp.isSpecialPartner ? '4A148C' : emp.isOverseasStudent ? 'D84315' : '6A1B9A' } },
           alignment: { horizontal: 'center', vertical: 'center' }
         }
       },

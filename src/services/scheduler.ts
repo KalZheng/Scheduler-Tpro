@@ -62,6 +62,7 @@ export interface Employee {
   active: boolean;
   isNewcomer?: boolean; // 新進夥伴
   isOverseasStudent?: boolean; // 僑外生 (勞動部規定每週工時上限 20 小時)
+  isSpecialPartner?: boolean; // 儲備幹部 / 約聘夥伴 (排班優先序：正式夥伴 > 儲備/約聘 > 兼職夥伴；班次優先：8h -> 6h -> 4h)
   trainingPosition?: '餐吧' | 'POS機' | '後吧' | '收班' | '開早' | null; // 訓練中崗位 (最多一個)
   trainedPositions: ('餐吧' | 'POS機' | '後吧' | '收班' | '開早')[]; // 已受訓合格崗位 (可多選)
   certificates?: ('FBI' | '黃金吧檯手')[]; // 持有證照 (可多選)
@@ -71,11 +72,16 @@ export interface Employee {
 export const migrateEmployee = (emp: any): Employee => {
   let status = emp.status;
   let isOverseasStudent = !!emp.isOverseasStudent;
+  let isSpecialPartner = !!emp.isSpecialPartner;
   if (status === '正式') status = '正式夥伴';
   if (status === '訓練') status = '兼職夥伴';
   if (status === '僑生兼職' || status === '僑外生' || status === '僑生') {
     status = '兼職夥伴';
     isOverseasStudent = true;
+  }
+  if (status === '儲備幹部' || status === '約聘夥伴' || status === '儲備幹部 / 約聘夥伴') {
+    status = '兼職夥伴';
+    isSpecialPartner = true;
   }
   if (status !== '正式夥伴' && status !== '兼職夥伴') {
     status = '兼職夥伴';
@@ -88,6 +94,7 @@ export const migrateEmployee = (emp: any): Employee => {
     active: emp.active !== false,
     isNewcomer: !!emp.isNewcomer,
     isOverseasStudent,
+    isSpecialPartner,
     trainingPosition: emp.trainingPosition || null,
     trainedPositions: emp.trainedPositions || [],
     certificates: emp.certificates || [],

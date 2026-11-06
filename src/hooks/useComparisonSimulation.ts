@@ -122,14 +122,21 @@ export function useComparisonSimulation(options: UseComparisonSimulationOptions)
     setSampleSchedules(getStoredSampleSchedules());
   };
 
-  // Relevant active employees sorted by FT first, then PT
+  // Relevant active employees sorted by FT first, then Special (儲備/約聘), then PT
   // Also include any employees from manualMonthSchedules (e.g. from sample file) so all rows render properly
   const activeEmployees = useMemo(() => {
+    const getTierRank = (e: Employee) => {
+      if (e.status === '正式夥伴') return 0;
+      if (e.isSpecialPartner) return 1;
+      return 2;
+    };
+
     const list = [...employees]
       .filter(e => e.active !== false)
       .sort((a, b) => {
-        if (a.status === '正式夥伴' && b.status !== '正式夥伴') return -1;
-        if (a.status !== '正式夥伴' && b.status === '正式夥伴') return 1;
+        const rankA = getTierRank(a);
+        const rankB = getTierRank(b);
+        if (rankA !== rankB) return rankA - rankB;
         return a.name.localeCompare(b.name, 'zh-Hant');
       });
 
