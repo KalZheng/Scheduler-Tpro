@@ -604,5 +604,91 @@ describe('autoScheduler', () => {
       expect(fallbackResult.proposedSchedules[0].startTime).toBe('09:30');
       expect(fallbackResult.proposedSchedules[0].endTime).toBe('16:30');
     });
+
+    it('enforces priority FT > Special (儲備幹部/約聘夥伴) > PT and prefers 8h -> 6h -> 4h shifts for Special partners', () => {
+      const employeesWithSpecial: Employee[] = [
+        ...mockEmployees,
+        {
+          id: 'emp-special',
+          name: '林約聘',
+          phone: '0966778899',
+          status: '兼職夥伴',
+          isSpecialPartner: true,
+          active: true,
+          trainedPositions: ['開早', '收班', '餐吧'],
+          createdAt: 5000
+        }
+      ];
+
+      // 1. When Special (林約聘) and regular PT (李夥伴) compete for a single opening slot, Special wins
+      const resultVsPt = generatePureAutoSchedule(
+        [
+          {
+            id: 'av-pt',
+            employeeName: '李夥伴',
+            date: '2026-10-05',
+            workplace: '濟南店',
+            startTime: '06:30',
+            endTime: '18:00',
+            createdAt: 1
+          },
+          {
+            id: 'av-sp',
+            employeeName: '林約聘',
+            date: '2026-10-05',
+            workplace: '濟南店',
+            startTime: '06:30',
+            endTime: '18:00',
+            createdAt: 2
+          }
+        ],
+        employeesWithSpecial,
+        [],
+        {
+          dateRange: ['2026-10-05'],
+          operatingStartTime: '06:30',
+          operatingEndTime: '18:00',
+          staffingDemandConfig: {
+            ...defaultDemandConfig,
+            openingStaffCount: 1,
+            closingStaffCount: 0,
+            weekdayMaxStaff: 1
+          }
+        }
+      );
+
+      expect(resultVsPt.proposedSchedules[0].employeeName).toBe('林約聘');
+      // Available for 11.5h -> prefers 8h work (9.0h span: 06:30-15:30)
+      expect(resultVsPt.proposedSchedules[0].startTime).toBe('06:30');
+      expect(resultVsPt.proposedSchedules[0].endTime).toBe('15:30');
+
+      // 2. When Special only has 7h availability (cannot fit 9.0h span), prefers 6h work (6.5h span: 06:30-13:00) over 4h work (4.5h span)
+      const result6h = generatePureAutoSchedule(
+        [
+          {
+            id: 'av-sp-6h',
+            employeeName: '林約聘',
+            date: '2026-10-06',
+            workplace: '濟南店',
+            startTime: '06:30',
+            endTime: '13:30', // 7.0h available
+            createdAt: 3
+          }
+        ],
+        employeesWithSpecial,
+        [],
+        {
+          dateRange: ['2026-10-06'],
+          operatingStartTime: '06:30',
+          operatingEndTime: '18:00',
+          staffingDemandConfig: defaultDemandConfig
+        }
+      );
+
+      expect(result6h.proposedSchedules.length).toBe(1);
+      expect(result6h.proposedSchedules[0].startTime).toBe('06:30');
+      expect(result6h.proposedSchedules[0].endTime).toBe('13:00'); // 6.5h span = 6h work + 30m break
+      expect(calculateEffectiveWorkHours('06:30', '13:00')).toBe(6);
+    });
   });
 });
