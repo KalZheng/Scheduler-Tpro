@@ -100,9 +100,12 @@ export function buildAIPromptPayload(options: RunAIScheduleOptions) {
        - Labor Law (一例一休): Maximum 5~6 consecutive working days. NEVER schedule any worker for 7 consecutive days across existing schedules and new shifts.
        - Shift Duration: 4 to 9 hours within each worker's registered time window. All workers MUST work in full hours (e.g. exactly 4, 5, 6, 7, 8 hours; NO 30-minute fractional durations like 4.5h or 5.5h. For example, if a worker works for 4 hours and 30 minutes, they should be scheduled for 4 hours).
 
-    5. **Fair Rotation & Shift Balance**
-       - Distribute weekend shifts and weekly hours evenly among all available staff.
-       - If a worker has worked multiple days leading up to the weekend, give them a rest day on Saturday or Sunday to avoid consecutive day violations, while rotating in other available workers.
+    5. **Employee Priority & Shift Duration By Type**
+       - Priority order when assigning shifts: Full-Time (正式夥伴, employeeType="fulltime") > Special/Contract (儲備幹部/約聘夥伴, employeeType="special") > Part-Time (兼職夥伴, employeeType="parttime").
+       - Full-Time (正式夥伴): Prefer 8h work (9.0h span with 1h break), maximum 4 consecutive working days, maximum 5 days per week.
+       - Special/Contract (儲備幹部/約聘夥伴): Prefer 8h work (9.0h span) -> 6h work (6.5h span) -> 4h work (4.5h span).
+       - Part-Time (兼職夥伴): Prefer 4h work (4.5h span) -> 6h work (6.5h span) -> 8h work (9.0h span).
+       - Distribute weekend shifts and weekly hours evenly within each tier.
 
     6. **Complete Date Coverage (CRITICAL)**
        - You MUST process EVERY date in \`dateRange\` chronologically from first date to last date.
@@ -123,7 +126,8 @@ export function buildAIPromptPayload(options: RunAIScheduleOptions) {
         id: a.id,
         date: a.date,
         who: a.employeeName.trim(),
-        time: `${a.startTime}-${a.endTime}`
+        time: `${a.startTime}-${a.endTime}`,
+        employeeType: emp?.status === '正式夥伴' ? 'fulltime' : emp?.isSpecialPartner ? 'special' : 'parttime'
       };
       if (emp?.status) item.status = emp.status;
       if (a.notes && a.notes.trim()) item.notes = a.notes.trim();

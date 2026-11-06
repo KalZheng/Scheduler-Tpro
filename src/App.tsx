@@ -187,12 +187,13 @@ function App() {
   const [empCertificates, setEmpCertificates] = useState<('FBI' | '黃金吧檯手')[]>([]);
   const [empIsNewcomer, setEmpIsNewcomer] = useState<boolean>(false);
   const [empIsOverseasStudent, setEmpIsOverseasStudent] = useState<boolean>(false);
+  const [empIsSpecialPartner, setEmpIsSpecialPartner] = useState<boolean>(false);
   const [isUploadingExcel, setIsUploadingExcel] = useState<boolean>(false);
   const [uploadExcelStatus, setUploadExcelStatus] = useState<'idle' | 'success' | 'error' | 'noconfig'>('idle');
   const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
 
   const [empSearch, setEmpSearch] = useState('');
-  const [empStatusFilter, setEmpStatusFilter] = useState<'all' | '正式夥伴' | '兼職夥伴' | '僑生兼職'>('all');
+  const [empStatusFilter, setEmpStatusFilter] = useState<'all' | '正式夥伴' | '儲備幹部' | '兼職夥伴' | '僑生兼職'>('all');
   const [empActiveFilter, setEmpActiveFilter] = useState<'all' | 'active' | 'inactive'>('active');
 
   const [workerName, setWorkerName] = useState(() => localStorage.getItem('scheduler_worker_name') || '');
@@ -335,6 +336,7 @@ function App() {
       setEmpActive(emp.active !== false);
       setEmpIsNewcomer(emp.isNewcomer || false);
       setEmpIsOverseasStudent(emp.isOverseasStudent || false);
+      setEmpIsSpecialPartner(emp.isSpecialPartner || false);
       setEmpTrainingPos(emp.trainingPosition || null);
       setEmpTrainedPoss(emp.trainedPositions || []);
       setEmpCertificates(emp.certificates || []);
@@ -347,6 +349,7 @@ function App() {
       setEmpActive(true);
       setEmpIsNewcomer(false);
       setEmpIsOverseasStudent(false);
+      setEmpIsSpecialPartner(false);
       setEmpTrainingPos(null);
       setEmpTrainedPoss([]);
       setEmpCertificates([]);
@@ -370,7 +373,8 @@ function App() {
       status: empStatus,
       active: empActive,
       isNewcomer: empIsNewcomer,
-      isOverseasStudent: empStatus === '兼職夥伴' ? empIsOverseasStudent : false,
+      isOverseasStudent: empStatus === '兼職夥伴' && !empIsSpecialPartner ? empIsOverseasStudent : false,
+      isSpecialPartner: empStatus === '兼職夥伴' ? empIsSpecialPartner : false,
       trainingPosition: empTrainingPos,
       trainedPositions: empTrainedPoss,
       certificates: empCertificates
@@ -2258,6 +2262,8 @@ function App() {
         setEmpIsNewcomer={setEmpIsNewcomer}
         empIsOverseasStudent={empIsOverseasStudent}
         setEmpIsOverseasStudent={setEmpIsOverseasStudent}
+        empIsSpecialPartner={empIsSpecialPartner}
+        setEmpIsSpecialPartner={setEmpIsSpecialPartner}
         empTrainingPos={empTrainingPos}
         setEmpTrainingPos={setEmpTrainingPos}
         empTrainedPoss={empTrainedPoss}

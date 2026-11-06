@@ -493,8 +493,8 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
   };
 
   /**
-   * Helper to compare candidates according to FT status, 5-day overtime avoidance,
-   * 2-3 consecutive days preference, short-operating-day PT preference, and fair rotation.
+   * Helper to compare candidates according to priority tier (FT > Special > PT),
+   * FT 5-day overtime avoidance, 2-4 consecutive days preference, short-operating-day preference, and fair rotation.
    */
   const compareCandidatePreferences = (
     a: WorkerAvailability,
@@ -507,9 +507,11 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
     const empB = safeEmployees.find(e => e.name.trim().toLowerCase() === b.employeeName.trim().toLowerCase());
     const isFTA = empA?.status === '正式夥伴';
     const isFTB = empB?.status === '正式夥伴';
+    const isSpecialA = !isFTA && empA?.isSpecialPartner === true;
+    const isSpecialB = !isFTB && empB?.isSpecialPartner === true;
 
     // On short operating days (< 9h, where FT cannot get a full 9h shift span),
-    // strictly prefer Part-Time first unless Part-Time is unavailable.
+    // hold back FT unless non-FT (Special / PT) is unavailable.
     if (preferPTFirst && isFTA !== isFTB) {
       return isFTA ? 1 : -1;
     }
@@ -517,15 +519,23 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
     const prefScoreA = getWorkerDayPreferenceScore(a.employeeName, dateStr, !!isFTA);
     const prefScoreB = getWorkerDayPreferenceScore(b.employeeName, dateStr, !!isFTB);
 
-    let baseFTA = 0;
-    let baseFTB = 0;
+    // Priority hierarchy: Full-Time (正式夥伴: +120) > Special (儲備幹部/約聘夥伴: +60) > Part-Time (一般/僑生兼職: 0)
+    let baseTierA = 0;
+    let baseTierB = 0;
     if (preferFT && !preferPTFirst) {
-      if (isFTA) baseFTA += 60;
-      if (isFTB) baseFTB += 60;
+      if (isFTA) baseTierA += 120;
+      else if (isSpecialA) baseTierA += 60;
+
+      if (isFTB) baseTierB += 120;
+      else if (isSpecialB) baseTierB += 60;
+    } else {
+      // Even when FT priority is off or on short operating days, Special still ranks above regular PT
+      if (isSpecialA) baseTierA += 60;
+      if (isSpecialB) baseTierB += 60;
     }
 
-    const totalScoreA = baseFTA + prefScoreA;
-    const totalScoreB = baseFTB + prefScoreB;
+    const totalScoreA = baseTierA + prefScoreA;
+    const totalScoreB = baseTierB + prefScoreB;
 
     if (totalScoreA !== totalScoreB) {
       return totalScoreB - totalScoreA; // higher score first
@@ -610,6 +620,7 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
 
           const emp = safeEmployees.find(e => e.name.trim().toLowerCase() === cand.employeeName.trim().toLowerCase());
           const isFT = emp?.status === '正式夥伴';
+          const isSpecial = !isFT && emp?.isSpecialPartner === true;
 
           const openStart = dayOpenStart;
           const openStartMins = dayOpenStartMins;
@@ -618,10 +629,13 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
           const availDurationMins = candEndMins - openStartMins;
 
           // Rules 1, 2, 3:
-          // 8h work -> 9h span (1h break). 4h work -> 4.5h span (30m break).
-          // Intermediate spans (5.5h, 6.5h, 7.0h, 7.5h) only unless it is a must.
+          // - FT: 8h work (9.0h span) -> 4h work (4.5h span)
+          // - Special (儲備幹部/約聘夥伴): prefer 8h (9.0h span), then 6h (6.5h span), then 4h (4.5h span)
+          // - PT: 9.0h / 4.5h standard spans
           let candidateSpans = [9.0, 4.5, 7.5, 7.0, 6.5, 5.5];
-          if (slot >= 2 && !isFT && !isWeekend) {
+          if (isSpecial) {
+            candidateSpans = [9.0, 6.5, 4.5, 7.5, 7.0, 5.5];
+          } else if (slot >= 2 && !isFT && !isWeekend) {
             candidateSpans = [4.5, 5.5, 9.0, 7.5, 7.0, 6.5];
           } else if (isShortOperatingDay && isFT) {
             // If no PT was available on a short operating day (<9h) and FT must cover as fallback, allow open-to-close span
@@ -698,11 +712,17 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
 
         const emp = safeEmployees.find(e => e.name.trim().toLowerCase() === cand.employeeName.trim().toLowerCase());
         const isFT = emp?.status === '正式夥伴';
+        const isSpecial = !isFT && emp?.isSpecialPartner === true;
 
         // Rules 1, 2, 3:
-        // Prioritize 9.0h (8h work + 1h break) and 4.5h (4h work + 30m break)
-        // Intermediate spans only unless it is a must
-        const candidateSpans = isFT ? [9.0, 4.5, 7.5, 7.0, 6.5, 5.5] : [4.5, 9.0, 5.5, 6.5, 7.0, 7.5];
+        // - FT: 9.0h (8h work) -> 4.5h (4h work)
+        // - Special (儲備幹部/約聘夥伴): prefer 8h (9.0h span), then 6h (6.5h span), then 4h (4.5h span)
+        // - PT: 4.5h (4h work) -> 9.0h (8h work)
+        const candidateSpans = isFT
+          ? [9.0, 4.5, 7.5, 7.0, 6.5, 5.5]
+          : isSpecial
+          ? [9.0, 6.5, 4.5, 7.5, 7.0, 5.5]
+          : [4.5, 9.0, 5.5, 6.5, 7.0, 7.5];
 
         for (const span of candidateSpans) {
           const durMins = Math.round(span * 60);
@@ -719,8 +739,10 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
             !wouldExceedOverseasWeeklyLimit(cand.employeeName, dateStr, sStr, eStr)
           ) {
             const useful = countCoveredDeficitHours(sStr, eStr, dateStr, isWeekend);
-            const isStandard = span === 9.0 || span === 4.5;
-            const score = useful * 20 + (isStandard ? 30 : 0) + span;
+            const spanPrefBonus = isSpecial
+              ? (span === 9.0 ? 45 : span === 6.5 ? 35 : span === 4.5 ? 25 : 0)
+              : (span === 9.0 || span === 4.5 ? 30 : 0);
+            const score = useful * 20 + spanPrefBonus + span;
             if (score > maxUseful) {
               maxUseful = score;
               bestStartMins = testStartMins;
@@ -770,6 +792,7 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
 
       const emp = safeEmployees.find(e => e.name.trim().toLowerCase() === cand.employeeName.trim().toLowerCase());
       const isFT = emp?.status === '正式夥伴';
+      const isSpecial = !isFT && emp?.isSpecialPartner === true;
 
       // Start Phase 3 at dayOpenStart + 90 mins or 08:30 to ensure opening window remains dedicated to opening workers
       const minMidStartMins = Math.max(dayOpenStartMins + 90, timeToMinutes('08:30'));
@@ -816,9 +839,16 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
       }
 
       // Sliding window evaluation across available range
-      // Rules 1, 2, 3: Prioritize standard 9.0h (8h work + 1h break) and 4.5h (4h work + 30m break)
+      // Rules 1, 2, 3:
+      // - FT: 9.0h (8h work) -> 4.5h (4h work)
+      // - Special (儲備幹部/約聘夥伴): prefer 8h (9.0h span), then 6h (6.5h span), then 4h (4.5h span)
+      // - PT: 4.5h (4h work) -> 9.0h (8h work)
       if (bestScore < 0) {
-        const candidateSpans = isFT ? [9.0, 4.5, 7.5, 6.5, 5.5] : [4.5, 9.0, 5.5, 6.5, 7.5];
+        const candidateSpans = isFT
+          ? [9.0, 4.5, 7.5, 6.5, 5.5]
+          : isSpecial
+          ? [9.0, 6.5, 4.5, 7.5, 5.5]
+          : [4.5, 9.0, 5.5, 6.5, 7.5];
 
         for (const span of candidateSpans) {
           const dur = Math.round(span * 60);
@@ -843,9 +873,10 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
               continue;
             }
 
-            // Standard shifts (9.0h and 4.5h) get a priority bonus; intermediate shifts chosen only when necessary
-            const isStandard = span === 9.0 || span === 4.5;
-            const score = useful * 20 + (isStandard ? 30 : 0) + span;
+            const spanPrefBonus = isSpecial
+              ? (span === 9.0 ? 45 : span === 6.5 ? 35 : span === 4.5 ? 25 : 0)
+              : (span === 9.0 || span === 4.5 ? 30 : 0);
+            const score = useful * 20 + spanPrefBonus + span;
             if (score > bestScore) {
               bestScore = score;
               bestStartMins = sM;

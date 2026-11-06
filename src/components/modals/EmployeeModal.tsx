@@ -16,6 +16,8 @@ interface EmployeeModalProps {
   setEmpIsNewcomer: (val: boolean) => void;
   empIsOverseasStudent: boolean;
   setEmpIsOverseasStudent: (val: boolean) => void;
+  empIsSpecialPartner: boolean;
+  setEmpIsSpecialPartner: (val: boolean) => void;
   empTrainingPos: '餐吧' | 'POS機' | '後吧' | '收班' | '開早' | null;
   setEmpTrainingPos: (val: '餐吧' | 'POS機' | '後吧' | '收班' | '開早' | null) => void;
   empTrainedPoss: ('餐吧' | 'POS機' | '後吧' | '收班' | '開早')[];
@@ -46,6 +48,8 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
   setEmpIsNewcomer,
   empIsOverseasStudent,
   setEmpIsOverseasStudent,
+  empIsSpecialPartner,
+  setEmpIsSpecialPartner,
   empTrainingPos,
   empTrainedPoss,
   empCertificates,
@@ -110,11 +114,12 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
           {/* Employee Type Selection */}
           <div>
             <label className="block text-xs font-bold text-[#6D4C41] uppercase tracking-wider mb-2">職務類別 / 身分</label>
-            <div className="grid grid-cols-3 gap-2.5">
+            <div className="grid grid-cols-2 gap-2.5">
               <button
                 type="button"
                 onClick={() => {
                   setEmpStatus('正式夥伴');
+                  setEmpIsSpecialPartner(false);
                   setEmpIsOverseasStudent(false);
                 }}
                 className={`py-3 px-3 rounded-xl text-xs font-bold transition-all border cursor-pointer ${empStatus === '正式夥伴'
@@ -128,9 +133,24 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                 type="button"
                 onClick={() => {
                   setEmpStatus('兼職夥伴');
+                  setEmpIsSpecialPartner(true);
                   setEmpIsOverseasStudent(false);
                 }}
-                className={`py-3 px-3 rounded-xl text-xs font-bold transition-all border cursor-pointer ${empStatus === '兼職夥伴' && !empIsOverseasStudent
+                className={`py-3 px-3 rounded-xl text-xs font-bold transition-all border cursor-pointer ${empStatus === '兼職夥伴' && empIsSpecialPartner
+                  ? 'bg-purple-800 text-white border-purple-800 shadow-md shadow-purple-800/10'
+                  : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:border-[#8D6E63]'
+                  }`}
+              >
+                ⭐ 儲備幹部 / 約聘夥伴
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setEmpStatus('兼職夥伴');
+                  setEmpIsSpecialPartner(false);
+                  setEmpIsOverseasStudent(false);
+                }}
+                className={`py-3 px-3 rounded-xl text-xs font-bold transition-all border cursor-pointer ${empStatus === '兼職夥伴' && !empIsSpecialPartner && !empIsOverseasStudent
                   ? 'bg-[#795548] text-white border-[#795548] shadow-md shadow-[#795548]/10'
                   : 'bg-white text-[#8D6E63] border-[#DAC0A3]/50 hover:border-[#8D6E63]'
                   }`}
@@ -141,6 +161,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                 type="button"
                 onClick={() => {
                   setEmpStatus('兼職夥伴');
+                  setEmpIsSpecialPartner(false);
                   setEmpIsOverseasStudent(true);
                 }}
                 className={`py-3 px-3 rounded-xl text-xs font-bold transition-all border cursor-pointer ${empStatus === '兼職夥伴' && empIsOverseasStudent
@@ -151,6 +172,11 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
                 🎓 僑生兼職 (≤20h)
               </button>
             </div>
+            {empIsSpecialPartner && (
+              <p className="mt-2 text-[11px] font-bold text-purple-900 bg-purple-50 border border-purple-200 rounded-lg px-3 py-1.5">
+                ⭐ 排班優先序：正式夥伴 ＞ 儲備幹部/約聘夥伴 ＞ 一般/僑生兼職；班次時數優先排 8h ➔ 6h ➔ 4h。
+              </p>
+            )}
             {empIsOverseasStudent && (
               <p className="mt-2 text-[11px] font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">
                 🎓 勞動部規定：僑生工讀每週實質工時上限為 20 小時，自動排班將嚴格控管單週不超過 20 小時。
