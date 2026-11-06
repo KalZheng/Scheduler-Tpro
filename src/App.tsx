@@ -1123,13 +1123,13 @@ function App() {
           endTime,
           notes: notes.trim(),
           managerNotes: notes.trim(),
-          workerNotes: workerNotes,
+          workerNotes: workerNotes || '',
           color: derivedColor,
           originalStartTime: formOriginalStartTime || null,
           originalEndTime: formOriginalEndTime || null,
           markedBlue: isTimeChanged ? true : !!existingSchedule?.markedBlue,
           scheduleSource: existingSchedule?.scheduleSource || 'manual',
-          shiftType: existingSchedule?.shiftType
+          ...(existingSchedule?.shiftType ? { shiftType: existingSchedule.shiftType } : {})
         };
         await updateSchedule(editingId, payload);
       }

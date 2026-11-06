@@ -904,11 +904,17 @@ export const subscribeToSchedules = (callback: (schedules: WorkSchedule[]) => vo
   }
 };
 
+const stripUndefined = <T extends Record<string, any>>(obj: T): T => {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([, value]) => value !== undefined)
+  ) as T;
+};
+
 export const addSchedule = async (schedule: Omit<WorkSchedule, 'id' | 'createdAt'>) => {
-  const newSchedule = {
+  const newSchedule = stripUndefined({
     ...schedule,
     createdAt: Date.now()
-  };
+  });
 
   if (isValidConfig && db) {
     const schedulesCollection = collection(db, 'schedules');
@@ -925,15 +931,16 @@ export const addSchedule = async (schedule: Omit<WorkSchedule, 'id' | 'createdAt
 };
 
 export const updateSchedule = async (id: string, updates: Partial<Omit<WorkSchedule, 'id' | 'createdAt'>>) => {
+  const cleanUpdates = stripUndefined(updates);
   if (isValidConfig && db) {
     const docRef = doc(db, 'schedules', id);
-    return await updateDoc(docRef, updates);
+    return await updateDoc(docRef, cleanUpdates);
   } else {
     let affectedDate = '';
     inMemoryDb.schedules = inMemoryDb.schedules.map(item => {
       if (item.id === id) {
-        affectedDate = updates.date || item.date;
-        return { ...item, ...updates };
+        affectedDate = cleanUpdates.date || item.date;
+        return { ...item, ...cleanUpdates };
       }
       return item;
     });
@@ -1077,10 +1084,10 @@ export const subscribeToAvailabilities = (callback: (availabilities: WorkerAvail
 };
 
 export const addAvailability = async (availability: Omit<WorkerAvailability, 'id' | 'createdAt'>) => {
-  const newAvail = {
+  const newAvail = stripUndefined({
     ...availability,
     createdAt: Date.now()
-  };
+  });
 
   if (isValidConfig && db) {
     const availabilitiesCollection = collection(db, 'availabilities');
@@ -1117,15 +1124,16 @@ export const deleteAvailability = async (id: string) => {
 };
 
 export const updateAvailability = async (id: string, updates: Partial<Omit<WorkerAvailability, 'id' | 'createdAt'>>) => {
+  const cleanUpdates = stripUndefined(updates);
   if (isValidConfig && db) {
     const docRef = doc(db, 'availabilities', id);
-    return await updateDoc(docRef, updates);
+    return await updateDoc(docRef, cleanUpdates);
   } else {
     let affectedDate = '';
     inMemoryDb.availabilities = inMemoryDb.availabilities.map(item => {
       if (item.id === id) {
-        affectedDate = updates.date || item.date;
-        return { ...item, ...updates };
+        affectedDate = cleanUpdates.date || item.date;
+        return { ...item, ...cleanUpdates };
       }
       return item;
     });
@@ -1197,10 +1205,10 @@ export const subscribeToEmployees = (callback: (employees: Employee[]) => void) 
 };
 
 export const addEmployee = async (employee: Omit<Employee, 'id' | 'createdAt'>) => {
-  const newEmp = {
+  const newEmp = stripUndefined({
     ...employee,
     createdAt: Date.now()
-  };
+  });
 
   if (isValidConfig && db) {
     const employeesCollection = collection(db, 'employees');
@@ -1217,13 +1225,14 @@ export const addEmployee = async (employee: Omit<Employee, 'id' | 'createdAt'>) 
 };
 
 export const updateEmployee = async (id: string, updates: Partial<Omit<Employee, 'id' | 'createdAt'>>) => {
+  const cleanUpdates = stripUndefined(updates);
   if (isValidConfig && db) {
     const docRef = doc(db, 'employees', id);
-    return await updateDoc(docRef, updates);
+    return await updateDoc(docRef, cleanUpdates);
   } else {
     inMemoryDb.employees = inMemoryDb.employees.map(item => {
       if (item.id === id) {
-        return { ...item, ...updates };
+        return { ...item, ...cleanUpdates };
       }
       return item;
     });
