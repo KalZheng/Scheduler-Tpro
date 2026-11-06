@@ -49,6 +49,7 @@ import { FTAssignModal } from './components/modals/FTAssignModal';
 import { WorkerLogin } from './components/worker/WorkerLogin';
 import { WorkerAvailForm } from './components/worker/WorkerAvailForm';
 import { WorkerAvailModal } from './components/worker/WorkerAvailModal';
+import { WorkerPunchView } from './components/worker/WorkerPunchView';
 import { AutoScheduleModal } from './components/modals/AutoScheduleModal';
 import { RuleScheduleModal } from './components/modals/RuleScheduleModal';
 import { ClearScheduleModal } from './components/modals/ClearScheduleModal';
@@ -63,6 +64,7 @@ import { ManagerCalculationView } from './components/manager/ManagerCalculationV
 import { ManagerSystemView } from './components/manager/ManagerSystemView';
 import { ManagerAnalysisView } from './components/manager/ManagerAnalysisView';
 import { ManagerComparisonView } from './components/manager/ManagerComparisonView';
+import { ManagerPunchView } from './components/manager/ManagerPunchView';
 import { ManagerSelectedDateDetail } from './components/manager/ManagerSelectedDateDetail';
 
 declare const google: any;
@@ -125,7 +127,7 @@ function App() {
   } = useScheduleData();
 
   // Manager view sub-mode
-  const [managerViewMode, setManagerViewMode] = useState<'calendar' | 'grid' | 'employees' | 'calculation' | 'system' | 'analysis' | 'comparison'>('calendar');
+  const [managerViewMode, setManagerViewMode] = useState<'calendar' | 'grid' | 'employees' | 'calculation' | 'system' | 'analysis' | 'comparison' | 'punch'>('calendar');
 
   const gridContainerRef = useRef<HTMLDivElement>(null);
   const [isScrolled, setIsScrolled] = useState(false);
@@ -197,6 +199,7 @@ function App() {
 
   const [workerName, setWorkerName] = useState(() => localStorage.getItem('scheduler_worker_name') || '');
   const [isWorkerVerified, setIsWorkerVerified] = useState(() => localStorage.getItem('scheduler_worker_verified') === 'true' && !!localStorage.getItem('scheduler_worker_name'));
+  const [workerTab, setWorkerTab] = useState<'availability' | 'punch'>('availability');
 
   const loggedInEmployee = employees.find(
     emp => emp.name.trim().toLowerCase() === workerName.trim().toLowerCase() && emp.active !== false
@@ -1824,32 +1827,93 @@ function App() {
               onVerify={handleWorkerVerify}
             />
           ) : (
-            <WorkerAvailForm
-              workerName={workerName}
-              isFullTime={isFullTime}
-              workerNextMonthStart={workerNextMonthStart}
-              isWorkerEditable={isWorkerEditable}
-              startDay={startDay}
-              deadlineDay={deadlineDay}
-              availSelectedDates={availSelectedDates}
-              workerCalendarGridDates={workerCalendarGridDates}
-              availNotes={availNotes}
-              setAvailNotes={setAvailNotes}
-              onWorkerLogout={handleWorkerLogout}
-              onAddAvailability={handleAddAvailability}
-              onOpenWorkerAvailModal={handleOpenWorkerAvailModal}
-              toggleAvailDateSelection={toggleAvailDateSelection}
-              handleSelectAvailMonWedFri={handleSelectAvailMonWedFri}
-              handleSelectAvailTueThu={handleSelectAvailTueThu}
-              handleSelectAvailAllDays={handleSelectAvailAllDays}
-              handleClearAvailAllSelected={handleClearAvailAllSelected}
-              getWorkerDisplayAvailabilities={getWorkerDisplayAvailabilities}
-              handleEditAvailability={handleEditAvailability}
-              handleDeleteAvailability={handleDeleteAvailability}
-              allowMonthSwitch={allowMonthSwitch}
-              onWorkerPrevMonth={handleWorkerPrevMonth}
-              onWorkerNextMonth={handleWorkerNextMonth}
-            />
+            <div className="space-y-6">
+              {/* Worker Identity & Sub-Tab Switcher Banner */}
+              <div className="glass-panel p-5 sm:p-6 rounded-2xl border border-[#DAC0A3]/50 flex flex-col md:flex-row items-center gap-4 justify-between shadow-sm">
+                <div className="space-y-1 text-center md:text-left">
+                  <h2 className="text-lg font-bold text-[#3E2723] flex items-center justify-center md:justify-start gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#2E7D32]"></span>
+                    員工身分已驗證
+                  </h2>
+                  <p className="text-xs text-[#6D4C41]">
+                    您目前是以「<span className="font-extrabold text-[#3E2723]">{workerName}</span>」的身分使用夥伴系統
+                  </p>
+                </div>
+
+                {/* Worker Sub-Tabs: 登記可用時間 | 員工打卡 */}
+                <div className="flex flex-wrap items-center justify-center gap-2.5 w-full md:w-auto">
+                  <div className="flex items-center gap-1.5 bg-[#FAF7F2] p-1.5 rounded-xl border border-[#DAC0A3]/60 shadow-2xs">
+                    <button
+                      type="button"
+                      onClick={() => setWorkerTab('availability')}
+                      className={`px-4 py-2 rounded-lg text-xs sm:text-sm font-extrabold transition-all cursor-pointer flex items-center gap-1.5 ${
+                        workerTab === 'availability'
+                          ? 'bg-[#245f47] text-white shadow-sm'
+                          : 'text-[#315a48] hover:bg-white'
+                      }`}
+                    >
+                      <span>📅</span>
+                      <span>登記可用時間</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setWorkerTab('punch')}
+                      className={`px-4 py-2 rounded-lg text-xs sm:text-sm font-extrabold transition-all cursor-pointer flex items-center gap-1.5 ${
+                        workerTab === 'punch'
+                          ? 'bg-[#245f47] text-white shadow-sm'
+                          : 'text-[#315a48] hover:bg-white'
+                      }`}
+                    >
+                      <span>⏱️</span>
+                      <span>員工打卡</span>
+                    </button>
+                  </div>
+
+                  <button
+                    onClick={handleWorkerLogout}
+                    className="bg-white hover:bg-red-50 border border-[#E5DCD5] text-[#5D4037] hover:text-red-650 font-semibold px-4 py-2 rounded-xl transition-all cursor-pointer text-center text-xs sm:text-sm shadow-sm"
+                  >
+                    切換/變更身分
+                  </button>
+                </div>
+              </div>
+
+              {workerTab === 'punch' ? (
+                <WorkerPunchView
+                  workerName={workerName}
+                  loggedInEmployee={loggedInEmployee}
+                  employees={employees}
+                  schedules={schedules}
+                />
+              ) : (
+                <WorkerAvailForm
+                  workerName={workerName}
+                  isFullTime={isFullTime}
+                  workerNextMonthStart={workerNextMonthStart}
+                  isWorkerEditable={isWorkerEditable}
+                  startDay={startDay}
+                  deadlineDay={deadlineDay}
+                  availSelectedDates={availSelectedDates}
+                  workerCalendarGridDates={workerCalendarGridDates}
+                  availNotes={availNotes}
+                  setAvailNotes={setAvailNotes}
+                  onWorkerLogout={handleWorkerLogout}
+                  onAddAvailability={handleAddAvailability}
+                  onOpenWorkerAvailModal={handleOpenWorkerAvailModal}
+                  toggleAvailDateSelection={toggleAvailDateSelection}
+                  handleSelectAvailMonWedFri={handleSelectAvailMonWedFri}
+                  handleSelectAvailTueThu={handleSelectAvailTueThu}
+                  handleSelectAvailAllDays={handleSelectAvailAllDays}
+                  handleClearAvailAllSelected={handleClearAvailAllSelected}
+                  getWorkerDisplayAvailabilities={getWorkerDisplayAvailabilities}
+                  handleEditAvailability={handleEditAvailability}
+                  handleDeleteAvailability={handleDeleteAvailability}
+                  allowMonthSwitch={allowMonthSwitch}
+                  onWorkerPrevMonth={handleWorkerPrevMonth}
+                  onWorkerNextMonth={handleWorkerNextMonth}
+                />
+              )}
+            </div>
           )
         )}
 
@@ -1888,6 +1952,12 @@ function App() {
                   setEmpStatusFilter={setEmpStatusFilter}
                   handleOpenEmployeeModal={handleOpenEmployeeModal}
                   handleDeleteEmployee={handleDeleteEmployee}
+                />
+              ) : managerViewMode === 'punch' ? (
+                <ManagerPunchView
+                  currentMonthStart={currentMonthStart}
+                  employees={employees}
+                  schedules={schedules}
                 />
               ) : managerViewMode === 'calculation' ? (
                 <ManagerCalculationView
