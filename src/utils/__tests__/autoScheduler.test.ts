@@ -690,5 +690,70 @@ describe('autoScheduler', () => {
       expect(result6h.proposedSchedules[0].endTime).toBe('13:00'); // 6.5h span = 6h work + 30m break
       expect(calculateEffectiveWorkHours('06:30', '13:00')).toBe(6);
     });
+
+    it('historical 5+ consecutive-day runs in other months do NOT block scheduling (grid matches comparison)', () => {
+      // 李夥伴 worked 7 days in a row in November (manually entered history)
+      const history: WorkSchedule[] = ['01', '02', '03', '04', '05', '06', '07'].map((d, i) => ({
+        id: `hist-${i}`,
+        title: '李夥伴',
+        employeeName: '李夥伴',
+        date: `2026-11-${d}`,
+        workplace: '濟南店',
+        startTime: '06:30',
+        endTime: '15:30',
+        color: 'emerald',
+        createdAt: i
+      }));
+
+      const avails: WorkerAvailability[] = [{
+        id: 'av-dec',
+        employeeName: '李夥伴',
+        date: '2026-12-01',
+        workplace: '濟南店',
+        startTime: '06:30',
+        endTime: '15:30',
+        createdAt: 1
+      }];
+
+      const opts = {
+        dateRange: ['2026-12-01'],
+        prioritizeFullTime: true,
+        maxHoursPerShift: 8,
+        onlyFillDeficits: false,
+        operatingStartTime: '06:30',
+        operatingEndTime: '18:00',
+        staffingDemandConfig: defaultDemandConfig
+      };
+
+      const gridResult = generateAutoSchedule(avails, history, mockEmployees, [], [], [], opts);
+      const pureResult = generatePureAutoSchedule(avails, mockEmployees, [], opts);
+
+      expect(gridResult.proposedSchedules.length).toBe(1);
+      expect(gridResult.proposedSchedules.map(p => `${p.employeeName}|${p.startTime}-${p.endTime}`))
+        .toEqual(pureResult.proposedSchedules.map(p => `${p.employeeName}|${p.startTime}-${p.endTime}`));
+    });
+
+    it('still blocks a 5th consecutive day adjacent to existing schedules', () => {
+      const history: WorkSchedule[] = ['2026-11-27', '2026-11-28', '2026-11-29', '2026-11-30'].map((d, i) => ({
+        id: `h-${i}`,
+        title: '李夥伴',
+        employeeName: '李夥伴',
+        date: d,
+        workplace: '濟南店',
+        startTime: '06:30',
+        endTime: '15:30',
+        color: 'emerald',
+        createdAt: i
+      }));
+      const result = generateAutoSchedule(
+        [{ id: 'av-5th', employeeName: '李夥伴', date: '2026-12-01', workplace: '濟南店', startTime: '06:30', endTime: '15:30', createdAt: 1 }],
+        history, mockEmployees, [], [], [],
+        {
+          dateRange: ['2026-12-01'], prioritizeFullTime: true, maxHoursPerShift: 8, onlyFillDeficits: false,
+          operatingStartTime: '06:30', operatingEndTime: '18:00', staffingDemandConfig: defaultDemandConfig
+        }
+      );
+      expect(result.proposedSchedules.length).toBe(0);
+    });
   });
 });
