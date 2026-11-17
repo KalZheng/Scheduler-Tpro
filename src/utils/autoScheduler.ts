@@ -1,5 +1,5 @@
 import type { WorkSchedule, WorkerAvailability, Employee, StaffingTarget, ShiftPreset, StaffingDemandConfig } from '../services/scheduler';
-import { isShiftActiveAtHour, hasSevenConsecutiveDays, getColorFromName, compareTimeStrings, formatDateString, calculateEffectiveWorkHours } from './dateUtils';
+import { isShiftActiveAtHour, getColorFromName, compareTimeStrings, formatDateString, calculateEffectiveWorkHours } from './dateUtils';
 
 export interface AutoScheduleOptions {
   dateRange: string[];
@@ -326,30 +326,6 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
   };
 
   /**
-   * Helper to check if a set of date strings contains more than maxConsecutive consecutive work days
-   */
-  const hasMoreThanMaxConsecutiveDays = (dateStrings: string[], maxConsecutive: number): boolean => {
-    const uniqueDates = Array.from(new Set(dateStrings)).sort();
-    if (uniqueDates.length <= maxConsecutive) return false;
-
-    let consecutiveCount = 1;
-    for (let i = 1; i < uniqueDates.length; i++) {
-      const prev = new Date(uniqueDates[i - 1] + 'T00:00:00');
-      const curr = new Date(uniqueDates[i] + 'T00:00:00');
-      const diffDays = Math.round((curr.getTime() - prev.getTime()) / (1000 * 60 * 60 * 24));
-      if (diffDays === 1) {
-        consecutiveCount++;
-        if (consecutiveCount > maxConsecutive) {
-          return true;
-        }
-      } else {
-        consecutiveCount = 1;
-      }
-    }
-    return false;
-  };
-
-  /**
    * Helper to count how many days an employee is already scheduled in the calendar week (Mon-Sun) of dateStr
    */
   const getDaysScheduledInWeek = (empName: string, dateStr: string): number => {
@@ -378,6 +354,28 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
     return count;
   };
 
+  /**
+   * Length of the consecutive work-day run that would include dateStr if the worker were scheduled on it
+   * (days already assigned immediately before + dateStr + days already assigned immediately after).
+   */
+  const getStreakIncludingDate = (empKey: string, dateStr: string): number => {
+    const dates = empAssignedDates[empKey];
+    if (!dates || dates.size === 0) return 1;
+    const base = new Date(dateStr + 'T00:00:00');
+    let streak = 1;
+    for (let i = 1; i <= 7; i++) {
+      const d = new Date(base);
+      d.setDate(base.getDate() - i);
+      if (dates.has(formatDateString(d))) streak++; else break;
+    }
+    for (let i = 1; i <= 7; i++) {
+      const d = new Date(base);
+      d.setDate(base.getDate() + i);
+      if (dates.has(formatDateString(d))) streak++; else break;
+    }
+    return streak;
+  };
+
   // Helper: Check if worker can work on this date (not already scheduled, <= 4 consecutive days, FT <= 5 days/week, overseas <= 20h/week)
   const canWorkerWorkOnDate = (empName: string, dateStr: string): boolean => {
     const empKey = empName.trim().toLowerCase();
@@ -389,9 +387,9 @@ function runAutoScheduleEngine(config: InternalAutoScheduleConfig): AutoSchedule
     if (alreadyScheduled) return false;
 
     // Consecutive days check: strictly max 4 consecutive work days (Rule 2: 2-4 consecutive days, never 5 or 6+)
-    const currentDates = Array.from(empAssignedDates[empKey] || new Set<string>());
-    const prospective = Array.from(new Set([...currentDates, dateStr]));
-    if (hasSevenConsecutiveDays(prospective) || hasMoreThanMaxConsecutiveDays(prospective, 4)) {
+    // IMPORTANT: Only evaluate the streak that would CONTAIN dateStr. Historical streaks elsewhere
+    // (e.g. a manually entered 5+ day run last month) must NOT disqualify the worker on unrelated dates.
+    if (getStreakIncludingDate(empKey, dateStr) > 4) {
       return false;
     }
 
