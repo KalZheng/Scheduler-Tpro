@@ -63,6 +63,8 @@ export interface Employee {
   isNewcomer?: boolean; // 新進夥伴
   isOverseasStudent?: boolean; // 僑外生 (勞動部規定每週工時上限 20 小時)
   isSpecialPartner?: boolean; // 儲備幹部 / 約聘夥伴 (排班優先序：正式夥伴 > 儲備/約聘 > 兼職夥伴；班次優先：8h -> 6h -> 4h)
+  boundDeviceId?: string | null; // 打卡手機裝置綁定 Token (防止他人代打卡)
+  boundDeviceUpdatedAt?: number | null;
   trainingPosition?: '餐吧' | 'POS機' | '後吧' | '收班' | '開早' | null; // 訓練中崗位 (最多一個)
   trainedPositions: ('餐吧' | 'POS機' | '後吧' | '收班' | '開早')[]; // 已受訓合格崗位 (可多選)
   certificates?: ('FBI' | '黃金吧檯手')[]; // 持有證照 (可多選)
@@ -95,6 +97,8 @@ export const migrateEmployee = (emp: any): Employee => {
     isNewcomer: !!emp.isNewcomer,
     isOverseasStudent,
     isSpecialPartner,
+    boundDeviceId: emp.boundDeviceId || null,
+    boundDeviceUpdatedAt: emp.boundDeviceUpdatedAt || null,
     trainingPosition: emp.trainingPosition || null,
     trainedPositions: emp.trainedPositions || [],
     certificates: emp.certificates || [],
@@ -1901,6 +1905,284 @@ export const updateStaffingDemandConfig = async (config: Partial<StaffingDemandC
     await saveDbForDate();
   }
 };
+
+// ============================================================================
+// Punch In / Punch Out Attendance System (員工上下班與休息打卡紀錄)
+// ============================================================================
+
+export type PunchAction = 'in' | 'breakStart' | 'breakEnd' | 'out';
+
+export interface PunchEvent {
+  id: string;
+  employeeName: string;
+  workplace: string;
+  action: PunchAction;
+  timestamp: string; // ISO string
+  date: string;      // "YYYY-MM-DD" (Asia/Taipei)
+  timeStr: string;   // "HH:MM:SS" (Asia/Taipei)
+  createdAt: number;
+  latitude?: number | null;
+  longitude?: number | null;
+  distanceMeters?: number | null;
+  deviceId?: string | null;
+}
+
+export interface WorkplaceGpsConfig {
+  workplace: string;
+  latitude: number;
+  longitude: number;
+  radiusMeters: number;
+  gpsRequired: boolean;
+  deviceBindingRequired: boolean;
+}
+
+export const DEFAULT_WORKPLACE_GPS_CONFIGS: Record<string, WorkplaceGpsConfig> = {
+  '埔里酒廠門市': {
+    workplace: '埔里酒廠門市',
+    latitude: 23.9688,
+    longitude: 120.9625,
+    radiusMeters: 200,
+    gpsRequired: true,
+    deviceBindingRequired: true
+  },
+  '暨南大學門市': {
+    workplace: '暨南大學門市',
+    latitude: 23.9516,
+    longitude: 120.9277,
+    radiusMeters: 200,
+    gpsRequired: true,
+    deviceBindingRequired: true
+  }
+};
+
+const DEVICE_TOKEN_KEY = 'scheduler_device_token_v1';
+
+export const getOrCreateLocalDeviceToken = (): string => {
+  if (typeof localStorage === 'undefined') return 'server-device';
+  let token = localStorage.getItem(DEVICE_TOKEN_KEY);
+  if (!token) {
+    token =
+      typeof crypto !== 'undefined' && crypto.randomUUID
+        ? `DEV-${crypto.randomUUID().slice(0, 8).toUpperCase()}`
+        : `DEV-${Math.random().toString(36).slice(2, 10).toUpperCase()}`;
+    localStorage.setItem(DEVICE_TOKEN_KEY, token);
+  }
+  return token;
+};
+
+/**
+ * Calculate straight-line distance in meters between two GPS coordinates (Haversine formula)
+ */
+export const calculateGpsDistanceMeters = (
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): number => {
+  const R = 6371000; // Earth radius in meters
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.round(R * c);
+};
+
+const GPS_CONFIG_STORAGE_KEY = 'scheduler_workplace_gps_configs_v1';
+let localGpsConfigListeners: ((configs: Record<string, WorkplaceGpsConfig>) => void)[] = [];
+
+const getLocalWorkplaceGpsConfigs = (): Record<string, WorkplaceGpsConfig> => {
+  if (typeof localStorage === 'undefined') return { ...DEFAULT_WORKPLACE_GPS_CONFIGS };
+  const raw = localStorage.getItem(GPS_CONFIG_STORAGE_KEY);
+  if (!raw) return { ...DEFAULT_WORKPLACE_GPS_CONFIGS };
+  try {
+    const parsed = JSON.parse(raw) as Record<string, WorkplaceGpsConfig>;
+    return { ...DEFAULT_WORKPLACE_GPS_CONFIGS, ...parsed };
+  } catch {
+    return { ...DEFAULT_WORKPLACE_GPS_CONFIGS };
+  }
+};
+
+const saveLocalWorkplaceGpsConfigs = (configs: Record<string, WorkplaceGpsConfig>) => {
+  if (typeof localStorage === 'undefined') return;
+  localStorage.setItem(GPS_CONFIG_STORAGE_KEY, JSON.stringify(configs));
+  localGpsConfigListeners.forEach(l => l(configs));
+};
+
+export const subscribeToWorkplaceGpsConfigs = (
+  callback: (configs: Record<string, WorkplaceGpsConfig>) => void
+) => {
+  localGpsConfigListeners.push(callback);
+  callback(getLocalWorkplaceGpsConfigs());
+
+  let unsubFirestore: (() => void) | null = null;
+  if (isValidConfig && db) {
+    try {
+      const docRef = doc(db, 'settings', 'punch_gps_config');
+      unsubFirestore = onSnapshot(
+        docRef,
+        (snap) => {
+          if (snap.exists()) {
+            const data = snap.data() as { configs?: Record<string, WorkplaceGpsConfig> };
+            if (data.configs) {
+              const merged = { ...DEFAULT_WORKPLACE_GPS_CONFIGS, ...data.configs };
+              saveLocalWorkplaceGpsConfigs(merged);
+            }
+          }
+        },
+        (err) => {
+          console.warn('Firestore punch_gps_config fallback to localStorage:', err);
+        }
+      );
+    } catch (err) {
+      console.warn('Failed to subscribe to punch_gps_config:', err);
+    }
+  }
+
+  return () => {
+    localGpsConfigListeners = localGpsConfigListeners.filter(l => l !== callback);
+    if (unsubFirestore) unsubFirestore();
+  };
+};
+
+export const saveWorkplaceGpsConfig = async (config: WorkplaceGpsConfig): Promise<void> => {
+  const current = getLocalWorkplaceGpsConfigs();
+  const updated = {
+    ...current,
+    [config.workplace]: config
+  };
+  saveLocalWorkplaceGpsConfigs(updated);
+
+  if (isValidConfig && db) {
+    try {
+      const docRef = doc(db, 'settings', 'punch_gps_config');
+      await setDoc(docRef, { configs: updated }, { merge: true });
+    } catch (err) {
+      console.warn('Failed to save punch_gps_config to Firestore:', err);
+    }
+  }
+};
+
+const PUNCH_STORAGE_KEY = 'scheduler_punch_events_v1';
+let localPunchEventListeners: ((events: PunchEvent[]) => void)[] = [];
+
+const getLocalPunchEvents = (): PunchEvent[] => {
+  if (typeof localStorage === 'undefined') return [];
+  const raw = localStorage.getItem(PUNCH_STORAGE_KEY);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as PunchEvent[];
+    return Array.isArray(parsed) ? parsed.sort((a, b) => a.createdAt - b.createdAt) : [];
+  } catch {
+    return [];
+  }
+};
+
+const saveLocalPunchEvents = (events: PunchEvent[]) => {
+  if (typeof localStorage === 'undefined') return;
+  const sorted = [...events].sort((a, b) => a.createdAt - b.createdAt);
+  localStorage.setItem(PUNCH_STORAGE_KEY, JSON.stringify(sorted));
+  localPunchEventListeners.forEach(listener => listener(sorted));
+};
+
+export const subscribeToPunchEvents = (callback: (events: PunchEvent[]) => void) => {
+  localPunchEventListeners.push(callback);
+  callback(getLocalPunchEvents());
+
+  let unsubFirestore: (() => void) | null = null;
+  if (isValidConfig && db) {
+    try {
+      const q = query(collection(db, 'punch_events'), orderBy('createdAt', 'asc'));
+      unsubFirestore = onSnapshot(
+        q,
+        (snapshot) => {
+          const items: PunchEvent[] = [];
+          snapshot.forEach((docSnap) => {
+            const data = docSnap.data();
+            items.push({
+              id: docSnap.id,
+              employeeName: data.employeeName || '',
+              workplace: data.workplace || '',
+              action: data.action as PunchAction,
+              timestamp: data.timestamp || '',
+              date: data.date || '',
+              timeStr: data.timeStr || '',
+              createdAt: data.createdAt || 0,
+              latitude: data.latitude ?? null,
+              longitude: data.longitude ?? null,
+              distanceMeters: data.distanceMeters ?? null,
+              deviceId: data.deviceId ?? null
+            });
+          });
+          saveLocalPunchEvents(items);
+        },
+        (error) => {
+          console.warn('Firestore punch_events listener fallback to localStorage:', error);
+        }
+      );
+    } catch (err) {
+      console.warn('Failed to subscribe to Firestore punch_events, using localStorage:', err);
+    }
+  }
+
+  return () => {
+    localPunchEventListeners = localPunchEventListeners.filter(l => l !== callback);
+    if (unsubFirestore) unsubFirestore();
+  };
+};
+
+export const addPunchEvent = async (
+  eventData: Omit<PunchEvent, 'id' | 'createdAt'>
+): Promise<PunchEvent> => {
+  const newEvent: PunchEvent = {
+    ...eventData,
+    id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `punch-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    createdAt: Date.now()
+  };
+
+  // Always update local cache immediately for instant UI responsiveness
+  const current = getLocalPunchEvents();
+  saveLocalPunchEvents([...current, newEvent]);
+
+  if (isValidConfig && db) {
+    try {
+      await setDoc(doc(db, 'punch_events', newEvent.id), {
+        employeeName: newEvent.employeeName,
+        workplace: newEvent.workplace,
+        action: newEvent.action,
+        timestamp: newEvent.timestamp,
+        date: newEvent.date,
+        timeStr: newEvent.timeStr,
+        createdAt: newEvent.createdAt,
+        latitude: newEvent.latitude ?? null,
+        longitude: newEvent.longitude ?? null,
+        distanceMeters: newEvent.distanceMeters ?? null,
+        deviceId: newEvent.deviceId ?? null
+      });
+    } catch (err) {
+      console.warn('Failed to sync punch event to Firestore, kept in localStorage:', err);
+    }
+  }
+
+  return newEvent;
+};
+
+export const deletePunchEvent = async (id: string): Promise<void> => {
+  const current = getLocalPunchEvents().filter(e => e.id !== id);
+  saveLocalPunchEvents(current);
+
+  if (isValidConfig && db) {
+    try {
+      await deleteDoc(doc(db, 'punch_events', id));
+    } catch (err) {
+      console.warn('Failed to delete punch event from Firestore:', err);
+    }
+  }
+};
+
+
 
 
 
