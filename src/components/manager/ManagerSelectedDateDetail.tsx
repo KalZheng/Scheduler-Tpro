@@ -22,6 +22,7 @@ interface ManagerSelectedDateDetailProps {
   setStartTime: (time: string) => void;
   setEndTime: (time: string) => void;
   setNotes: (notes: string) => void;
+  setWorkerNotes?: (notes: string) => void;
   setSelectedDates: (dates: string[]) => void;
   setFormOriginalStartTime: (time: string | null) => void;
   setFormOriginalEndTime: (time: string | null) => void;
@@ -49,6 +50,7 @@ export const ManagerSelectedDateDetail: React.FC<ManagerSelectedDateDetailProps>
   setStartTime,
   setEndTime,
   setNotes,
+  setWorkerNotes,
   setSelectedDates,
   setFormOriginalStartTime,
   setFormOriginalEndTime,
@@ -182,7 +184,8 @@ export const ManagerSelectedDateDetail: React.FC<ManagerSelectedDateDetailProps>
                         setWorkplace(avail.workplace);
                         setStartTime(avail.startTime);
                         setEndTime(avail.endTime);
-                        setNotes(avail.notes || '');
+                        setNotes('');
+                        setWorkerNotes?.(avail.notes || '');
                         setSelectedDates([selectedDateStr]);
                         setFormOriginalStartTime(avail.startTime);
                         setFormOriginalEndTime(avail.endTime);

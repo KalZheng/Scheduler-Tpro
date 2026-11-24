@@ -49,6 +49,7 @@ import { FTAssignModal } from './components/modals/FTAssignModal';
 import { WorkerLogin } from './components/worker/WorkerLogin';
 import { WorkerAvailForm } from './components/worker/WorkerAvailForm';
 import { WorkerAvailModal } from './components/worker/WorkerAvailModal';
+import { WorkerPunchView } from './components/worker/WorkerPunchView';
 import { AutoScheduleModal } from './components/modals/AutoScheduleModal';
 import { RuleScheduleModal } from './components/modals/RuleScheduleModal';
 import { ClearScheduleModal } from './components/modals/ClearScheduleModal';
@@ -63,6 +64,7 @@ import { ManagerCalculationView } from './components/manager/ManagerCalculationV
 import { ManagerSystemView } from './components/manager/ManagerSystemView';
 import { ManagerAnalysisView } from './components/manager/ManagerAnalysisView';
 import { ManagerComparisonView } from './components/manager/ManagerComparisonView';
+import { ManagerPunchView } from './components/manager/ManagerPunchView';
 import { ManagerSelectedDateDetail } from './components/manager/ManagerSelectedDateDetail';
 
 declare const google: any;
@@ -125,7 +127,7 @@ function App() {
   } = useScheduleData();
 
   // Manager view sub-mode
-  const [managerViewMode, setManagerViewMode] = useState<'calendar' | 'grid' | 'employees' | 'calculation' | 'system' | 'analysis' | 'comparison'>('calendar');
+  const [managerViewMode, setManagerViewMode] = useState<'calendar' | 'grid' | 'employees' | 'calculation' | 'system' | 'analysis' | 'comparison' | 'punch'>('calendar');
 
   const gridContainerRef = useRef<HTMLDivElement>(null);
   const [isScrolled, setIsScrolled] = useState(false);
@@ -198,6 +200,7 @@ function App() {
 
   const [workerName, setWorkerName] = useState(() => localStorage.getItem('scheduler_worker_name') || '');
   const [isWorkerVerified, setIsWorkerVerified] = useState(() => localStorage.getItem('scheduler_worker_verified') === 'true' && !!localStorage.getItem('scheduler_worker_name'));
+  const [workerTab, setWorkerTab] = useState<'availability' | 'punch'>('availability');
 
   const loggedInEmployee = employees.find(
     emp => emp.name.trim().toLowerCase() === workerName.trim().toLowerCase() && emp.active !== false
@@ -445,6 +448,42 @@ function App() {
   }, [availabilities, workerName, isFullTime, workerNextMonthStart]);
 
   const lastSyncedDbRestDatesRef = useRef<string[]>([]);
+  const reconciledAvailIdsRef = useRef<Set<string>>(new Set());
+
+  // Auto-reconcile previously affected availability records:
+  // If a confirmed WorkSchedule already exists for (employeeName, date),
+  // ensure any matching unconfirmed non-off-day WorkerAvailability is marked confirmed: true.
+  useEffect(() => {
+    if (activeRole !== 'manager' || !isAuthenticated) return;
+    if (schedules.length === 0 || availabilities.length === 0) return;
+
+    const scheduledKeys = new Set(
+      schedules.map(s => `${s.employeeName.trim().toLowerCase()}|${s.date}`)
+    );
+
+    const staleUnconfirmedAvails = availabilities.filter(a => {
+      if (a.confirmed === true) return false;
+      if (a.startTime === '00:00' && a.endTime === '00:00') return false;
+      if (reconciledAvailIdsRef.current.has(a.id)) return false;
+      const key = `${a.employeeName.trim().toLowerCase()}|${a.date}`;
+      return scheduledKeys.has(key);
+    });
+
+    if (staleUnconfirmedAvails.length === 0) return;
+
+    staleUnconfirmedAvails.forEach(a => reconciledAvailIdsRef.current.add(a.id));
+
+    (async () => {
+      for (const avail of staleUnconfirmedAvails) {
+        try {
+          await updateAvailability(avail.id, { confirmed: true });
+        } catch (err) {
+          console.error('Failed to reconcile availability confirmation:', avail.id, err);
+          reconciledAvailIdsRef.current.delete(avail.id);
+        }
+      }
+    })();
+  }, [activeRole, isAuthenticated, schedules, availabilities]);
 
   useEffect(() => {
     const isDbChanged = dbRestDates.length !== lastSyncedDbRestDatesRef.current.length ||
@@ -455,6 +494,19 @@ function App() {
       setAvailSelectedDates(dbRestDates);
     }
   }, [dbRestDates]);
+
+  // Restore existing monthly note for Full-Time workers so re-submitting doesn't silently clear it
+  useEffect(() => {
+    if (!isFullTime || !workerName.trim()) return;
+    const targetMonthStr = formatDateString(workerNextMonthStart).substring(0, 7);
+    const existingNote = availabilities.find(
+      a => a.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase() &&
+        a.date.startsWith(targetMonthStr) &&
+        a.notes &&
+        a.notes.trim() !== ''
+    )?.notes?.trim() || '';
+    setAvailNotes(existingNote);
+  }, [isFullTime, workerName, workerNextMonthStart]);
 
   const handleWorkerVerify = (e: React.FormEvent) => {
     e.preventDefault();
@@ -547,6 +599,15 @@ function App() {
           .map(formatDateString)
           .filter(dateStr => !availSelectedDates.includes(dateStr));
 
+        const confirmedScheduleDates = new Set(
+          schedules
+            .filter(
+              s => s.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase() &&
+                s.date.startsWith(nextMonthStr)
+            )
+            .map(s => s.date)
+        );
+
         for (const dateStr of workDays) {
           await addAvailability({
             employeeName: workerName.trim(),
@@ -554,7 +615,8 @@ function App() {
             workplace: workplaces[0]?.name || '',
             startTime: defaultShiftStart,
             endTime: defaultShiftEnd,
-            notes: availNotes.trim()
+            notes: availNotes.trim(),
+            ...(confirmedScheduleDates.has(dateStr) ? { confirmed: true } : {})
           });
         }
 
@@ -1091,6 +1153,11 @@ function App() {
 
       if (modalMode === 'create') {
         for (const dateStr of selectedDates) {
+          const matchingAvail = availabilities.find(
+            a => a.employeeName.trim().toLowerCase() === targetName.toLowerCase() &&
+              a.date === dateStr &&
+              !(a.startTime === '00:00' && a.endTime === '00:00')
+          );
           const payload = {
             title: employeeName.trim(),
             employeeName: employeeName.trim(),
@@ -1100,13 +1167,17 @@ function App() {
             endTime,
             notes: notes.trim(),
             managerNotes: notes.trim(),
-            workerNotes: '',
+            workerNotes: matchingAvail?.notes?.trim() || workerNotes || '',
             color: derivedColor,
-            originalStartTime: formOriginalStartTime || null,
-            originalEndTime: formOriginalEndTime || null,
+            originalStartTime: formOriginalStartTime || matchingAvail?.startTime || null,
+            originalEndTime: formOriginalEndTime || matchingAvail?.endTime || null,
+            ...(matchingAvail ? { availabilityId: matchingAvail.id } : {}),
             scheduleSource: 'manual' as const
           };
           await addSchedule(payload);
+          if (matchingAvail && matchingAvail.confirmed !== true) {
+            await updateAvailability(matchingAvail.id, { confirmed: true });
+          }
         }
       } else if (modalMode === 'edit' && editingId) {
         const existingSchedule = schedules.find(s => s.id === editingId);
@@ -1146,8 +1217,25 @@ function App() {
       try {
         const scheduleToDelete = schedules.find(s => s.id === id);
         await deleteSchedule(id);
-        if (scheduleToDelete?.availabilityId) {
-          await updateAvailability(scheduleToDelete.availabilityId, { confirmed: false });
+        if (scheduleToDelete) {
+          const hasOtherScheduleSameDay = schedules.some(
+            s => s.id !== id &&
+              s.employeeName.trim().toLowerCase() === scheduleToDelete.employeeName.trim().toLowerCase() &&
+              s.date === scheduleToDelete.date
+          );
+          if (!hasOtherScheduleSameDay) {
+            const matchingAvails = availabilities.filter(
+              a => (scheduleToDelete.availabilityId && a.id === scheduleToDelete.availabilityId) ||
+                (a.employeeName.trim().toLowerCase() === scheduleToDelete.employeeName.trim().toLowerCase() &&
+                  a.date === scheduleToDelete.date &&
+                  !(a.startTime === '00:00' && a.endTime === '00:00') &&
+                  a.confirmed === true)
+            );
+            for (const avail of matchingAvails) {
+              reconciledAvailIdsRef.current.delete(avail.id);
+              await updateAvailability(avail.id, { confirmed: false });
+            }
+          }
         }
         setIsModalOpen(false);
       } catch (error) {
@@ -1828,32 +1916,93 @@ function App() {
               onVerify={handleWorkerVerify}
             />
           ) : (
-            <WorkerAvailForm
-              workerName={workerName}
-              isFullTime={isFullTime}
-              workerNextMonthStart={workerNextMonthStart}
-              isWorkerEditable={isWorkerEditable}
-              startDay={startDay}
-              deadlineDay={deadlineDay}
-              availSelectedDates={availSelectedDates}
-              workerCalendarGridDates={workerCalendarGridDates}
-              availNotes={availNotes}
-              setAvailNotes={setAvailNotes}
-              onWorkerLogout={handleWorkerLogout}
-              onAddAvailability={handleAddAvailability}
-              onOpenWorkerAvailModal={handleOpenWorkerAvailModal}
-              toggleAvailDateSelection={toggleAvailDateSelection}
-              handleSelectAvailMonWedFri={handleSelectAvailMonWedFri}
-              handleSelectAvailTueThu={handleSelectAvailTueThu}
-              handleSelectAvailAllDays={handleSelectAvailAllDays}
-              handleClearAvailAllSelected={handleClearAvailAllSelected}
-              getWorkerDisplayAvailabilities={getWorkerDisplayAvailabilities}
-              handleEditAvailability={handleEditAvailability}
-              handleDeleteAvailability={handleDeleteAvailability}
-              allowMonthSwitch={allowMonthSwitch}
-              onWorkerPrevMonth={handleWorkerPrevMonth}
-              onWorkerNextMonth={handleWorkerNextMonth}
-            />
+            <div className="space-y-6">
+              {/* Worker Identity & Sub-Tab Switcher Banner */}
+              <div className="glass-panel p-5 sm:p-6 rounded-2xl border border-[#DAC0A3]/50 flex flex-col md:flex-row items-center gap-4 justify-between shadow-sm">
+                <div className="space-y-1 text-center md:text-left">
+                  <h2 className="text-lg font-bold text-[#3E2723] flex items-center justify-center md:justify-start gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#2E7D32]"></span>
+                    員工身分已驗證
+                  </h2>
+                  <p className="text-xs text-[#6D4C41]">
+                    您目前是以「<span className="font-extrabold text-[#3E2723]">{workerName}</span>」的身分使用夥伴系統
+                  </p>
+                </div>
+
+                {/* Worker Sub-Tabs: 登記可用時間 | 員工打卡 */}
+                <div className="flex flex-wrap items-center justify-center gap-2.5 w-full md:w-auto">
+                  <div className="flex items-center gap-1.5 bg-[#FAF7F2] p-1.5 rounded-xl border border-[#DAC0A3]/60 shadow-2xs">
+                    <button
+                      type="button"
+                      onClick={() => setWorkerTab('availability')}
+                      className={`px-4 py-2 rounded-lg text-xs sm:text-sm font-extrabold transition-all cursor-pointer flex items-center gap-1.5 ${
+                        workerTab === 'availability'
+                          ? 'bg-[#245f47] text-white shadow-sm'
+                          : 'text-[#315a48] hover:bg-white'
+                      }`}
+                    >
+                      <span>📅</span>
+                      <span>登記可用時間</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setWorkerTab('punch')}
+                      className={`px-4 py-2 rounded-lg text-xs sm:text-sm font-extrabold transition-all cursor-pointer flex items-center gap-1.5 ${
+                        workerTab === 'punch'
+                          ? 'bg-[#245f47] text-white shadow-sm'
+                          : 'text-[#315a48] hover:bg-white'
+                      }`}
+                    >
+                      <span>⏱️</span>
+                      <span>員工打卡</span>
+                    </button>
+                  </div>
+
+                  <button
+                    onClick={handleWorkerLogout}
+                    className="bg-white hover:bg-red-50 border border-[#E5DCD5] text-[#5D4037] hover:text-red-650 font-semibold px-4 py-2 rounded-xl transition-all cursor-pointer text-center text-xs sm:text-sm shadow-sm"
+                  >
+                    切換/變更身分
+                  </button>
+                </div>
+              </div>
+
+              {workerTab === 'punch' ? (
+                <WorkerPunchView
+                  workerName={workerName}
+                  loggedInEmployee={loggedInEmployee}
+                  employees={employees}
+                  schedules={schedules}
+                />
+              ) : (
+                <WorkerAvailForm
+                  workerName={workerName}
+                  isFullTime={isFullTime}
+                  workerNextMonthStart={workerNextMonthStart}
+                  isWorkerEditable={isWorkerEditable}
+                  startDay={startDay}
+                  deadlineDay={deadlineDay}
+                  availSelectedDates={availSelectedDates}
+                  workerCalendarGridDates={workerCalendarGridDates}
+                  availNotes={availNotes}
+                  setAvailNotes={setAvailNotes}
+                  onWorkerLogout={handleWorkerLogout}
+                  onAddAvailability={handleAddAvailability}
+                  onOpenWorkerAvailModal={handleOpenWorkerAvailModal}
+                  toggleAvailDateSelection={toggleAvailDateSelection}
+                  handleSelectAvailMonWedFri={handleSelectAvailMonWedFri}
+                  handleSelectAvailTueThu={handleSelectAvailTueThu}
+                  handleSelectAvailAllDays={handleSelectAvailAllDays}
+                  handleClearAvailAllSelected={handleClearAvailAllSelected}
+                  getWorkerDisplayAvailabilities={getWorkerDisplayAvailabilities}
+                  handleEditAvailability={handleEditAvailability}
+                  handleDeleteAvailability={handleDeleteAvailability}
+                  allowMonthSwitch={allowMonthSwitch}
+                  onWorkerPrevMonth={handleWorkerPrevMonth}
+                  onWorkerNextMonth={handleWorkerNextMonth}
+                />
+              )}
+            </div>
           )
         )}
 
@@ -1892,6 +2041,12 @@ function App() {
                   setEmpStatusFilter={setEmpStatusFilter}
                   handleOpenEmployeeModal={handleOpenEmployeeModal}
                   handleDeleteEmployee={handleDeleteEmployee}
+                />
+              ) : managerViewMode === 'punch' ? (
+                <ManagerPunchView
+                  currentMonthStart={currentMonthStart}
+                  employees={employees}
+                  schedules={schedules}
                 />
               ) : managerViewMode === 'calculation' ? (
                 <ManagerCalculationView
@@ -2127,6 +2282,7 @@ function App() {
                     setStartTime={setStartTime}
                     setEndTime={setEndTime}
                     setNotes={setNotes}
+                    setWorkerNotes={setWorkerNotes}
                     setSelectedDates={setSelectedDates}
                     setFormOriginalStartTime={setFormOriginalStartTime}
                     setFormOriginalEndTime={setFormOriginalEndTime}
@@ -2221,6 +2377,7 @@ function App() {
         notes={notes}
         setNotes={setNotes}
         workerNotes={workerNotes}
+        setWorkerNotes={setWorkerNotes}
         registerTime={registerTime}
         selectedDates={selectedDates}
         setSelectedDates={setSelectedDates}

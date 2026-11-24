@@ -41,7 +41,7 @@ export const WorkerAvailForm: React.FC<WorkerAvailFormProps> = ({
   workerCalendarGridDates,
   availNotes,
   setAvailNotes,
-  onWorkerLogout,
+  onWorkerLogout: _onWorkerLogout,
   onAddAvailability,
   onOpenWorkerAvailModal,
   toggleAvailDateSelection,
@@ -60,25 +60,6 @@ export const WorkerAvailForm: React.FC<WorkerAvailFormProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Name Input Banner Card */}
-      <div className="glass-panel p-6 rounded-2xl border border-[#DAC0A3]/50 flex flex-col sm:flex-row items-center gap-4 justify-between shadow-sm">
-        <div className="space-y-1 text-center sm:text-left">
-          <h2 className="text-lg font-bold text-[#3E2723] flex items-center justify-center sm:justify-start gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-[#2E7D32]"></span>
-            員工身分已驗證
-          </h2>
-          <p className="text-xs text-[#6D4C41]">
-            您目前是以「<span className="font-extrabold text-[#3E2723]">{workerName}</span>」的身分填寫可用時間
-          </p>
-        </div>
-        <button
-          onClick={onWorkerLogout}
-          className="w-full sm:w-auto bg-white hover:bg-red-50 border border-[#E5DCD5] text-[#5D4037] hover:text-red-650 font-semibold px-5 py-2.5 rounded-xl transition-all cursor-pointer text-center text-sm shadow-sm"
-        >
-          切換/變更身分
-        </button>
-      </div>
-
       {/* Worker Dashboard Split Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Submission Form Card */}
