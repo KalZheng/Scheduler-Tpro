@@ -443,17 +443,23 @@ export const WorkerPunchView: React.FC<WorkerPunchViewProps> = ({
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-col gap-1.5 flex-1 min-w-[160px]">
             <label className="text-xs font-semibold text-[#6D4C41]">所屬門市 / 地點</label>
-            <select
-              value={selectedStore}
-              onChange={(e) => setSelectedStore(e.target.value)}
-              className="bg-white border border-[#DAC0A3]/70 rounded-xl px-3 py-2 text-sm font-bold text-[#3E2723] focus:outline-none focus:border-[#6D4C41] transition-colors"
-            >
-              {storeOptions.map(store => (
-                <option key={store} value={store}>
-                  {store}
-                </option>
-              ))}
-            </select>
+            {storeOptions.length > 1 ? (
+              <select
+                value={selectedStore}
+                onChange={(e) => setSelectedStore(e.target.value)}
+                className="bg-white border border-[#DAC0A3]/70 rounded-xl px-3 py-2 text-sm font-bold text-[#3E2723] focus:outline-none focus:border-[#6D4C41] transition-colors"
+              >
+                {storeOptions.map(store => (
+                  <option key={store} value={store}>
+                    {store}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div className="bg-[#FAF7F2] border border-[#DAC0A3]/60 rounded-xl px-3.5 py-2 text-sm font-extrabold text-[#3E2723]">
+                📍 {selectedStore}
+              </div>
+            )}
           </div>
 
           <div className="flex flex-col gap-1.5 flex-1 min-w-[160px]">

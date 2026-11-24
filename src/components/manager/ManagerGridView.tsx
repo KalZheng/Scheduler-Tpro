@@ -516,7 +516,12 @@ export const ManagerGridView: React.FC<ManagerGridViewProps> = ({
                         a => a.employeeName.trim().toLowerCase() === empName.toLowerCase() && a.date === dateStr
                       ).sort((a, b) => compareTimeStrings(a.startTime, b.startTime));
 
-                      const unconfirmedEmpAvails = allEmpAvails.filter(a => a.confirmed !== true);
+                      const unconfirmedEmpAvails = allEmpAvails.filter(a => {
+                        if (a.confirmed === true) return false;
+                        const isOffDay = a.startTime === '00:00' && a.endTime === '00:00';
+                        if (empSchedules.length > 0 && !isOffDay) return false;
+                        return true;
+                      });
                       const cellKey = `${empName.trim().toLowerCase()}|${dateStr}`;
                       const isCellMarkedBlue = !!markedEmptyCells[cellKey];
 

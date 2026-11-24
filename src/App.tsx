@@ -448,6 +448,42 @@ function App() {
   }, [availabilities, workerName, isFullTime, workerNextMonthStart]);
 
   const lastSyncedDbRestDatesRef = useRef<string[]>([]);
+  const reconciledAvailIdsRef = useRef<Set<string>>(new Set());
+
+  // Auto-reconcile previously affected availability records:
+  // If a confirmed WorkSchedule already exists for (employeeName, date),
+  // ensure any matching unconfirmed non-off-day WorkerAvailability is marked confirmed: true.
+  useEffect(() => {
+    if (activeRole !== 'manager' || !isAuthenticated) return;
+    if (schedules.length === 0 || availabilities.length === 0) return;
+
+    const scheduledKeys = new Set(
+      schedules.map(s => `${s.employeeName.trim().toLowerCase()}|${s.date}`)
+    );
+
+    const staleUnconfirmedAvails = availabilities.filter(a => {
+      if (a.confirmed === true) return false;
+      if (a.startTime === '00:00' && a.endTime === '00:00') return false;
+      if (reconciledAvailIdsRef.current.has(a.id)) return false;
+      const key = `${a.employeeName.trim().toLowerCase()}|${a.date}`;
+      return scheduledKeys.has(key);
+    });
+
+    if (staleUnconfirmedAvails.length === 0) return;
+
+    staleUnconfirmedAvails.forEach(a => reconciledAvailIdsRef.current.add(a.id));
+
+    (async () => {
+      for (const avail of staleUnconfirmedAvails) {
+        try {
+          await updateAvailability(avail.id, { confirmed: true });
+        } catch (err) {
+          console.error('Failed to reconcile availability confirmation:', avail.id, err);
+          reconciledAvailIdsRef.current.delete(avail.id);
+        }
+      }
+    })();
+  }, [activeRole, isAuthenticated, schedules, availabilities]);
 
   useEffect(() => {
     const isDbChanged = dbRestDates.length !== lastSyncedDbRestDatesRef.current.length ||
@@ -458,6 +494,19 @@ function App() {
       setAvailSelectedDates(dbRestDates);
     }
   }, [dbRestDates]);
+
+  // Restore existing monthly note for Full-Time workers so re-submitting doesn't silently clear it
+  useEffect(() => {
+    if (!isFullTime || !workerName.trim()) return;
+    const targetMonthStr = formatDateString(workerNextMonthStart).substring(0, 7);
+    const existingNote = availabilities.find(
+      a => a.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase() &&
+        a.date.startsWith(targetMonthStr) &&
+        a.notes &&
+        a.notes.trim() !== ''
+    )?.notes?.trim() || '';
+    setAvailNotes(existingNote);
+  }, [isFullTime, workerName, workerNextMonthStart]);
 
   const handleWorkerVerify = (e: React.FormEvent) => {
     e.preventDefault();
@@ -550,6 +599,15 @@ function App() {
           .map(formatDateString)
           .filter(dateStr => !availSelectedDates.includes(dateStr));
 
+        const confirmedScheduleDates = new Set(
+          schedules
+            .filter(
+              s => s.employeeName.trim().toLowerCase() === workerName.trim().toLowerCase() &&
+                s.date.startsWith(nextMonthStr)
+            )
+            .map(s => s.date)
+        );
+
         for (const dateStr of workDays) {
           await addAvailability({
             employeeName: workerName.trim(),
@@ -557,7 +615,8 @@ function App() {
             workplace: workplaces[0]?.name || '',
             startTime: defaultShiftStart,
             endTime: defaultShiftEnd,
-            notes: availNotes.trim()
+            notes: availNotes.trim(),
+            ...(confirmedScheduleDates.has(dateStr) ? { confirmed: true } : {})
           });
         }
 
@@ -1094,6 +1153,11 @@ function App() {
 
       if (modalMode === 'create') {
         for (const dateStr of selectedDates) {
+          const matchingAvail = availabilities.find(
+            a => a.employeeName.trim().toLowerCase() === targetName.toLowerCase() &&
+              a.date === dateStr &&
+              !(a.startTime === '00:00' && a.endTime === '00:00')
+          );
           const payload = {
             title: employeeName.trim(),
             employeeName: employeeName.trim(),
@@ -1103,13 +1167,17 @@ function App() {
             endTime,
             notes: notes.trim(),
             managerNotes: notes.trim(),
-            workerNotes: '',
+            workerNotes: matchingAvail?.notes?.trim() || workerNotes || '',
             color: derivedColor,
-            originalStartTime: formOriginalStartTime || null,
-            originalEndTime: formOriginalEndTime || null,
+            originalStartTime: formOriginalStartTime || matchingAvail?.startTime || null,
+            originalEndTime: formOriginalEndTime || matchingAvail?.endTime || null,
+            ...(matchingAvail ? { availabilityId: matchingAvail.id } : {}),
             scheduleSource: 'manual' as const
           };
           await addSchedule(payload);
+          if (matchingAvail && matchingAvail.confirmed !== true) {
+            await updateAvailability(matchingAvail.id, { confirmed: true });
+          }
         }
       } else if (modalMode === 'edit' && editingId) {
         const existingSchedule = schedules.find(s => s.id === editingId);
@@ -1149,8 +1217,25 @@ function App() {
       try {
         const scheduleToDelete = schedules.find(s => s.id === id);
         await deleteSchedule(id);
-        if (scheduleToDelete?.availabilityId) {
-          await updateAvailability(scheduleToDelete.availabilityId, { confirmed: false });
+        if (scheduleToDelete) {
+          const hasOtherScheduleSameDay = schedules.some(
+            s => s.id !== id &&
+              s.employeeName.trim().toLowerCase() === scheduleToDelete.employeeName.trim().toLowerCase() &&
+              s.date === scheduleToDelete.date
+          );
+          if (!hasOtherScheduleSameDay) {
+            const matchingAvails = availabilities.filter(
+              a => (scheduleToDelete.availabilityId && a.id === scheduleToDelete.availabilityId) ||
+                (a.employeeName.trim().toLowerCase() === scheduleToDelete.employeeName.trim().toLowerCase() &&
+                  a.date === scheduleToDelete.date &&
+                  !(a.startTime === '00:00' && a.endTime === '00:00') &&
+                  a.confirmed === true)
+            );
+            for (const avail of matchingAvails) {
+              reconciledAvailIdsRef.current.delete(avail.id);
+              await updateAvailability(avail.id, { confirmed: false });
+            }
+          }
         }
         setIsModalOpen(false);
       } catch (error) {
@@ -2197,6 +2282,7 @@ function App() {
                     setStartTime={setStartTime}
                     setEndTime={setEndTime}
                     setNotes={setNotes}
+                    setWorkerNotes={setWorkerNotes}
                     setSelectedDates={setSelectedDates}
                     setFormOriginalStartTime={setFormOriginalStartTime}
                     setFormOriginalEndTime={setFormOriginalEndTime}
@@ -2291,6 +2377,7 @@ function App() {
         notes={notes}
         setNotes={setNotes}
         workerNotes={workerNotes}
+        setWorkerNotes={setWorkerNotes}
         registerTime={registerTime}
         selectedDates={selectedDates}
         setSelectedDates={setSelectedDates}

@@ -77,10 +77,8 @@ export const ManagerPunchView: React.FC<ManagerPunchViewProps> = ({
   const [selectedEmployee, setSelectedEmployee] = useState<string>('ALL');
   const [onlyCurrentMonth, setOnlyCurrentMonth] = useState<boolean>(true);
 
-  // GPS & Device Settings editor state
-  const [configStoreName, setConfigStoreName] = useState<string>(
-    workplaces[0]?.name || '埔里酒廠門市'
-  );
+  // GPS & Device Settings editor state (uses this branch's configured store)
+  const configStoreName = workplaces[0]?.name || '埔里酒廠門市';
   const [latInput, setLatInput] = useState<string>('23.9688');
   const [lngInput, setLngInput] = useState<string>('120.9625');
   const [radiusInput, setRadiusInput] = useState<string>('200');
@@ -443,12 +441,15 @@ export const ManagerPunchView: React.FC<ManagerPunchViewProps> = ({
       <article className="glass-panel p-6 rounded-2xl border border-[#DAC0A3]/50 shadow-sm space-y-4 bg-white/90">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#DAC0A3]/40 pb-3">
           <div>
-            <h2 className="text-base font-extrabold text-[#3E2723] flex items-center gap-2">
+            <h2 className="text-base font-extrabold text-[#3E2723] flex items-center gap-2 flex-wrap">
               <span>📍</span>
               <span>門市打卡定位 (GPS) 與手機裝置綁定設定</span>
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-[#6D4C41]/10 text-[#5D4037] border border-[#DAC0A3]/70">
+                {configStoreName}
+              </span>
             </h2>
             <p className="text-xs text-[#6D4C41] mt-0.5">
-              設定各門市的 GPS 經緯度座標與允許打卡半徑，並啟用「1 人 1 機裝置綁定」防止他人切換帳號代打卡。
+              設定本門市的 GPS 經緯度座標與允許打卡半徑，並啟用「1 人 1 機裝置綁定」防止他人切換帳號代打卡。
             </p>
           </div>
           {configSavedNotice && (
@@ -459,22 +460,7 @@ export const ManagerPunchView: React.FC<ManagerPunchViewProps> = ({
         </div>
 
         <form onSubmit={handleSaveStoreGpsConfig} className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
-            <div>
-              <label className="block text-xs font-bold text-[#6D4C41] mb-1">選擇設定門市</label>
-              <select
-                value={configStoreName}
-                onChange={(e) => setConfigStoreName(e.target.value)}
-                className="w-full bg-white border border-[#DAC0A3]/80 rounded-xl px-3 py-2 text-xs font-bold text-[#3E2723]"
-              >
-                {storeOptions.map(st => (
-                  <option key={st} value={st}>
-                    {st}
-                  </option>
-                ))}
-              </select>
-            </div>
-
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
             <div>
               <label className="block text-xs font-bold text-[#6D4C41] mb-1">門市緯度 (Latitude)</label>
               <input
@@ -581,18 +567,20 @@ export const ManagerPunchView: React.FC<ManagerPunchViewProps> = ({
               {onlyCurrentMonth ? `📅 僅顯示 ${currentMonthPrefix} 月份` : '📅 顯示全部月份'}
             </button>
 
-            <select
-              value={selectedStore}
-              onChange={(e) => setSelectedStore(e.target.value)}
-              className="bg-white border border-[#DAC0A3]/70 rounded-xl px-3 py-2 text-xs font-bold text-[#3E2723] focus:outline-none focus:border-[#795548]"
-            >
-              <option value="ALL">全部門市</option>
-              {storeOptions.map(st => (
-                <option key={st} value={st}>
-                  {st}
-                </option>
-              ))}
-            </select>
+            {storeOptions.length > 1 && (
+              <select
+                value={selectedStore}
+                onChange={(e) => setSelectedStore(e.target.value)}
+                className="bg-white border border-[#DAC0A3]/70 rounded-xl px-3 py-2 text-xs font-bold text-[#3E2723] focus:outline-none focus:border-[#795548]"
+              >
+                <option value="ALL">全部門市</option>
+                {storeOptions.map(st => (
+                  <option key={st} value={st}>
+                    {st}
+                  </option>
+                ))}
+              </select>
+            )}
 
             <select
               value={selectedEmployee}
