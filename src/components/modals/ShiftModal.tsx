@@ -18,6 +18,7 @@ interface ShiftModalProps {
   notes: string;
   setNotes: (val: string) => void;
   workerNotes: string;
+  setWorkerNotes?: (val: string) => void;
   registerTime: string;
   selectedDates: string[];
   setSelectedDates: (val: string[]) => void;
@@ -58,6 +59,7 @@ export const ShiftModal: React.FC<ShiftModalProps> = ({
   notes,
   setNotes,
   workerNotes,
+  setWorkerNotes,
   registerTime,
   selectedDates,
   singleDate,
@@ -139,7 +141,8 @@ export const ShiftModal: React.FC<ShiftModalProps> = ({
                               setWorkplace(avail.workplace);
                               setStartTime(avail.startTime);
                               setEndTime(avail.endTime);
-                              setNotes(avail.notes || '');
+                              setNotes('');
+                              setWorkerNotes?.(avail.notes || '');
                               setFormOriginalStartTime(avail.startTime);
                               setFormOriginalEndTime(avail.endTime);
                             }}

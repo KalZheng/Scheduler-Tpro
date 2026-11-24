@@ -2,8 +2,8 @@ import React from 'react';
 
 interface ManagerHeaderProps {
   currentMonthStart: Date;
-  managerViewMode: 'calendar' | 'grid' | 'employees' | 'calculation' | 'system' | 'analysis' | 'comparison';
-  setManagerViewMode: (mode: 'calendar' | 'grid' | 'employees' | 'calculation' | 'system' | 'analysis' | 'comparison') => void;
+  managerViewMode: 'calendar' | 'grid' | 'employees' | 'calculation' | 'system' | 'analysis' | 'comparison' | 'punch';
+  setManagerViewMode: (mode: 'calendar' | 'grid' | 'employees' | 'calculation' | 'system' | 'analysis' | 'comparison' | 'punch') => void;
   handleGoToToday: () => void;
   handlePrevMonth: () => void;
   handleNextMonth: () => void;
@@ -99,6 +99,15 @@ export const ManagerHeader: React.FC<ManagerHeaderProps> = ({
               }`}
           >
             員工管理
+          </button>
+          <button
+            onClick={() => setManagerViewMode('punch')}
+            className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${managerViewMode === 'punch'
+              ? 'bg-[#246b4c] text-white shadow-sm'
+              : 'text-[#246b4c] hover:text-[#1d583e] bg-emerald-50/70 hover:bg-emerald-100/70'
+              }`}
+          >
+            <span>⏱️</span> 打卡工時統計
           </button>
           <button
             onClick={() => setManagerViewMode('analysis')}
