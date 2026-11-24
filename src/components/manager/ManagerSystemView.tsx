@@ -41,6 +41,9 @@ interface ManagerSystemViewProps {
   staffingDemandConfig: StaffingDemandConfig;
   setStaffingDemandConfig: React.Dispatch<React.SetStateAction<StaffingDemandConfig>>;
   onOpenClearModal?: () => void;
+  unconfirmedAvailsCount?: number;
+  unlinkedSchedulesCount?: number;
+  onRepairAffectedRecords?: () => Promise<void>;
 }
 
 const addMinutesToTime = (time: string, mins: number): string => {
@@ -77,7 +80,10 @@ export const ManagerSystemView: React.FC<ManagerSystemViewProps> = ({
   setFilenamePrefix,
   staffingDemandConfig,
   setStaffingDemandConfig,
-  onOpenClearModal
+  onOpenClearModal,
+  unconfirmedAvailsCount = 0,
+  unlinkedSchedulesCount = 0,
+  onRepairAffectedRecords
 }) => {
 
   const handleSaveSystemSettings = async () => {
@@ -641,6 +647,42 @@ export const ManagerSystemView: React.FC<ManagerSystemViewProps> = ({
             </div>
           </div>
 
+
+          {/* Section 4.8: Manual Repair for Affected Availability/Schedule Records */}
+          {onRepairAffectedRecords && (
+            <div className="border-t border-[#E5DCD5]/60 pt-4 space-y-3">
+              <h4 className="text-xs font-bold text-[#3E2723] flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-600"></span>
+                歷史排班與登記資料修復
+              </h4>
+              <p className="text-xs text-[#6D4C41] leading-relaxed">
+                手動修復先前因重複登記或手動排班導致的資料不一致（將已有確認班次的可用登記補標為已確認，並補齊排班關聯與同仁備註）。
+              </p>
+              <div className="flex flex-wrap gap-2 text-[11px] font-bold">
+                <span className={`px-2.5 py-1 rounded-lg border ${unconfirmedAvailsCount > 0 ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-emerald-50 border-emerald-200 text-emerald-800'}`}>
+                  未確認重複登記：{unconfirmedAvailsCount} 筆
+                </span>
+                <span className={`px-2.5 py-1 rounded-lg border ${unlinkedSchedulesCount > 0 ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-emerald-50 border-emerald-200 text-emerald-800'}`}>
+                  待補關聯/備註排班：{unlinkedSchedulesCount} 筆
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={onRepairAffectedRecords}
+                disabled={unconfirmedAvailsCount === 0 && unlinkedSchedulesCount === 0}
+                className={`w-full py-2.5 font-extrabold rounded-xl text-xs transition-all flex items-center justify-center gap-2 border ${
+                  unconfirmedAvailsCount > 0 || unlinkedSchedulesCount > 0
+                    ? 'bg-amber-600 hover:bg-amber-700 text-white shadow-md border-amber-700/30 cursor-pointer hover:-translate-y-0.5 active:translate-y-0'
+                    : 'bg-[#FAF7F2] text-[#8D6E63]/60 border-[#DAC0A3]/40 cursor-not-allowed'
+                }`}
+              >
+                <span className="text-sm">🔧</span>
+                {unconfirmedAvailsCount > 0 || unlinkedSchedulesCount > 0
+                  ? `手動修復歷史異常紀錄（共 ${unconfirmedAvailsCount + unlinkedSchedulesCount} 筆）`
+                  : '目前無須修復（所有紀錄皆正常）'}
+              </button>
+            </div>
+          )}
 
           {/* Section 5: Batch Reset & Clear Confirmed Schedules */}
           {onOpenClearModal && (

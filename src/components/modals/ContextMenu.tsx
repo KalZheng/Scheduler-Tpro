@@ -12,6 +12,8 @@ interface ContextMenuProps {
   onClose: () => void;
   onToggleMarkBlue: (schedule: WorkSchedule) => void;
   onToggleMarkEmptyCellBlue: (employeeName: string, dateStr: string) => void;
+  hasCellIssue?: boolean;
+  onRepairSingleSchedule?: (schedule: WorkSchedule) => void;
 }
 
 export const ContextMenu: React.FC<ContextMenuProps> = ({
@@ -19,7 +21,9 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   markedEmptyCells,
   onClose,
   onToggleMarkBlue,
-  onToggleMarkEmptyCellBlue
+  onToggleMarkEmptyCellBlue,
+  hasCellIssue = false,
+  onRepairSingleSchedule
 }) => {
   if (!contextMenu) return null;
 
@@ -41,16 +45,27 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
           {empName} ({dateStr})
         </div>
         {contextMenu.schedule ? (
-          <button
-            onClick={() => onToggleMarkBlue(contextMenu.schedule!)}
-            className="w-full text-left px-3 py-2 text-xs font-semibold text-[#1e40af] hover:bg-blue-50 transition-colors flex items-center gap-2 cursor-pointer"
-          >
-            {contextMenu.schedule.markedBlue ? (
-              <><span className="text-base">⬜</span><span>取消藍色標記</span></>
-            ) : (
-              <><span className="text-base">🔵</span><span>藍色標記此班次</span></>
+          <>
+            <button
+              onClick={() => onToggleMarkBlue(contextMenu.schedule!)}
+              className="w-full text-left px-3 py-2 text-xs font-semibold text-[#1e40af] hover:bg-blue-50 transition-colors flex items-center gap-2 cursor-pointer"
+            >
+              {contextMenu.schedule.markedBlue ? (
+                <><span className="text-base">⬜</span><span>取消藍色標記</span></>
+              ) : (
+                <><span className="text-base">🔵</span><span>藍色標記此班次</span></>
+              )}
+            </button>
+            {hasCellIssue && onRepairSingleSchedule && (
+              <button
+                onClick={() => onRepairSingleSchedule(contextMenu.schedule!)}
+                className="w-full text-left px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-50 transition-colors flex items-center gap-2 cursor-pointer border-t border-[#DAC0A3]/25"
+              >
+                <span className="text-base">🔧</span>
+                <span>修復此格重複登記/備註</span>
+              </button>
             )}
-          </button>
+          </>
         ) : contextMenu.emptyCell ? (
           <button
             onClick={() => onToggleMarkEmptyCellBlue(contextMenu.emptyCell!.employeeName, contextMenu.emptyCell!.dateStr)}
