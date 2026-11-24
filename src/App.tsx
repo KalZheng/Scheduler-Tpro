@@ -448,42 +448,132 @@ function App() {
   }, [availabilities, workerName, isFullTime, workerNextMonthStart]);
 
   const lastSyncedDbRestDatesRef = useRef<string[]>([]);
-  const reconciledAvailIdsRef = useRef<Set<string>>(new Set());
 
-  // Auto-reconcile previously affected availability records:
-  // If a confirmed WorkSchedule already exists for (employeeName, date),
-  // ensure any matching unconfirmed non-off-day WorkerAvailability is marked confirmed: true.
-  useEffect(() => {
-    if (activeRole !== 'manager' || !isAuthenticated) return;
-    if (schedules.length === 0 || availabilities.length === 0) return;
-
+  const affectedRecordsSummary = useMemo(() => {
     const scheduledKeys = new Set(
       schedules.map(s => `${s.employeeName.trim().toLowerCase()}|${s.date}`)
     );
+    const availById = new Map(availabilities.map(a => [a.id, a]));
+    const workAvailByKey = new Map<string, WorkerAvailability>();
+    for (const a of availabilities) {
+      if (a.startTime === '00:00' && a.endTime === '00:00') continue;
+      const key = `${a.employeeName.trim().toLowerCase()}|${a.date}`;
+      if (!workAvailByKey.has(key)) {
+        workAvailByKey.set(key, a);
+      }
+    }
 
     const staleUnconfirmedAvails = availabilities.filter(a => {
       if (a.confirmed === true) return false;
       if (a.startTime === '00:00' && a.endTime === '00:00') return false;
-      if (reconciledAvailIdsRef.current.has(a.id)) return false;
       const key = `${a.employeeName.trim().toLowerCase()}|${a.date}`;
       return scheduledKeys.has(key);
     });
 
-    if (staleUnconfirmedAvails.length === 0) return;
+    const schedulesToRepair: { schedule: WorkSchedule; avail: WorkerAvailability; updates: Partial<WorkSchedule> }[] = [];
+    for (const s of schedules) {
+      const key = `${s.employeeName.trim().toLowerCase()}|${s.date}`;
+      const matchedAvail = (s.availabilityId ? availById.get(s.availabilityId) : undefined) || workAvailByKey.get(key);
+      if (!matchedAvail) continue;
 
-    staleUnconfirmedAvails.forEach(a => reconciledAvailIdsRef.current.add(a.id));
-
-    (async () => {
-      for (const avail of staleUnconfirmedAvails) {
-        try {
-          await updateAvailability(avail.id, { confirmed: true });
-        } catch (err) {
-          console.error('Failed to reconcile availability confirmation:', avail.id, err);
-          reconciledAvailIdsRef.current.delete(avail.id);
+      const updates: Partial<WorkSchedule> = {};
+      if (s.availabilityId !== matchedAvail.id) {
+        updates.availabilityId = matchedAvail.id;
+      }
+      const availNote = (matchedAvail.notes || '').trim();
+      if (availNote && !(s.workerNotes || '').trim()) {
+        updates.workerNotes = availNote;
+        if ((s.managerNotes || '').trim() === availNote) {
+          updates.managerNotes = '';
+          if ((s.notes || '').trim() === availNote) {
+            updates.notes = '';
+          }
         }
       }
-    })();
-  }, [activeRole, isAuthenticated, schedules, availabilities]);
+      if (Object.keys(updates).length > 0) {
+        schedulesToRepair.push({ schedule: s, avail: matchedAvail, updates });
+      }
+    }
+
+    return {
+      staleUnconfirmedAvails,
+      schedulesToRepair
+    };
+  }, [schedules, availabilities]);
+
+  const handleRepairAffectedRecords = async () => {
+    const { staleUnconfirmedAvails, schedulesToRepair } = affectedRecordsSummary;
+    const totalCount = staleUnconfirmedAvails.length + schedulesToRepair.length;
+    if (totalCount === 0) {
+      alert('目前沒有發現需要修復的歷史異常紀錄！');
+      return;
+    }
+
+    const proceed = safeConfirm(
+      `偵測到以下歷史異常紀錄：\n` +
+      `• 已排班但仍顯示未確認的可用登記：${staleUnconfirmedAvails.length} 筆\n` +
+      `• 缺少關聯或備註錯置的已確認排班：${schedulesToRepair.length} 筆\n\n` +
+      `確定要立即修復這些紀錄嗎？`
+    );
+    if (!proceed) return;
+
+    let repairedAvails = 0;
+    let repairedSchedules = 0;
+    try {
+      for (const avail of staleUnconfirmedAvails) {
+        await updateAvailability(avail.id, { confirmed: true });
+        repairedAvails++;
+      }
+      for (const item of schedulesToRepair) {
+        await updateSchedule(item.schedule.id, item.updates);
+        repairedSchedules++;
+      }
+      alert(`✅ 修復完成！\n已標記確認登記：${repairedAvails} 筆\n已修復排班關聯/備註：${repairedSchedules} 筆`);
+    } catch (error) {
+      console.error('Failed to repair affected records:', error);
+      alert(`修復過程中發生錯誤（已修復登記 ${repairedAvails} 筆、排班 ${repairedSchedules} 筆），請重試。`);
+    }
+  };
+
+  const handleRepairSingleSchedule = async (schedule: WorkSchedule) => {
+    setContextMenu(null);
+    const empKey = schedule.employeeName.trim().toLowerCase();
+    const matchingUnconfirmedAvails = affectedRecordsSummary.staleUnconfirmedAvails.filter(
+      a => a.employeeName.trim().toLowerCase() === empKey && a.date === schedule.date
+    );
+    const scheduleRepairItem = affectedRecordsSummary.schedulesToRepair.find(
+      item => item.schedule.id === schedule.id
+    );
+
+    if (matchingUnconfirmedAvails.length === 0 && !scheduleRepairItem) {
+      alert('此格紀錄目前正常，無須修復。');
+      return;
+    }
+
+    try {
+      for (const avail of matchingUnconfirmedAvails) {
+        await updateAvailability(avail.id, { confirmed: true });
+      }
+      if (scheduleRepairItem) {
+        await updateSchedule(schedule.id, scheduleRepairItem.updates);
+      }
+      alert(`✅ 已修復 ${schedule.employeeName} (${schedule.date}) 的紀錄！`);
+    } catch (error) {
+      console.error('Failed to repair single schedule:', error);
+      alert('修復失敗，請重試。');
+    }
+  };
+
+  const contextMenuHasCellIssue = useMemo(() => {
+    const sched = contextMenu?.schedule;
+    if (!sched) return false;
+    const empKey = sched.employeeName.trim().toLowerCase();
+    const hasUnconfirmed = affectedRecordsSummary.staleUnconfirmedAvails.some(
+      a => a.employeeName.trim().toLowerCase() === empKey && a.date === sched.date
+    );
+    if (hasUnconfirmed) return true;
+    return affectedRecordsSummary.schedulesToRepair.some(item => item.schedule.id === sched.id);
+  }, [contextMenu, affectedRecordsSummary]);
 
   useEffect(() => {
     const isDbChanged = dbRestDates.length !== lastSyncedDbRestDatesRef.current.length ||
@@ -1232,7 +1322,6 @@ function App() {
                   a.confirmed === true)
             );
             for (const avail of matchingAvails) {
-              reconciledAvailIdsRef.current.delete(avail.id);
               await updateAvailability(avail.id, { confirmed: false });
             }
           }
@@ -2109,6 +2198,9 @@ function App() {
                   staffingDemandConfig={staffingDemandConfig}
                   setStaffingDemandConfig={setStaffingDemandConfig}
                   onOpenClearModal={() => setIsClearScheduleModalOpen(true)}
+                  unconfirmedAvailsCount={affectedRecordsSummary.staleUnconfirmedAvails.length}
+                  unlinkedSchedulesCount={affectedRecordsSummary.schedulesToRepair.length}
+                  onRepairAffectedRecords={handleRepairAffectedRecords}
                 />
               ) : (
                 <>
@@ -2442,6 +2534,8 @@ function App() {
         onClose={() => setContextMenu(null)}
         onToggleMarkBlue={handleToggleMarkBlue}
         onToggleMarkEmptyCellBlue={handleToggleMarkEmptyCellBlue}
+        hasCellIssue={contextMenuHasCellIssue}
+        onRepairSingleSchedule={handleRepairSingleSchedule}
       />
     </div>
   );
